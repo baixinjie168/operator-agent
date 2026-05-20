@@ -1,0 +1,5 @@
+错误1：
+错误路径:  functions[0].description
+错误信息:  描述职责越界：当前描述'AdaLayerNorm算子将LayerNorm和下游的Add、Mul融合起来，通过自适应参数scale和shift来调整归一化过程。'是算子整体功能说明，而非aclnnAdaLayerNormGetWorkspaceSize函数的独立描述。GetWorkspaceSize函数的描述应只描述查询workspace大小和获取执行器的职责。
+修复建议:  将description修改为GetWorkspaceSize函数自身的功能描述，例如：'获取AdaLayerNorm算子计算所需的workspace大小以及包含算子计算流程的执行器。'，或在文档无独立描述时填写'文档中未提供函数描述'。
+是否已修复:  否

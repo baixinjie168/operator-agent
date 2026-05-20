@@ -1,0 +1,5 @@
+{
+  "operation_name": "aclnnAdaLayerNorm",
+  "description": "AdaLayerNorm算子将LayerNorm和下游的Add、Mul融合起来，通过自适应参数scale和shift来调整归一化过程。",
+  "api_flow": "two-step"
+}

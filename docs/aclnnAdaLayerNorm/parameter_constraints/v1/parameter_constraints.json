@@ -1,0 +1,449 @@
+{
+  "parameter_constraints": [
+    {
+      "name": "x",
+      "constraints": {
+        "shape": [
+          {
+            "platform": "Atlas A3 训练系列产品/Atlas A3 推理系列产品",
+            "constraint": [
+              {
+                "structure": "dims",
+                "rule": "2 <= len(x.shape) <= 8",
+                "dim_num": [
+                  [
+                    2,
+                    8
+                  ]
+                ],
+                "dim_valid_value": [],
+                "dim_invalid_value": []
+              }
+            ]
+          },
+          {
+            "platform": "Atlas A2 训练系列产品/Atlas A2 推理系列产品",
+            "constraint": [
+              {
+                "structure": "dims",
+                "rule": "2 <= len(x.shape) <= 8",
+                "dim_num": [
+                  [
+                    2,
+                    8
+                  ]
+                ],
+                "dim_valid_value": [],
+                "dim_invalid_value": []
+              }
+            ]
+          }
+        ],
+        "data_types": [
+          {
+            "platform": "Atlas A3 训练系列产品/Atlas A3 推理系列产品",
+            "types": [
+              "FLOAT32",
+              "FLOAT16",
+              "BFLOAT16"
+            ]
+          },
+          {
+            "platform": "Atlas A2 训练系列产品/Atlas A2 推理系列产品",
+            "types": [
+              "FLOAT32",
+              "FLOAT16",
+              "BFLOAT16"
+            ]
+          }
+        ],
+        "memory": [
+          {
+            "platform": "Atlas A3 训练系列产品/Atlas A3 推理系列产品",
+            "discontinuous": true
+          },
+          {
+            "platform": "Atlas A2 训练系列产品/Atlas A2 推理系列产品",
+            "discontinuous": true
+          }
+        ],
+        "allowed_values": [],
+        "not_allowed_values": []
+      }
+    },
+    {
+      "name": "scale",
+      "constraints": {
+        "shape": [
+          {
+            "platform": "Atlas A3 训练系列产品/Atlas A3 推理系列产品",
+            "constraint": [
+              {
+                "structure": "dims",
+                "rule": "1 <= len(scale.shape) <= 8",
+                "dim_num": [
+                  1
+                ],
+                "dim_valid_value": [],
+                "dim_invalid_value": []
+              }
+            ]
+          },
+          {
+            "platform": "Atlas A2 训练系列产品/Atlas A2 推理系列产品",
+            "constraint": [
+              {
+                "structure": "dims",
+                "rule": "1 <= len(scale.shape) <= 8",
+                "dim_num": [
+                  1
+                ],
+                "dim_valid_value": [],
+                "dim_invalid_value": []
+              }
+            ]
+          }
+        ],
+        "data_types": [
+          {
+            "platform": "Atlas A3 训练系列产品/Atlas A3 推理系列产品",
+            "types": [
+              "FLOAT32",
+              "FLOAT16",
+              "BFLOAT16"
+            ]
+          },
+          {
+            "platform": "Atlas A2 训练系列产品/Atlas A2 推理系列产品",
+            "types": [
+              "FLOAT32",
+              "FLOAT16",
+              "BFLOAT16"
+            ]
+          }
+        ],
+        "memory": [
+          {
+            "platform": "Atlas A3 训练系列产品/Atlas A3 推理系列产品",
+            "discontinuous": true
+          },
+          {
+            "platform": "Atlas A2 训练系列产品/Atlas A2 推理系列产品",
+            "discontinuous": true
+          }
+        ],
+        "allowed_values": [],
+        "not_allowed_values": []
+      }
+    },
+    {
+      "name": "shift",
+      "constraints": {
+        "shape": [
+          {
+            "platform": "Atlas A3 训练系列产品/Atlas A3 推理系列产品",
+            "constraint": [
+              {
+                "structure": "dims",
+                "rule": "1 <= len(shift.shape) <= 8",
+                "dim_num": [
+                  1
+                ],
+                "dim_valid_value": [],
+                "dim_invalid_value": []
+              }
+            ]
+          },
+          {
+            "platform": "Atlas A2 训练系列产品/Atlas A2 推理系列产品",
+            "constraint": [
+              {
+                "structure": "dims",
+                "rule": "1 <= len(shift.shape) <= 8",
+                "dim_num": [
+                  1
+                ],
+                "dim_valid_value": [],
+                "dim_invalid_value": []
+              }
+            ]
+          }
+        ],
+        "data_types": [
+          {
+            "platform": "Atlas A3 训练系列产品/Atlas A3 推理系列产品",
+            "types": [
+              "FLOAT32",
+              "FLOAT16",
+              "BFLOAT16"
+            ]
+          },
+          {
+            "platform": "Atlas A2 训练系列产品/Atlas A2 推理系列产品",
+            "types": [
+              "FLOAT32",
+              "FLOAT16",
+              "BFLOAT16"
+            ]
+          }
+        ],
+        "memory": [
+          {
+            "platform": "Atlas A3 训练系列产品/Atlas A3 推理系列产品",
+            "discontinuous": true
+          },
+          {
+            "platform": "Atlas A2 训练系列产品/Atlas A2 推理系列产品",
+            "discontinuous": true
+          }
+        ],
+        "allowed_values": [],
+        "not_allowed_values": []
+      }
+    },
+    {
+      "name": "weightOptional",
+      "constraints": {
+        "shape": [
+          {
+            "platform": "Atlas A3 训练系列产品/Atlas A3 推理系列产品",
+            "constraint": [
+              {
+                "structure": "dims",
+                "rule": "len(weightOptional.shape) == 1",
+                "dim_num": [
+                  1
+                ],
+                "dim_valid_value": [],
+                "dim_invalid_value": []
+              }
+            ]
+          },
+          {
+            "platform": "Atlas A2 训练系列产品/Atlas A2 推理系列产品",
+            "constraint": [
+              {
+                "structure": "dims",
+                "rule": "len(weightOptional.shape) == 1",
+                "dim_num": [
+                  1
+                ],
+                "dim_valid_value": [],
+                "dim_invalid_value": []
+              }
+            ]
+          }
+        ],
+        "data_types": [
+          {
+            "platform": "Atlas A3 训练系列产品/Atlas A3 推理系列产品",
+            "types": [
+              "FLOAT32",
+              "FLOAT16",
+              "BFLOAT16"
+            ]
+          },
+          {
+            "platform": "Atlas A2 训练系列产品/Atlas A2 推理系列产品",
+            "types": [
+              "FLOAT32",
+              "FLOAT16",
+              "BFLOAT16"
+            ]
+          }
+        ],
+        "memory": [
+          {
+            "platform": "Atlas A3 训练系列产品/Atlas A3 推理系列产品",
+            "discontinuous": true
+          },
+          {
+            "platform": "Atlas A2 训练系列产品/Atlas A2 推理系列产品",
+            "discontinuous": true
+          }
+        ],
+        "allowed_values": [],
+        "not_allowed_values": []
+      }
+    },
+    {
+      "name": "biasOptional",
+      "constraints": {
+        "shape": [
+          {
+            "platform": "Atlas A3 训练系列产品/Atlas A3 推理系列产品",
+            "constraint": [
+              {
+                "structure": "dims",
+                "rule": "len(biasOptional.shape) == 1",
+                "dim_num": [
+                  1
+                ],
+                "dim_valid_value": [],
+                "dim_invalid_value": []
+              }
+            ]
+          },
+          {
+            "platform": "Atlas A2 训练系列产品/Atlas A2 推理系列产品",
+            "constraint": [
+              {
+                "structure": "dims",
+                "rule": "len(biasOptional.shape) == 1",
+                "dim_num": [
+                  1
+                ],
+                "dim_valid_value": [],
+                "dim_invalid_value": []
+              }
+            ]
+          }
+        ],
+        "data_types": [
+          {
+            "platform": "Atlas A3 训练系列产品/Atlas A3 推理系列产品",
+            "types": [
+              "FLOAT32",
+              "FLOAT16",
+              "BFLOAT16"
+            ]
+          },
+          {
+            "platform": "Atlas A2 训练系列产品/Atlas A2 推理系列产品",
+            "types": [
+              "FLOAT32",
+              "FLOAT16",
+              "BFLOAT16"
+            ]
+          }
+        ],
+        "memory": [
+          {
+            "platform": "Atlas A3 训练系列产品/Atlas A3 推理系列产品",
+            "discontinuous": true
+          },
+          {
+            "platform": "Atlas A2 训练系列产品/Atlas A2 推理系列产品",
+            "discontinuous": true
+          }
+        ],
+        "allowed_values": [],
+        "not_allowed_values": []
+      }
+    },
+    {
+      "name": "epsilon",
+      "constraints": {
+        "shape": [],
+        "data_types": [
+          {
+            "platform": "Atlas A3 训练系列产品/Atlas A3 推理系列产品",
+            "types": [
+              "DOUBLE"
+            ]
+          },
+          {
+            "platform": "Atlas A2 训练系列产品/Atlas A2 推理系列产品",
+            "types": [
+              "DOUBLE"
+            ]
+          }
+        ],
+        "memory": [],
+        "allowed_values": [],
+        "not_allowed_values": []
+      }
+    },
+    {
+      "name": "out",
+      "constraints": {
+        "shape": [
+          {
+            "platform": "Atlas A3 训练系列产品/Atlas A3 推理系列产品",
+            "constraint": [
+              {
+                "structure": "dims",
+                "rule": "2 <= len(out.shape) <= 8",
+                "dim_num": [
+                  [
+                    2,
+                    8
+                  ]
+                ],
+                "dim_valid_value": [],
+                "dim_invalid_value": []
+              }
+            ]
+          },
+          {
+            "platform": "Atlas A2 训练系列产品/Atlas A2 推理系列产品",
+            "constraint": [
+              {
+                "structure": "dims",
+                "rule": "2 <= len(out.shape) <= 8",
+                "dim_num": [
+                  [
+                    2,
+                    8
+                  ]
+                ],
+                "dim_valid_value": [],
+                "dim_invalid_value": []
+              }
+            ]
+          }
+        ],
+        "data_types": [
+          {
+            "platform": "Atlas A3 训练系列产品/Atlas A3 推理系列产品",
+            "types": [
+              "FLOAT32",
+              "FLOAT16",
+              "BFLOAT16"
+            ]
+          },
+          {
+            "platform": "Atlas A2 训练系列产品/Atlas A2 推理系列产品",
+            "types": [
+              "FLOAT32",
+              "FLOAT16",
+              "BFLOAT16"
+            ]
+          }
+        ],
+        "memory": [
+          {
+            "platform": "Atlas A3 训练系列产品/Atlas A3 推理系列产品",
+            "discontinuous": true
+          },
+          {
+            "platform": "Atlas A2 训练系列产品/Atlas A2 推理系列产品",
+            "discontinuous": true
+          }
+        ],
+        "allowed_values": [],
+        "not_allowed_values": []
+      }
+    },
+    {
+      "name": "workspaceSize",
+      "constraints": {
+        "shape": [],
+        "data_types": [],
+        "memory": [],
+        "allowed_values": [],
+        "not_allowed_values": []
+      }
+    },
+    {
+      "name": "executor",
+      "constraints": {
+        "shape": [],
+        "data_types": [],
+        "memory": [],
+        "allowed_values": [],
+        "not_allowed_values": []
+      }
+    }
+  ]
+}

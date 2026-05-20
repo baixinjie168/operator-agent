@@ -1,0 +1,40 @@
+{
+  "other_parameters": [
+    {
+      "name": "B",
+      "type": "int64_t",
+      "description": "batch维度",
+      "constraints": [
+        {
+          "platform": "All",
+          "value": [],
+          "rule": "B = x.shape[0]; B = scale.shape[0]; B = shift.shape[0]; B = out.shape[0]"
+        }
+      ]
+    },
+    {
+      "name": "S",
+      "type": "int64_t",
+      "description": "文档中未提供该参数说明",
+      "constraints": [
+        {
+          "platform": "All",
+          "value": [],
+          "rule": "S = x.shape[1]; S = out.shape[1]"
+        }
+      ]
+    },
+    {
+      "name": "H",
+      "type": "int64_t",
+      "description": "隐藏层维度",
+      "constraints": [
+        {
+          "platform": "All",
+          "value": [],
+          "rule": "H = x.shape[-1]; H = scale.shape[-1]; H = shift.shape[-1]; H = weightOptional.shape[0]; H = biasOptional.shape[0]; H = out.shape[-1]"
+        }
+      ]
+    }
+  ]
+}

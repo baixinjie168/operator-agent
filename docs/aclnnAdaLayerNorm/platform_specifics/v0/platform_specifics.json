@@ -1,0 +1,29 @@
+{
+  "platform_specifics": [
+    {
+      "platform": "Atlas A3 训练系列产品/Atlas A3 推理系列产品",
+      "description": "支持该算子",
+      "constraint_detail": "operator_supported == true"
+    },
+    {
+      "platform": "Atlas A2 训练系列产品/Atlas A2 推理系列产品",
+      "description": "支持该算子",
+      "constraint_detail": "operator_supported == true"
+    },
+    {
+      "platform": "Atlas 200I/500 A2 推理产品",
+      "description": "不支持该算子",
+      "constraint_detail": "operator_supported == false"
+    },
+    {
+      "platform": "Atlas 推理系列产品",
+      "description": "不支持该算子",
+      "constraint_detail": "operator_supported == false"
+    },
+    {
+      "platform": "Atlas 训练系列产品",
+      "description": "不支持该算子",
+      "constraint_detail": "operator_supported == false"
+    }
+  ]
+}

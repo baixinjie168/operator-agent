@@ -1,0 +1,200 @@
+[
+  {
+    "id": 0,
+    "name": "aclnnAdaLayerNorm",
+    "aclnn_name": "AdaLayerNorm",
+    "triton_name": null,
+    "version": "v1.0",
+    "expected_error_msg": null,
+    "api": "pytorch",
+    "api_type": "function_adalayernorm",
+    "aclnn_api_type": "pyaclnn_aclnn_adalayernorm",
+    "triton_api_type": "triton_function",
+    "fusion_api_type": "fusion_function",
+    "fusion_mode": null,
+    "dist_api_type": "dist_function",
+    "backward": false,
+    "standard": {
+      "acc": {},
+      "perf": [
+        0.95,
+        0.95
+      ]
+    },
+    "outputs": null,
+    "inputs": [
+      {
+        "name": "x",
+        "type": "tensor",
+        "required": true,
+        "dtype": "float32",
+        "shape": [
+          9,
+          1,
+          2,
+          1,
+          1,
+          1,
+          1,
+          2
+        ],
+        "range_values": [
+          -7.0444215667038295,
+          8.647868923086019
+        ],
+        "backward": false,
+        "align_32B": null,
+        "outlier_values": null
+      },
+      {
+        "name": "scale",
+        "type": "tensor",
+        "required": true,
+        "dtype": "float32",
+        "shape": [
+          1,
+          1,
+          2
+        ],
+        "range_values": [
+          -8.396371705187837,
+          6.335787776955521
+        ],
+        "backward": false,
+        "align_32B": null,
+        "outlier_values": null
+      },
+      {
+        "name": "shift",
+        "type": "tensor",
+        "required": true,
+        "dtype": "float32",
+        "shape": [
+          1,
+          2
+        ],
+        "range_values": [
+          -5.958337680864213,
+          1.482993506577553
+        ],
+        "backward": false,
+        "align_32B": null,
+        "outlier_values": null
+      },
+      {
+        "name": "biasOptional",
+        "type": "tensor",
+        "required": false,
+        "dtype": "float32",
+        "shape": [
+          1,
+          2
+        ],
+        "range_values": [
+          -4.731533511880846,
+          6.528400313273295
+        ],
+        "backward": false,
+        "align_32B": null,
+        "outlier_values": null
+      }
+    ]
+  },
+  {
+    "id": 1,
+    "name": "aclnnAdaLayerNorm",
+    "aclnn_name": "AdaLayerNorm",
+    "triton_name": null,
+    "version": "v1.0",
+    "expected_error_msg": null,
+    "api": "pytorch",
+    "api_type": "function_adalayernorm",
+    "aclnn_api_type": "pyaclnn_aclnn_adalayernorm",
+    "triton_api_type": "triton_function",
+    "fusion_api_type": "fusion_function",
+    "fusion_mode": null,
+    "dist_api_type": "dist_function",
+    "backward": false,
+    "standard": {
+      "acc": {},
+      "perf": [
+        0.95,
+        0.95
+      ]
+    },
+    "outputs": null,
+    "inputs": [
+      {
+        "name": "x",
+        "type": "tensor",
+        "required": true,
+        "dtype": "float32",
+        "shape": [
+          4,
+          10,
+          1,
+          1,
+          1,
+          1
+        ],
+        "range_values": [
+          -1.5597699861990062,
+          7.7376319752222935
+        ],
+        "backward": false,
+        "align_32B": null,
+        "outlier_values": null
+      },
+      {
+        "name": "scale",
+        "type": "tensor",
+        "required": true,
+        "dtype": "float32",
+        "shape": [
+          1
+        ],
+        "range_values": [
+          -8.594179556469946,
+          4.4674273717379975
+        ],
+        "backward": false,
+        "align_32B": null,
+        "outlier_values": null
+      },
+      {
+        "name": "shift",
+        "type": "tensor",
+        "required": true,
+        "dtype": "float32",
+        "shape": [
+          1
+        ],
+        "range_values": [
+          -6.109842734520292,
+          8.71599846182337
+        ],
+        "backward": false,
+        "align_32B": null,
+        "outlier_values": null
+      },
+      {
+        "name": "biasOptional",
+        "type": "tensor",
+        "required": false,
+        "dtype": "float32",
+        "shape": [
+          1,
+          1,
+          1
+        ],
+        "range_values": [
+          -3.3354976258062283,
+          6.5293641785606775
+        ],
+        "backward": false,
+        "align_32B": null,
+        "outlier_values": null
+      }
+    ]
+  }
+]

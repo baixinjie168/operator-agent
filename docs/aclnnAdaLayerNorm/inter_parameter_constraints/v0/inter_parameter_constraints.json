@@ -1,0 +1,84 @@
+{
+  "inter_parameter_constraints": [
+    {
+      "type": "type_equality",
+      "params": [
+        "x",
+        "scale",
+        "shift",
+        "weightOptional",
+        "biasOptional",
+        "out"
+      ],
+      "expr": "x.dtype == scale.dtype == shift.dtype == weightOptional.dtype == biasOptional.dtype == out.dtype",
+      "description": "scale、shift、weightOptional、biasOptional、out与x的数据类型必须一致",
+      "source": null,
+      "target": null
+    },
+    {
+      "type": "shape_dependency",
+      "params": [
+        "x",
+        "scale"
+      ],
+      "expr": "scale.shape == (x.shape[0],) + x.shape[2:] or scale.shape == (x.shape[0], 1) + x.shape[2:]",
+      "description": "scale的shape为[B, H]或[B, 1, H]，其中B和H与x中的对应维度一致",
+      "source": "x",
+      "target": [
+        "scale"
+      ]
+    },
+    {
+      "type": "shape_dependency",
+      "params": [
+        "x",
+        "shift"
+      ],
+      "expr": "shift.shape == (x.shape[0],) + x.shape[2:] or shift.shape == (x.shape[0], 1) + x.shape[2:]",
+      "description": "shift的shape为[B, H]或[B, 1, H]，其中B和H与x中的对应维度一致",
+      "source": "x",
+      "target": [
+        "shift"
+      ]
+    },
+    {
+      "type": "shape_dependency",
+      "params": [
+        "x",
+        "weightOptional"
+      ],
+      "expr": "weightOptional.shape == (x.shape[-1],)",
+      "description": "weightOptional的shape为[H]，H与x中H维一致",
+      "source": "x",
+      "target": [
+        "weightOptional"
+      ]
+    },
+    {
+      "type": "shape_dependency",
+      "params": [
+        "x",
+        "biasOptional"
+      ],
+      "expr": "biasOptional.shape == (x.shape[-1],)",
+      "description": "biasOptional的shape为[H]，H与x中H维一致",
+      "source": "x",
+      "target": [
+        "biasOptional"
+      ]
+    },
+    {
+      "type": "shape_equality",
+      "params": [
+        "x",
+        "out"
+      ],
+      "expr": "x.shape == out.shape",
+      "description": "out的shape与x保持一致",
+      "source": "x",
+      "target": [
+        "out"
+      ]
+    }
+  ]
+}
