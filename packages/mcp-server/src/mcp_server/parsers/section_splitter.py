@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 URL_PATTERN = re.compile(r"^\*\*URL:\*\*\s*(.+)$")
 SAVED_PATTERN = re.compile(r"^\*\*Saved:\*\*\s*(.+)$")
 CANN_TITLE_PATTERN = re.compile(r"^(.+?)-CANN社区版(\d+\.\d+\.\d+)-昇腾社区$")
+PLAIN_TITLE_PATTERN = re.compile(r"^(aclnn?\w+)$")
 EXTRACTED_BY_PATTERN = re.compile(r"^\*Markdown extracted by")
 NAVIGATION_PATTERN = re.compile(r"(?:上一篇|下一篇)")
 
@@ -87,11 +88,22 @@ class DocumentHeader:
 
 
 def _parse_title(title: str) -> tuple[str, str]:
-    """Extract operator name and CANN version from the H1 title line."""
+    """Extract operator name and CANN version from the H1 title line.
+
+    Supports:
+    - '{name}-CANN社区版{version}-昇腾社区' → (name, version)
+    - Plain operator name like 'aclnnAddRmsNorm' → (name, "unknown")
+    """
     m = CANN_TITLE_PATTERN.match(title.strip())
-    if not m:
-        raise DocumentParsingError(f"Cannot parse operator title: {title!r}")
-    return m.group(1).strip(), m.group(2)
+    if m:
+        return m.group(1).strip(), m.group(2)
+
+    # Fallback: plain operator name (e.g. aclnnAddRmsNorm)
+    m = PLAIN_TITLE_PATTERN.match(title.strip())
+    if m:
+        return m.group(1).strip(), "unknown"
+
+    raise DocumentParsingError(f"Cannot parse operator title: {title!r}")
 
 
 def _strip_footer(lines: list[str]) -> list[str]:
@@ -211,20 +223,29 @@ def split_sections(markdown_content: str) -> tuple[DocumentHeader, list[RawSecti
     if not lines or not lines[0].strip():
         raise DocumentParsingError("Document is empty")
 
-    # --- Parse H1 title ---
-    h1_text = lines[0].strip()
-    if not h1_text.startswith("# "):
-        raise DocumentParsingError(f"First line is not a valid H1 heading: {lines[0]!r}")
+    # --- Find first heading (H1 or H2) to extract operator name ---
+    h1_line_idx: int | None = None
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("# ") or stripped.startswith("## "):
+            h1_line_idx = i
+            break
 
-    title_text = h1_text[2:].strip()
+    if h1_line_idx is None:
+        raise DocumentParsingError("No H1 or H2 heading found in document")
+
+    # --- Parse title from first heading ---
+    h1_text = lines[h1_line_idx].strip()
+    # Strip heading prefix (# or ##)
+    title_text = re.sub(r"^#{1,2}\s+", "", h1_text).strip()
     operator_name, cann_version = _parse_title(title_text)
 
     # --- Parse metadata lines (URL, Saved) ---
     source_url: str | None = None
     saved_date: str | None = None
-    metadata_end = 1
+    metadata_end = h1_line_idx + 1
 
-    for i in range(1, min(len(lines), 10)):
+    for i in range(h1_line_idx + 1, min(len(lines), h1_line_idx + 10)):
         line = lines[i].strip()
         if url_m := URL_PATTERN.match(line):
             source_url = url_m.group(1).strip()

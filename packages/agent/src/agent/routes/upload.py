@@ -143,12 +143,20 @@ def _extract_tool_result(result: dict, tool_name: str) -> dict | None:
 
 
 def _extract_operator_name(content: str) -> str | None:
-    """Extract operator name from the H1 title line.
+    """Extract operator name from the first H1 or H2 title line.
 
-    Format: # {name}-CANN社区版{version}-昇腾社区
+    Supports formats:
+    - # {name}-CANN社区版{version}-昇腾社区
+    - # {name}  (plain H1, e.g. "# aclnnAddRmsNorm")
+    - ## {name}  (H2 as first heading, e.g. "## aclnnAddRmsNorm")
     """
     for line in content.split("\n"):
-        m = re.match(r"^#\s+(.+?)-CANN社区版", line)
+        # Pattern 1: original format with CANN version suffix (H1 or H2)
+        m = re.match(r"^#{1,2}\s+(.+?)-CANN社区版", line)
+        if m:
+            return m.group(1).strip()
+        # Pattern 2: plain heading with operator-like name (aclnn/aclnnXxx)
+        m = re.match(r"^#{1,2}\s+(aclnn?\w+)", line)
         if m:
             return m.group(1).strip()
     return None
