@@ -15,6 +15,7 @@ from mcp_server.tools.document_tools import (
     list_all_operators,
     parse_document,
     save_document,
+    save_parameters,
     save_parsed_document,
 )
 
@@ -116,6 +117,23 @@ def query_operators() -> str:
         JSON array of operators with name, source_url, latest_version, created_at.
     """
     result = list_all_operators()
+    return json.dumps(result, ensure_ascii=False)
+
+
+@mcp.tool()
+def save_params(operator_name: str, version: int, parameters: str) -> str:
+    """Save parsed parameters for a specific operator version.
+
+    Args:
+        operator_name: Operator name.
+        version: Document version number.
+        parameters: JSON string — array of parameter dicts.
+
+    Returns:
+        JSON string with count of saved parameters.
+    """
+    params = json.loads(parameters)
+    result = save_parameters(operator_name, version, params)
     return json.dumps(result, ensure_ascii=False)
 
 

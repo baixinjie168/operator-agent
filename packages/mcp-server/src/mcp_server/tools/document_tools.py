@@ -176,3 +176,53 @@ def list_all_operators() -> list[dict]:
         }
         for r in rows
     ]
+
+
+def save_parameters(operator_name: str, version: int, parameters: list[dict]) -> dict:
+    """Save parsed parameters for a specific operator version.
+
+    Uses INSERT OR REPLACE for idempotency (upsert on unique constraint).
+
+    Args:
+        operator_name: Operator name.
+        version: Document version number.
+        parameters: List of parameter dicts matching ParsedParameter fields.
+
+    Returns:
+        dict with count of saved parameters.
+    """
+    db = get_db()
+    conn = db.conn
+
+    operator_row = conn.execute(
+        "SELECT id FROM operators WHERE name = ?", (operator_name,)
+    ).fetchone()
+    if not operator_row:
+        return {"saved": 0, "error": f"Operator '{operator_name}' not found"}
+
+    operator_id = operator_row[0]
+
+    for param in parameters:
+        conn.execute(
+            "INSERT OR REPLACE INTO parameters "
+            "(operator_id, version, function_name, param_name, param_type, "
+            "direction, description, usage_notes, data_type, data_format, shape, attributes) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                operator_id,
+                version,
+                param.get("function_name", ""),
+                param.get("param_name", ""),
+                param.get("param_type", ""),
+                param.get("direction", "input"),
+                param.get("description", ""),
+                param.get("usage_notes", ""),
+                param.get("data_type", ""),
+                param.get("data_format", ""),
+                param.get("shape", ""),
+                json.dumps(param.get("attributes", {}), ensure_ascii=False),
+            ),
+        )
+
+    conn.commit()
+    return {"saved": len(parameters)}

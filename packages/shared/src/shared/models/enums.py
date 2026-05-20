@@ -56,10 +56,8 @@ class TaskComplexity(StrEnum):
 
 
 class LLMProvider(StrEnum):
-    OPENAI = "openai"
-    CLAUDE = "claude"
-    QWEN = "qwen"
-    WENXIN = "wenxin"
+    ZAI = "zai"
+    DEEPSEEK = "deepseek"
 
 
 class TestCaseCategory(StrEnum):

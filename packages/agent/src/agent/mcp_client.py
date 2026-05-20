@@ -83,3 +83,11 @@ class MCPClient:
             "version": version,
             "parsed_data": json.dumps(parsed_data, ensure_ascii=False),
         })
+
+    async def save_parameters(self, operator_name: str, version: int, parameters: list[dict]) -> dict:
+        """Save parsed parameters for a specific operator version."""
+        return await self._call_tool("save_params", {
+            "operator_name": operator_name,
+            "version": version,
+            "parameters": json.dumps(parameters, ensure_ascii=False),
+        })

@@ -2,7 +2,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from shared.models.enums import SectionType
+from shared.models.enums import ParamDirection, SectionType
 
 
 class ProductSupport(BaseModel):
@@ -38,3 +38,18 @@ class ParsedOperatorDocument(BaseModel):
     sections: list[ParsedSection]
     product_support: list[ProductSupport] = []
     function_signatures: list[FunctionSignature] = []
+
+
+class ParsedParameter(BaseModel):
+    """A single parameter extracted from a CANN operator function signature."""
+
+    function_name: str
+    param_name: str
+    param_type: str = ""
+    direction: ParamDirection = ParamDirection.INPUT
+    description: str = ""
+    usage_notes: str = ""
+    data_type: str = ""
+    data_format: str = ""
+    shape: str = ""
+    attributes: dict[str, Any] = {}

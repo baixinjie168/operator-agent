@@ -15,3 +15,24 @@ CREATE TABLE IF NOT EXISTS document_versions (
     created_at      TEXT DEFAULT (datetime('now')),
     UNIQUE(operator_id, version)
 );
+
+CREATE TABLE IF NOT EXISTS parameters (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    operator_id     INTEGER NOT NULL REFERENCES operators(id),
+    version         INTEGER NOT NULL,
+    function_name   TEXT NOT NULL,
+    param_name      TEXT NOT NULL,
+    param_type      TEXT NOT NULL DEFAULT '',
+    direction       TEXT NOT NULL DEFAULT 'input',
+    description     TEXT,
+    usage_notes     TEXT,
+    data_type       TEXT,
+    data_format     TEXT,
+    shape           TEXT,
+    attributes      TEXT,
+    created_at      TEXT DEFAULT (datetime('now')),
+    UNIQUE(operator_id, version, function_name, param_name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_parameters_operator
+    ON parameters(operator_id, version);
