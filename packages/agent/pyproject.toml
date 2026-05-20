@@ -10,7 +10,8 @@ dependencies = [
     "uvicorn>=0.29",
     "pydantic>=2.0",
     "pydantic-settings>=2.0",
-    "deepagents>=0.6.2",
+    "langchain-openai>=0.3",
+    "langgraph>=0.4",
 ]
 
 [build-system]
