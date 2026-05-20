@@ -1,13 +1,18 @@
-"""Upload route: accepts operator documents and triggers processing via MCP."""
+"""Upload route: accepts operator documents and triggers agent-based processing."""
 
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import re
 
+from langchain_core.messages import HumanMessage, ToolMessage
+from starlette.requests import Request
+
 from fastapi import APIRouter, UploadFile
 
+from agent.graph import create_operator_agent
 from agent.mcp_client import MCPClient
 from agent.schemas.upload import UploadResponse
 
@@ -22,16 +27,15 @@ async def upload_document(file: UploadFile) -> UploadResponse:
     """Upload a CANN operator Markdown document for processing.
 
     Flow:
-    1. Read file content, compute hash
-    2. Call MCP: check_version → determine if new/unchanged/updated
-    3. If unchanged → return existing parsed data
-    4. If new/updated → save to DB, parse, return result
+    1. Read file content, compute hash, extract operator name
+    2. Check version via MCP — return existing if unchanged
+    3. Save new/updated document via MCP
+    4. Invoke DeepAgent to parse document and sections
+    5. Return results
     """
     content = (await file.read()).decode("utf-8")
     filename = file.filename or "unknown"
 
-    # Step 1: Quick pre-parse to extract operator_name (from H1 title)
-    # We do this locally to avoid an MCP round-trip just for the name
     operator_name = _extract_operator_name(content)
     if not operator_name:
         return UploadResponse(success=False, error=f"Cannot parse operator name from {filename}")
@@ -40,12 +44,11 @@ async def upload_document(file: UploadFile) -> UploadResponse:
     client = _mcp_client
 
     try:
-        # Step 2: Check version via MCP
+        # Deterministic pre-processing
         version_info = await client.check_version(operator_name, content_hash)
         status = version_info.get("status", "new")
         existing_version = version_info.get("version")
 
-        # Step 3: If unchanged, return existing data
         if status == "unchanged":
             existing = await client.get_parsed(operator_name, existing_version)
             if existing:
@@ -58,19 +61,15 @@ async def upload_document(file: UploadFile) -> UploadResponse:
                     sections_count=len(existing.get("sections", [])),
                 )
 
-        # Step 4: Save new/updated document
         save_result = await client.save_doc(operator_name, content)
         new_version = save_result["version"]
 
-        # Step 5: Parse via MCP
-        parsed = await client.parse_doc(content)
-
-        # Step 6: Save parsed result
-        await client.save_parsed(operator_name, new_version, parsed)
+        # Agent-based parsing
+        parsed = await _invoke_parse_agent(operator_name, content, new_version)
 
         return UploadResponse(
             success=True,
-            operator_name=parsed.get("operator_name"),
+            operator_name=parsed.get("operator_name", operator_name),
             cann_version=parsed.get("cann_version"),
             status=status,
             version=new_version,
@@ -80,6 +79,67 @@ async def upload_document(file: UploadFile) -> UploadResponse:
     except Exception as e:
         logger.exception("Upload processing failed for %s", filename)
         return UploadResponse(success=False, error=str(e))
+
+
+async def _invoke_parse_agent(
+    operator_name: str,
+    content: str,
+    version: int,
+) -> dict:
+    """Invoke the DeepAgent to parse the document and save results.
+
+    Falls back to direct MCP parsing on agent failure.
+    """
+    graph = create_operator_agent()
+
+    user_message = (
+        f"Process the operator document '{operator_name}' (version {version}).\n\n"
+        f"Document content:\n{content}\n\n"
+        f"After parsing, save the results with operator_name='{operator_name}' "
+        f"and version={version}."
+    )
+
+    try:
+        result = await graph.ainvoke(
+            {"messages": [HumanMessage(content=user_message)]},
+            config={"configurable": {"thread_id": f"upload_{operator_name}_{version}"}},
+        )
+
+        # Try to read back saved results from MCP
+        saved = await _mcp_client.get_parsed(operator_name, version)
+        if saved:
+            return saved
+
+        # If agent didn't save, extract parse_document result from tool messages
+        parsed = _extract_tool_result(result, "parse_document")
+        if parsed:
+            await _mcp_client.save_parsed(operator_name, version, parsed)
+            return parsed
+
+        logger.warning("Agent completed but produced no parse results, falling back")
+    except Exception:
+        logger.exception("Agent invocation failed, falling back to direct MCP parse")
+
+    # Fallback: direct MCP parse (the original behavior)
+    parsed = await _mcp_client.parse_doc(content)
+    await _mcp_client.save_parsed(operator_name, version, parsed)
+    return parsed
+
+
+def _extract_tool_result(result: dict, tool_name: str) -> dict | None:
+    """Extract a tool call result from the agent's message history."""
+    messages = result.get("messages", [])
+    for msg in reversed(messages):
+        if isinstance(msg, ToolMessage) and msg.name == tool_name:
+            content = msg.content
+            if isinstance(content, str):
+                try:
+                    return json.loads(content)
+                except (json.JSONDecodeError, TypeError):
+                    return None
+            if isinstance(content, dict):
+                return content
+    return None
 
 
 def _extract_operator_name(content: str) -> str | None:
