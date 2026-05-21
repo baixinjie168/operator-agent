@@ -15,6 +15,8 @@ from mcp_server.tools.document_tools import (
     list_all_operators,
     parse_document,
     query_parameters,
+    query_params_by_doc_id,
+    update_param_descriptions,
     save_document,
     save_parameters,
     save_parsed_document,
@@ -173,6 +175,37 @@ def save_product_support(doc_id: int, product_support_data: str) -> str:
 def get_operator(name: str) -> str:
     """Get operator info and latest parsed data."""
     result = get_parsed_document(name)
+    return json.dumps(result, ensure_ascii=False)
+
+
+@mcp.tool()
+def query_params_by_doc(doc_id: int) -> str:
+    """Query parameters for a specific document version by doc_id.
+
+    Args:
+        doc_id: Primary key of document_versions table.
+
+    Returns:
+        JSON array of parameter objects.
+    """
+    result = query_params_by_doc_id(doc_id)
+    return json.dumps(result, ensure_ascii=False)
+
+
+@mcp.tool()
+def update_param_descs(doc_id: int, updates: str) -> str:
+    """Batch update parameter description fields.
+
+    Args:
+        doc_id: Primary key of document_versions table.
+        updates: JSON string — array of dicts with function_name, param_name,
+                 description, usage_notes, dtype_desc, dformat_desc, shape, memory_desc.
+
+    Returns:
+        JSON string with count of updated parameters.
+    """
+    data = json.loads(updates)
+    result = update_param_descriptions(doc_id, data)
     return json.dumps(result, ensure_ascii=False)
 
 

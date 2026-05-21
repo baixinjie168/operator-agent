@@ -1,6 +1,15 @@
 """Pipeline state definition for the deterministic document processing graph."""
 
-from typing import Any, TypedDict
+from typing import Annotated, Any, TypedDict
+
+
+def merge_errors(current: str | None, new: str | None) -> str | None:
+    """Reducer for parallel node error merging: concatenate non-None errors."""
+    if current is None:
+        return new
+    if new is None:
+        return current
+    return f"{current}; {new}"
 
 
 class PipelineState(TypedDict, total=False):
@@ -17,4 +26,4 @@ class PipelineState(TypedDict, total=False):
     parameters: list[dict[str, Any]]
     product_support: list[dict[str, Any]]
     cann_version: str | None
-    error: str | None
+    error: Annotated[str | None, merge_errors]

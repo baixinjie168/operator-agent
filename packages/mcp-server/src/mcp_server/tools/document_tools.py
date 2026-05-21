@@ -248,6 +248,77 @@ def save_parameters(doc_id: int, parameters: list[dict]) -> dict:
     return {"saved": len(parameters)}
 
 
+def query_params_by_doc_id(doc_id: int) -> list[dict]:
+    """Query parameters for a specific document version by doc_id.
+
+    Args:
+        doc_id: Primary key of document_versions table.
+
+    Returns:
+        List of parameter dicts for the given doc_id.
+    """
+    db = get_db()
+    conn = db.conn
+    rows = conn.execute(
+        "SELECT id, function_name, param_name, param_type, direction, "
+        "description, usage_notes, dtype_desc, dformat_desc, shape, memory_desc "
+        "FROM parameters WHERE doc_id = ? ORDER BY function_name, direction, param_name",
+        (doc_id,),
+    ).fetchall()
+    return [
+        {
+            "id": r[0],
+            "function_name": r[1],
+            "param_name": r[2],
+            "param_type": r[3],
+            "direction": r[4],
+            "description": r[5],
+            "usage_notes": r[6],
+            "dtype_desc": r[7],
+            "dformat_desc": r[8],
+            "shape": r[9],
+            "memory_desc": r[10],
+        }
+        for r in rows
+    ]
+
+
+def update_param_descriptions(doc_id: int, updates: list[dict]) -> dict:
+    """Batch update parameter description fields.
+
+    Args:
+        doc_id: Primary key of document_versions table.
+        updates: List of dicts with keys: function_name, param_name,
+                 usage_notes, dtype_desc, dformat_desc, shape, memory_desc, description.
+
+    Returns:
+        dict with count of updated parameters.
+    """
+    db = get_db()
+    conn = db.conn
+    count = 0
+    for u in updates:
+        cursor = conn.execute(
+            "UPDATE parameters SET description = ?, usage_notes = ?, "
+            "dtype_desc = ?, dformat_desc = ?, shape = ?, memory_desc = ? "
+            "WHERE doc_id = ? AND function_name = ? AND param_name = ?",
+            (
+                u.get("description", ""),
+                u.get("usage_notes", ""),
+                u.get("dtype_desc", ""),
+                u.get("dformat_desc", ""),
+                u.get("shape", ""),
+                u.get("memory_desc", ""),
+                doc_id,
+                u.get("function_name", ""),
+                u.get("param_name", ""),
+            ),
+        )
+        count += cursor.rowcount
+    conn.commit()
+    return {"updated": count}
+
+
 def query_parameters(operator_name: str | None = None) -> list[dict]:
     """Query parameters from the database, optionally filtered by operator name.
 

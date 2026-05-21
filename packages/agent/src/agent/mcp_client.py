@@ -108,3 +108,14 @@ class MCPClient:
         if operator_name is not None:
             args["operator_name"] = operator_name
         return await self._call_tool("query_params", args)
+
+    async def query_params_by_doc_id(self, doc_id: int) -> list[dict]:
+        """Query parameters for a specific document version."""
+        return await self._call_tool("query_params_by_doc", {"doc_id": doc_id})
+
+    async def update_param_descriptions(self, doc_id: int, updates: list[dict]) -> dict:
+        """Batch update parameter description fields."""
+        return await self._call_tool("update_param_descs", {
+            "doc_id": doc_id,
+            "updates": json.dumps(updates, ensure_ascii=False),
+        })
