@@ -1,11 +1,15 @@
-"""Query routes: list operators and retrieve parsed documents from the database."""
+"""Query routes: list operators, retrieve parsed documents, and query parameters."""
 
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 
 from agent.mcp_client import MCPClient
-from agent.schemas.query import OperatorDetailResponse, OperatorListResponse
+from agent.schemas.query import (
+    OperatorDetailResponse,
+    OperatorListResponse,
+    ParameterListResponse,
+)
 
 router = APIRouter(prefix="/api/v1", tags=["query"])
 
@@ -40,3 +44,13 @@ async def get_operator(operator_name: str, version: int | None = None) -> Operat
         version=version,
         parsed_data=result,
     )
+
+
+@router.get("/parameters", response_model=ParameterListResponse)
+async def list_parameters(operator_name: str | None = Query(default=None)) -> ParameterListResponse:
+    """Query parameters, optionally filtered by operator name."""
+    try:
+        result = await _mcp_client.query_parameters(operator_name)
+        return ParameterListResponse(parameters=result)
+    except Exception:
+        return ParameterListResponse(parameters=[])

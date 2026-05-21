@@ -84,10 +84,27 @@ class MCPClient:
             "parsed_data": json.dumps(parsed_data, ensure_ascii=False),
         })
 
-    async def save_parameters(self, operator_name: str, version: int, parameters: list[dict]) -> dict:
-        """Save parsed parameters for a specific operator version."""
+    async def get_parsed_by_doc_id(self, doc_id: int) -> dict | None:
+        """Retrieve parsed document data by document_versions primary key."""
+        return await self._call_tool("get_parsed_by_doc_id", {"doc_id": doc_id})
+
+    async def save_parameters(self, doc_id: int, parameters: list[dict]) -> dict:
+        """Save parsed parameters for a specific document version."""
         return await self._call_tool("save_params", {
-            "operator_name": operator_name,
-            "version": version,
+            "doc_id": doc_id,
             "parameters": json.dumps(parameters, ensure_ascii=False),
         })
+
+    async def save_product_support(self, doc_id: int, product_support_data: list[dict]) -> str:
+        """Save product support data for a specific document version."""
+        return await self._call_tool("save_product_support", {
+            "doc_id": doc_id,
+            "product_support_data": json.dumps(product_support_data, ensure_ascii=False),
+        })
+
+    async def query_parameters(self, operator_name: str | None = None) -> list[dict]:
+        """Query parameters, optionally filtered by operator name."""
+        args: dict[str, Any] = {}
+        if operator_name is not None:
+            args["operator_name"] = operator_name
+        return await self._call_tool("query_params", args)

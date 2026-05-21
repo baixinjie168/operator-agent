@@ -1,7 +1,5 @@
 """PersistParams node: saves parsed parameters to the database via MCP."""
 
-from __future__ import annotations
-
 import logging
 from typing import Any
 

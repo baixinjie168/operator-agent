@@ -106,6 +106,16 @@
 
   .panel { display: none; flex: 1; min-height: 0; }
   .panel.active { display: flex; flex-direction: column; }
+
+  /* Parameters table */
+  .params-table { width: 100%; border-collapse: collapse; font-size: .85rem; }
+  .params-table th { background: #f3f4f6; padding: 10px 12px; text-align: left; border: 1px solid #e5e7eb; font-weight: 600; color: #374151; white-space: nowrap; position: sticky; top: 0; z-index: 1; }
+  .params-table td { padding: 8px 12px; border: 1px solid #e5e7eb; vertical-align: top; }
+  .params-table tr:hover td { background: #f9fafb; }
+  .params-table .td-desc { max-width: 300px; }
+  .dir-input { background: #dbeafe; color: #1d4ed8; padding: 2px 8px; border-radius: 10px; font-size: .75rem; font-weight: 600; }
+  .dir-output { background: #fef3c7; color: #92400e; padding: 2px 8px; border-radius: 10px; font-size: .75rem; font-weight: 600; }
+  .dir-other { background: #f3f4f6; color: #374151; padding: 2px 8px; border-radius: 10px; font-size: .75rem; font-weight: 600; }
 </style>
 </head>
 <body>
@@ -123,7 +133,11 @@
       </button>
       <button class="nav-item" onclick="switchTab('query', this)">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-        查询数据库
+        已解析文档
+      </button>
+      <button class="nav-item" onclick="switchTab('params', this)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>
+        文档参数
       </button>
     </nav>
   </aside>
@@ -214,6 +228,26 @@
       </div>
     </div>
   </div>
+
+  <!-- Parameters Panel -->
+  <div class="panel" id="panelParams">
+    <div class="card" style="flex:1;display:flex;flex-direction:column;min-height:0;overflow:hidden">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+        <h2 style="margin:0">文档参数</h2>
+        <div style="display:flex;gap:8px;align-items:center">
+          <select id="paramOperatorFilter" onchange="loadParams()" style="padding:6px 12px;border:1px solid #ddd;border-radius:6px;font-size:.85rem;min-width:180px">
+            <option value="">全部算子</option>
+          </select>
+          <button class="secondary" onclick="loadParams()">刷新</button>
+        </div>
+      </div>
+      <div id="paramsTableWrap" style="flex:1;min-height:0;overflow-y:auto">
+        <div id="paramsContent"></div>
+        <div class="status" id="paramsStatus"></div>
+      </div>
+    </div>
+  </div>
+
   </main>
 </div>
 
@@ -225,6 +259,7 @@ function switchTab(name, el) {
   el.classList.add('active');
   document.getElementById('panel' + name.charAt(0).toUpperCase() + name.slice(1)).classList.add('active');
   if (name === 'query') loadOperators();
+  if (name === 'params') { loadParamOperators(); loadParams(); }
 }
 
 /* ---------- Parse step helpers ---------- */
@@ -490,6 +525,74 @@ function showDetailTab(el, id) {
   document.querySelectorAll('.detail-content').forEach(c => c.style.display = 'none');
   el.classList.add('active');
   document.getElementById(id).style.display = '';
+}
+
+/* ---------- Parameters ---------- */
+async function loadParamOperators() {
+  try {
+    const res = await fetch('/api/v1/operators');
+    const data = await res.json();
+    const select = document.getElementById('paramOperatorFilter');
+    const current = select.value;
+    select.innerHTML = '<option value="">全部算子</option>';
+    if (data.operators) {
+      data.operators.forEach(op => {
+        const opt = document.createElement('option');
+        opt.value = op.name;
+        opt.textContent = op.name + (op.latest_version ? ' (v' + op.latest_version + ')' : '');
+        select.appendChild(opt);
+      });
+    }
+    select.value = current;
+  } catch (_) {}
+}
+
+async function loadParams() {
+  const statusEl = document.getElementById('paramsStatus');
+  const contentEl = document.getElementById('paramsContent');
+  const operatorName = document.getElementById('paramOperatorFilter').value;
+
+  statusEl.innerHTML = '<span class="spinner"></span>加载中...';
+  contentEl.innerHTML = '';
+
+  try {
+    const url = '/api/v1/parameters' + (operatorName ? '?operator_name=' + encodeURIComponent(operatorName) : '');
+    const res = await fetch(url);
+    const data = await res.json();
+
+    if (!data.parameters || data.parameters.length === 0) {
+      contentEl.innerHTML = '<div class="empty-state">暂无参数数据</div>';
+      statusEl.textContent = '';
+      return;
+    }
+
+    const dirBadge = d => {
+      if (d === 'input') return '<span class="dir-input">input</span>';
+      if (d === 'output') return '<span class="dir-output">output</span>';
+      return '<span class="dir-other">' + escapeHtml(d) + '</span>';
+    };
+
+    contentEl.innerHTML = '<table class="params-table"><thead><tr>' +
+      '<th>算子名称</th><th>版本</th><th>函数名</th><th>参数名</th><th>类型</th><th>方向</th><th>描述</th><th>数据类型</th><th>格式</th><th>Shape</th>' +
+      '</tr></thead><tbody>' +
+      data.parameters.map(p => '<tr>' +
+        '<td><strong>' + escapeHtml(p.operator_name) + '</strong></td>' +
+        '<td>v' + p.version + '</td>' +
+        '<td>' + escapeHtml(p.function_name) + '</td>' +
+        '<td><strong>' + escapeHtml(p.param_name) + '</strong></td>' +
+        '<td>' + escapeHtml(p.param_type) + '</td>' +
+        '<td>' + dirBadge(p.direction) + '</td>' +
+        '<td class="td-desc">' + escapeHtml(p.description || '-') + '</td>' +
+        '<td>' + escapeHtml(p.data_type || '-') + '</td>' +
+        '<td>' + escapeHtml(p.data_format || '-') + '</td>' +
+        '<td>' + escapeHtml(p.shape || '-') + '</td>' +
+      '</tr>').join('') +
+      '</tbody></table>';
+
+    statusEl.textContent = '共 ' + data.parameters.length + ' 条参数';
+  } catch (err) {
+    statusEl.textContent = '加载失败: ' + err.message;
+  }
 }
 
 function escapeHtml(text) {

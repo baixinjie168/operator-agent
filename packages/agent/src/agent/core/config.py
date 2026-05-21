@@ -1,3 +1,4 @@
+import sys
 from pathlib import Path
 
 from pydantic import Field, SecretStr, model_validator
@@ -26,7 +27,7 @@ class Settings(BaseSettings):
     operators_dir: str = "operators"
     database_path: str = "data/operator_agent.db"
     log_level: str = "INFO"
-    mcp_server_command: str = "python -m mcp_server"
+    mcp_server_command: str = f"{sys.executable} -m mcp_server"
     static_dir: Path = Path(__file__).resolve().parent.parent / "static"
 
     # Master switch: which LLM provider to use

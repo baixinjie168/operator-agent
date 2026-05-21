@@ -21,7 +21,7 @@ def check_document_version(operator_name: str, content_hash: str) -> dict:
         content_hash: SHA256 hash of the document content.
 
     Returns:
-        dict with keys: status ("new"/"unchanged"/"updated"), version (int or None)
+        dict with keys: status, version, doc_id (int or None).
     """
     db = get_db()
     conn = db.conn
@@ -31,23 +31,23 @@ def check_document_version(operator_name: str, content_hash: str) -> dict:
     ).fetchone()
 
     if not row:
-        return {"status": "new", "version": None}
+        return {"status": "new", "version": None, "doc_id": None}
 
     operator_id = row[0]
 
     latest = conn.execute(
-        "SELECT version, content_hash FROM document_versions "
+        "SELECT id, version, content_hash FROM document_versions "
         "WHERE operator_id = ? ORDER BY version DESC LIMIT 1",
         (operator_id,),
     ).fetchone()
 
     if not latest:
-        return {"status": "new", "version": None}
+        return {"status": "new", "version": None, "doc_id": None}
 
-    if latest[1] == content_hash:
-        return {"status": "unchanged", "version": latest[0]}
+    if latest[2] == content_hash:
+        return {"status": "unchanged", "version": latest[1], "doc_id": latest[0]}
 
-    return {"status": "updated", "version": latest[0]}
+    return {"status": "updated", "version": latest[1], "doc_id": latest[0]}
 
 
 def save_document(operator_name: str, content: str, source_url: str | None = None) -> dict:
@@ -78,14 +78,15 @@ def save_document(operator_name: str, content: str, source_url: str | None = Non
     ).fetchone()[0]
     next_version = (max_ver or 0) + 1
 
-    conn.execute(
+    cursor = conn.execute(
         "INSERT INTO document_versions (operator_id, version, content, content_hash) "
         "VALUES (?, ?, ?, ?)",
         (operator_id, next_version, content, content_hash),
     )
+    doc_id = cursor.lastrowid
     conn.commit()
 
-    return {"operator_id": operator_id, "version": next_version}
+    return {"operator_id": operator_id, "version": next_version, "doc_id": doc_id}
 
 
 def parse_document(content: str) -> dict:
@@ -137,6 +138,24 @@ def get_parsed_document(operator_name: str, version: int | None = None) -> dict 
     return json.loads(ver_row[0])
 
 
+def get_parsed_by_doc_id(doc_id: int) -> dict | None:
+    """Retrieve parsed document data by document_versions.id.
+
+    Args:
+        doc_id: Primary key of document_versions table.
+
+    Returns:
+        ParsedOperatorDocument as dict, or None if not found.
+    """
+    db = get_db()
+    row = db.conn.execute(
+        "SELECT parsed_data FROM document_versions WHERE id = ?", (doc_id,)
+    ).fetchone()
+    if not row or not row[0]:
+        return None
+    return json.loads(row[0])
+
+
 def save_parsed_document(operator_name: str, version: int, parsed_data: dict) -> None:
     """Save parsed document data to the database."""
     db = get_db()
@@ -152,6 +171,17 @@ def save_parsed_document(operator_name: str, version: int, parsed_data: dict) ->
         "UPDATE document_versions SET parsed_data = ? "
         "WHERE operator_id = ? AND version = ?",
         (json.dumps(parsed_data, ensure_ascii=False), operator_row[0], version),
+    )
+    conn.commit()
+
+
+def do_save_product_support(doc_id: int, product_support_data: list[dict]) -> None:
+    """Save product support data to the document_versions.product_support column."""
+    db = get_db()
+    conn = db.conn
+    conn.execute(
+        "UPDATE document_versions SET product_support = ? WHERE id = ?",
+        (json.dumps(product_support_data, ensure_ascii=False), doc_id),
     )
     conn.commit()
 
@@ -178,15 +208,14 @@ def list_all_operators() -> list[dict]:
     ]
 
 
-def save_parameters(operator_name: str, version: int, parameters: list[dict]) -> dict:
-    """Save parsed parameters for a specific operator version.
+def save_parameters(doc_id: int, parameters: list[dict]) -> dict:
+    """Save parsed parameters for a specific document version.
 
     Uses INSERT OR REPLACE for idempotency (upsert on unique constraint).
 
     Args:
-        operator_name: Operator name.
-        version: Document version number.
-        parameters: List of parameter dicts matching ParsedParameter fields.
+        doc_id: Primary key of document_versions table.
+        parameters: List of parameter dicts.
 
     Returns:
         dict with count of saved parameters.
@@ -194,35 +223,80 @@ def save_parameters(operator_name: str, version: int, parameters: list[dict]) ->
     db = get_db()
     conn = db.conn
 
-    operator_row = conn.execute(
-        "SELECT id FROM operators WHERE name = ?", (operator_name,)
-    ).fetchone()
-    if not operator_row:
-        return {"saved": 0, "error": f"Operator '{operator_name}' not found"}
-
-    operator_id = operator_row[0]
-
     for param in parameters:
         conn.execute(
             "INSERT OR REPLACE INTO parameters "
-            "(operator_id, version, function_name, param_name, param_type, "
-            "direction, description, usage_notes, data_type, data_format, shape, attributes) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "(doc_id, function_name, param_name, param_type, "
+            "direction, description, usage_notes, dtype_desc, dformat_desc, shape, memory_desc) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
-                operator_id,
-                version,
+                doc_id,
                 param.get("function_name", ""),
                 param.get("param_name", ""),
                 param.get("param_type", ""),
                 param.get("direction", "input"),
                 param.get("description", ""),
                 param.get("usage_notes", ""),
-                param.get("data_type", ""),
-                param.get("data_format", ""),
+                param.get("dtype_desc", ""),
+                param.get("dformat_desc", ""),
                 param.get("shape", ""),
-                json.dumps(param.get("attributes", {}), ensure_ascii=False),
+                param.get("memory_desc", ""),
             ),
         )
 
     conn.commit()
     return {"saved": len(parameters)}
+
+
+def query_parameters(operator_name: str | None = None) -> list[dict]:
+    """Query parameters from the database, optionally filtered by operator name.
+
+    Args:
+        operator_name: Optional operator name filter. If None, returns all parameters.
+
+    Returns:
+        List of parameter dicts with operator context.
+    """
+    db = get_db()
+    conn = db.conn
+
+    if operator_name:
+        rows = conn.execute(
+            "SELECT p.id, o.name, dv.version, p.function_name, p.param_name, "
+            "p.param_type, p.direction, p.description, p.usage_notes, "
+            "p.dtype_desc, p.dformat_desc, p.shape, p.memory_desc "
+            "FROM parameters p "
+            "JOIN document_versions dv ON p.doc_id = dv.id "
+            "JOIN operators o ON dv.operator_id = o.id "
+            "WHERE o.name = ? ORDER BY p.function_name, p.direction, p.param_name",
+            (operator_name,),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT p.id, o.name, dv.version, p.function_name, p.param_name, "
+            "p.param_type, p.direction, p.description, p.usage_notes, "
+            "p.dtype_desc, p.dformat_desc, p.shape, p.memory_desc "
+            "FROM parameters p "
+            "JOIN document_versions dv ON p.doc_id = dv.id "
+            "JOIN operators o ON dv.operator_id = o.id "
+            "ORDER BY o.name, p.function_name, p.direction, p.param_name",
+        ).fetchall()
+
+    return [
+        {
+            "id": r[0],
+            "operator_name": r[1],
+            "version": r[2],
+            "function_name": r[3],
+            "param_name": r[4],
+            "param_type": r[5],
+            "direction": r[6],
+            "description": r[7],
+            "usage_notes": r[8],
+            "dtype_desc": r[9],
+            "dformat_desc": r[10],
+            "shape": r[11],
+            "memory_desc": r[12],
+        }
+        for r in rows
+    ]

@@ -14,10 +14,13 @@ from mcp_server.tools.document_tools import (
     get_parsed_document,
     list_all_operators,
     parse_document,
+    query_parameters,
     save_document,
     save_parameters,
     save_parsed_document,
+    do_save_product_support,
 )
+from mcp_server.tools.document_tools import get_parsed_by_doc_id as _get_parsed_by_doc_id
 
 mcp = FastMCP("operator-agent-mcp-server")
 
@@ -85,6 +88,20 @@ def get_parsed(operator_name: str, version: int | None = None) -> str:
 
 
 @mcp.tool()
+def get_parsed_by_doc_id(doc_id: int) -> str:
+    """Retrieve parsed document data by document_versions primary key.
+
+    Args:
+        doc_id: Primary key of document_versions table.
+
+    Returns:
+        JSON string of ParsedOperatorDocument, or "null" if not found.
+    """
+    result = _get_parsed_by_doc_id(doc_id)
+    return json.dumps(result, ensure_ascii=False)
+
+
+@mcp.tool()
 def save_parsed(operator_name: str, version: int, parsed_data: str) -> str:
     """Save parsed document data to the database.
 
@@ -121,26 +138,55 @@ def query_operators() -> str:
 
 
 @mcp.tool()
-def save_params(operator_name: str, version: int, parameters: str) -> str:
-    """Save parsed parameters for a specific operator version.
+def save_params(doc_id: int, parameters: str) -> str:
+    """Save parsed parameters for a specific document version.
 
     Args:
-        operator_name: Operator name.
-        version: Document version number.
+        doc_id: Primary key of document_versions table.
         parameters: JSON string — array of parameter dicts.
 
     Returns:
         JSON string with count of saved parameters.
     """
     params = json.loads(parameters)
-    result = save_parameters(operator_name, version, params)
+    result = save_parameters(doc_id, params)
     return json.dumps(result, ensure_ascii=False)
+
+
+@mcp.tool()
+def save_product_support(doc_id: int, product_support_data: str) -> str:
+    """Save product support data for a specific document version.
+
+    Args:
+        doc_id: Primary key of document_versions table.
+        product_support_data: JSON string — array of {product, support} dicts.
+
+    Returns:
+        "ok" on success.
+    """
+    data = json.loads(product_support_data)
+    do_save_product_support(doc_id, data)
+    return "ok"
 
 
 @mcp.resource("operator://{name}")
 def get_operator(name: str) -> str:
     """Get operator info and latest parsed data."""
     result = get_parsed_document(name)
+    return json.dumps(result, ensure_ascii=False)
+
+
+@mcp.tool()
+def query_params(operator_name: str | None = None) -> str:
+    """Query parameters from the database, optionally filtered by operator name.
+
+    Args:
+        operator_name: Optional operator name filter. If null, returns all parameters.
+
+    Returns:
+        JSON array of parameter objects.
+    """
+    result = query_parameters(operator_name)
     return json.dumps(result, ensure_ascii=False)
 
 
