@@ -112,11 +112,25 @@
   .params-table th { background: #f3f4f6; padding: 10px 12px; text-align: left; border: 1px solid #e5e7eb; font-weight: 600; color: #374151; white-space: nowrap; position: sticky; top: 0; z-index: 1; }
   .params-table td { padding: 8px 12px; border: 1px solid #e5e7eb; vertical-align: top; }
   .params-table tr:hover td { background: #f9fafb; }
-  .params-table .td-desc { max-width: 300px; }
+  .params-table .td-desc { max-width: 360px; line-height: 1.6; }
   .dir-input { background: #dbeafe; color: #1d4ed8; padding: 2px 8px; border-radius: 10px; font-size: .75rem; font-weight: 600; }
   .dir-output { background: #fef3c7; color: #92400e; padding: 2px 8px; border-radius: 10px; font-size: .75rem; font-weight: 600; }
   .dir-other { background: #f3f4f6; color: #374151; padding: 2px 8px; border-radius: 10px; font-size: .75rem; font-weight: 600; }
+
+  /* Markdown description cell styles */
+  .td-desc { max-width: 360px; line-height: 1.6; }
+  .td-desc p { margin: 0 0 6px; }
+  .td-desc p:last-child { margin-bottom: 0; }
+  .td-desc ul, .td-desc ol { margin: 4px 0; padding-left: 18px; }
+  .td-desc li { margin-bottom: 2px; }
+  .td-desc code { background: #f3f4f6; padding: 1px 5px; border-radius: 3px; font-size: .8rem; }
+  .td-desc pre { background: #f3f4f6; padding: 6px 10px; border-radius: 4px; font-size: .8rem; overflow-x: auto; margin: 4px 0; }
+  .td-desc strong { color: #374151; }
+  .td-desc table { border-collapse: collapse; font-size: .8rem; margin: 4px 0; }
+  .td-desc th, .td-desc td { border: 1px solid #e5e7eb; padding: 4px 8px; }
+  .td-desc th { background: #f9fafb; }
 </style>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 </head>
 <body>
 <div class="layout">
@@ -582,7 +596,7 @@ async function loadParams() {
         '<td><strong>' + escapeHtml(p.param_name) + '</strong></td>' +
         '<td>' + escapeHtml(p.param_type) + '</td>' +
         '<td>' + dirBadge(p.direction) + '</td>' +
-        '<td class="td-desc">' + escapeHtml(p.description || '-') + '</td>' +
+        '<td class="td-desc">' + (p.description ? marked.parse(p.description) : '-') + '</td>' +
         '<td>' + escapeHtml(p.data_type || '-') + '</td>' +
         '<td>' + escapeHtml(p.data_format || '-') + '</td>' +
         '<td>' + escapeHtml(p.shape || '-') + '</td>' +
