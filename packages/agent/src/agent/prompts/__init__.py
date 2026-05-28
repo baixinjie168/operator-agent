@@ -55,13 +55,13 @@ DTYPE_EXTRACT_PROMPT = """\
 规则：
 1. 首先看"数据类型"行，如果有具体值（不是"（无）"、"无"、空），则直接提取
 2. 如果"数据类型"行是"（无）"，再看"描述"和"使用说明"行中是否有数据类型相关信息
-3. 常见数据类型示例：int8, int16, int32, int64, float16, float32, float64,
-   bool, uint8, string, Tensor, Scalar, list, 无, 非连续Tensor
-4. 提取的数据类型值应简洁，保留原文关键信息，如"int8"、"float32"、"Tensor"、"非连续Tensor"
+3. 常见数据类型示例：INT8, INT16, INT32, INT64, FLOAT16, FLOAT32, FLOAT64,
+   BOOL, UINT8, STRING, TENSOR, SCALAR, LIST, BFLOAT16, COMPLEX64, COMPLEX128
+4. 提取的数据类型值必须统一为大写，如"INT8"、"FLOAT32"、"TENSOR"
 5. 如果完全没有数据类型相关信息，dtype设为空字符串
 
 严格按以下JSON格式返回，不要添加任何其他文字：
-{{"param_name": "{param_name}", "dtype": "提取的数据类型值或空字符串"}}
+{{"param_name": "{param_name}", "dtype": "提取的大写数据类型或空字符串"}}
 
 参数描述：
 {params_text}

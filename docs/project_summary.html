@@ -1,0 +1,564 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Operator Agent 项目总览</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --text: #1a1a2e;
+    --text-secondary: #555;
+    --border: #e2e8f0;
+    --code-bg: #f7fafc;
+    --table-stripe: #f8fafc;
+    --table-hover: #edf2f7;
+    --link: #3182ce;
+    --heading: #2d3748;
+    --blockquote-bg: #f0fff4;
+    --blockquote-border: #48bb78;
+    --hr-color: #e2e8f0;
+    --tag-bg: #ebf8ff;
+    --tag-text: #2b6cb0;
+    --new-bg: #e6ffed; --new-border: #34d058;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    line-height: 1.8;
+    color: var(--text);
+    background: var(--bg);
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 2rem 1.5rem;
+  }
+  h1 { font-size: 2rem; border-bottom: 3px solid var(--border); padding-bottom: 0.5rem; margin-bottom: 0.5rem; color: var(--heading); }
+  h2 { font-size: 1.5rem; margin-top: 2.5rem; margin-bottom: 1rem; border-bottom: 2px solid var(--border); padding-bottom: 0.3rem; color: var(--heading); }
+  h3 { font-size: 1.2rem; margin-top: 1.8rem; margin-bottom: 0.6rem; color: var(--heading); }
+  h4 { font-size: 1.05rem; margin-top: 1.2rem; margin-bottom: 0.4rem; color: #4a5568; }
+  h5 { font-size: 0.95rem; margin-top: 1rem; margin-bottom: 0.3rem; color: #e53e3e; }
+  p { margin-bottom: 0.8rem; }
+  a { color: var(--link); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  blockquote {
+    background: var(--blockquote-bg);
+    border-left: 4px solid var(--blockquote-border);
+    padding: 0.6rem 1rem;
+    margin: 1rem 0;
+    border-radius: 0 6px 6px 0;
+    color: var(--text-secondary);
+  }
+  hr { border: none; border-top: 1px solid var(--hr-color); margin: 2rem 0; }
+  code {
+    background: var(--code-bg);
+    padding: 0.15em 0.4em;
+    border-radius: 4px;
+    font-family: "JetBrains Mono", "Fira Code", "Cascadia Code", Consolas, monospace;
+    font-size: 0.9em;
+  }
+  pre {
+    background: #1e293b;
+    color: #e2e8f0;
+    padding: 1.2rem 1.5rem;
+    border-radius: 8px;
+    overflow-x: auto;
+    margin: 1rem 0;
+    line-height: 1.6;
+    font-size: 0.85rem;
+  }
+  pre code {
+    background: none;
+    padding: 0;
+    color: inherit;
+    font-size: inherit;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1rem 0 1.5rem;
+    font-size: 0.92rem;
+  }
+  th, td {
+    border: 1px solid var(--border);
+    padding: 0.55rem 0.85rem;
+    text-align: left;
+  }
+  th { background: var(--code-bg); font-weight: 600; color: var(--heading); }
+  tr:nth-child(even) td { background: var(--table-stripe); }
+  tr:hover td { background: var(--table-hover); }
+  ul, ol { margin: 0.6rem 0 0.8rem 1.8rem; }
+  li { margin-bottom: 0.25rem; }
+  strong { color: var(--heading); }
+  del { color: #a0aec0; }
+  .tag {
+    display: inline-block;
+    background: var(--tag-bg);
+    color: var(--tag-text);
+    padding: 0.1em 0.55em;
+    border-radius: 4px;
+    font-size: 0.85em;
+    font-weight: 500;
+  }
+  .tag-new {
+    display: inline-block;
+    background: var(--new-bg);
+    color: #22863a;
+    padding: 0.1em 0.55em;
+    border-radius: 4px;
+    font-size: 0.85em;
+    font-weight: 500;
+  }
+  .flow-chart {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.2rem 1.5rem;
+    margin: 1rem 0;
+    font-family: "JetBrains Mono", "Fira Code", monospace;
+    font-size: 0.82rem;
+    line-height: 1.7;
+    white-space: pre;
+    overflow-x: auto;
+  }
+  .callout {
+    padding: 0.6rem 1rem;
+    margin: 1rem 0;
+    border-radius: 0 6px 6px 0;
+    border-left: 4px solid;
+    background: #fffbeb;
+    border-color: #f59e0b;
+  }
+  @media (max-width: 768px) {
+    body { padding: 1rem; }
+    table { font-size: 0.8rem; }
+    th, td { padding: 0.4rem 0.5rem; }
+  }
+</style>
+</head>
+<body>
+
+<h1>Operator Agent 项目总览</h1>
+<blockquote>生成日期: 2026-05-28 | 更新日期: 2026-05-28 | 基于代码实际状态</blockquote>
+<hr>
+
+<h2>1. 项目定位</h2>
+<p>基于 <strong>LangGraph + MCP</strong> 的 CANN 算子文档自动化处理系统。将华为昇腾平台的算子 Markdown 文档解析为结构化数据，经 LLM 提取参数、约束、产品支持信息，最终生成 Python 测试用例。</p>
+<p><strong>当前完成度</strong>：约 35%，文档解析、数据库层、基础 Pipeline 可运行。约束提取、人工审核、测试用例生成尚未实现。</p>
+<hr>
+
+<h2>2. 技术栈</h2>
+<table>
+<thead><tr><th>层级</th><th>技术</th><th>备注</th></tr></thead>
+<tbody>
+<tr><td>语言</td><td>Python 3.12+</td><td></td></tr>
+<tr><td>包管理</td><td>uv (monorepo, 3 个 hatchling 子包)</td><td></td></tr>
+<tr><td>Web 框架</td><td>FastAPI + Uvicorn</td><td></td></tr>
+<tr><td>工作流引擎</td><td>LangGraph (StateGraph)</td><td>确定性 DAG，非 LLM Agent</td></tr>
+<tr><td>LLM 调用</td><td>langchain-openai (ChatOpenAI)</td><td>支持 Z.AI (GLM) 和 DeepSeek</td></tr>
+<tr><td>协议桥接</td><td>MCP Python SDK (FastMCP, stdio transport)</td><td>Agent &harr; MCP Server 通信</td></tr>
+<tr><td>数据验证</td><td>Pydantic v2 + pydantic-settings</td><td></td></tr>
+<tr><td>数据库</td><td>SQLite (同步, WAL 模式)</td><td>注意：依赖声明的 aiosqlite 未使用</td></tr>
+<tr><td>Markdown 解析</td><td>markdown-it-py</td><td>仅用于 token 级别的章节分割</td></tr>
+<tr><td>前端</td><td>单页 HTML/JS (内嵌于 static/index.html)</td><td>无前端构建工具</td></tr>
+<tr><td>测试</td><td>pytest + pytest-asyncio + pytest-cov</td><td>仅 mcp_server 有测试</td></tr>
+<tr><td>类型检查</td><td>mypy (strict)</td><td></td></tr>
+<tr><td>Lint/Format</td><td>ruff + isort</td><td></td></tr>
+</tbody>
+</table>
+<hr>
+
+<h2>3. 目录结构与模块职责</h2>
+<div class="flow-chart">operator-agent/
+├── packages/
+│   ├── shared/                      # 领域模型层（纯数据结构，无业务逻辑）
+│   │   └── src/shared/
+│   │       ├── exceptions.py        # 异常层次：OperatorAgentError 及 4 个子类
+│   │       └── models/
+│   │           ├── enums.py         # 9 个 StrEnum（DataType, SectionType, LLMProvider 等）
+│   │           ├── operator.py      # 6 个文档解析模型
+│   │           ├── constraint.py    # 7 个约束模型
+│   │           └── test_case.py     # 3 个测试用例模型
+│   │
+│   ├── mcp-server/                  # 数据访问层（唯一直接访问 SQLite 的服务）
+│   │   └── src/mcp_server/
+│   │       ├── __main__.py          # 入口：初始化 DB，调用 mcp.run()
+│   │       ├── db.py                # Database 类 + get_db() 单例，同步 SQLite + WAL
+│   │       ├── schema.sql           # 3 张表：operators, document_versions, parameters
+│   │       ├── server.py            # FastMCP 实例，注册 15 个 tool + 2 个 resource
+│   │       ├── parsers/
+│   │       │   ├── section_splitter.py  # 基于 markdown-it-py token 的章节分割
+│   │       │   └── document_parser.py   # 章节分类 + 产品支持表解析 + 函数签名提取
+│   │       └── tools/
+│   │           └── document_tools.py    # 14 个 MCP tool 实现函数（纯同步）
+│   │
+│   └── agent/                       # 应用层（FastAPI + LangGraph Pipeline）
+│       └── src/agent/
+│           ├── main.py              # create_app() 工厂函数，挂载路由/静态文件
+│           ├── graph.py             # create_pipeline_graph() — LangGraph 图定义
+│           ├── mcp_client.py        # MCPClient — 通过 stdio 子进程调用 MCP Server
+│           ├── core/
+│           │   ├── config.py        # pydantic-settings，双 LLM 提供商切换
+│           │   └── logging.py       # setup_logging + get_logger
+│           ├── nodes/
+│           │   ├── state.py         # PipelineState TypedDict（带 merge_errors reducer）
+│           │   ├── init_doc.py      # 节点1：版本检查 -> 保存 -> 解析
+│           │   ├── product_support.py   # 节点2a（并行）：LLM 提取产品支持表
+│           │   ├── parse_params.py      # 节点2b（并行）：LLM 提取函数参数
+│           │   ├── param_desc_extract.py # 节点3：双Section路由 + LLM并发提取参数描述
+│           │   ├── shape_extract.py     # 节点4a（并行）：逐参数LLM提取无条件shape
+│           │   └── dtype_extract.py     # 节点4b（并行）：逐参数LLM提取数据类型  <span class="tag-new">NEW</span>
+│           ├── routes/
+│           │   ├── upload.py        # POST /api/v1/upload — 触发 Pipeline
+│           │   └── query.py         # GET /api/v1/operators, /operators/{name}, /parameters
+│           ├── schemas/
+│           │   ├── upload.py        # UploadResponse
+│           │   └── query.py         # OperatorListResponse, OperatorDetailResponse, ParameterListResponse
+│           ├── prompts/
+│           │   ├── __init__.py      # 4个Prompt: PRODUCT_SUPPORT, PARAM_DESC, SHAPE, DTYPE
+│           │   └── system.py        # SYSTEM_PROMPT（未使用）
+│           ├── tools/
+│           │   ├── document_tools.py    # @tool 装饰的 LangGraph 工具（节点未使用）
+│           │   └── section_tools.py     # 存根工具
+│           └── static/
+│               └── index.html       # 单页测试管理 UI（文档解析 + 查询 + 参数表）
+│
+├── operators/                       # ~510 个 CANN 算子 Markdown 源文档
+│   ├── (root)/, cv/, math/, nn/, trans/
+├── tests/                           # 测试（仅 mcp_server/parsers 有 25 个测试）
+├── docs/                            # 设计文档 + LLM 提取提示指南
+│   ├── design.md                    # 完整设计文档 v0.2
+│   ├── plan.md                      # 实现计划 v1.0
+│   ├── project_summary.html         # 项目总览 (HTML)
+│   ├── dtype_schema.html            # shape/dtype 提取节点详细文档
+│   └── prompts/                     # 7 个提取阶段的提示模板
+├── data/operator_agent.db           # SQLite 数据库（运行时生成）
+├── CLAUDE.md                        # 项目级 Claude Code 指引
+├── pyproject.toml                   # 根工作区配置（ruff, mypy, pytest）
+└── .env                             # 环境变量（LLM API Key 等，gitignored）</div>
+<hr>
+
+<h2>4. 入口文件</h2>
+<table>
+<thead><tr><th>入口</th><th>路径</th><th>启动方式</th></tr></thead>
+<tbody>
+<tr><td>FastAPI 应用</td><td><code>packages/agent/src/agent/main.py</code></td><td><code>uvicorn agent.main:create_app --factory --reload</code></td></tr>
+<tr><td>MCP Server</td><td><code>packages/mcp-server/src/mcp_server/__main__.py</code></td><td><code>python -m mcp_server</code> 或 <code>uv run python -m mcp_server</code></td></tr>
+<tr><td>Pipeline 触发</td><td><code>packages/agent/src/agent/routes/upload.py</code></td><td>通过 <code>POST /api/v1/upload</code> 调用</td></tr>
+<tr><td>前端页面</td><td><code>packages/agent/src/agent/static/index.html</code></td><td>访问 <code>http://localhost:8000/</code></td></tr>
+</tbody>
+</table>
+<hr>
+
+<h2>5. 核心流程：文档上传 Pipeline</h2>
+
+<h3>5.1 整体架构</h3>
+<div class="flow-chart">用户上传 .md 文件
+        │
+        &#9660;
+  FastAPI upload_document()
+    - 提取 operator_name（正则匹配标题）
+    - 计算 SHA256 content_hash
+    - 构造初始状态 {operator_name, content, content_hash}
+        │
+        &#9660;
+  graph.ainvoke(initial_state)
+        │
+        &#9660;
+  ┌──────────────────────────────────────────────────────────┐
+  │                  LangGraph Pipeline                       │
+  │                                                          │
+  │  START                                                   │
+  │    │                                                     │
+  │    &#9660;                                                     │
+  │  init_doc               （顺序，第1步）                      │
+  │    │                                                     │
+  │    ├── error ───────────&#9654; END                           │
+  │    │                                                     │
+  │    &#9660; (status = new/unchanged/updated)                    │
+  │  ┌─────────────────────┐                                 │
+  │  │   PARALLEL FAN-OUT   │                                │
+  │  │   （同时执行两个节点）    │                                │
+  │  ├─────────┬───────────┤                                 │
+  │  &#9660;         &#9660;                                           │
+  │  product   parse                                         │
+  │  _support  _params                                       │
+  │  （并行2a）  （并行2b）                                       │
+  │  │         │                                             │
+  │  └────┬────┘                                             │
+  │       │ （两者都完成后才继续）                                  │
+  │       &#9660;                                                │
+  │  param_desc_extract    （顺序，第3步）                         │
+  │       │                                                  │
+  │       │ 返回 {parameters: [...], error: None} 到 state     │
+  │       │                                                  │
+  │  ┌────┴────────────┐                                     │
+  │  │ PARALLEL FAN-OUT │                                    │
+  │  │ （同时执行两个节点）  │                                    │
+  │  ├────────┬─────────┤                                    │
+  │  &#9660;        &#9660;                                          │
+  │  shape    dtype                                           │
+  │  _extract _extract  <span class="tag-new">NEW</span>                                    │
+  │  （并行4a） （并行4b）                                       │
+  │  │        │                                              │
+  │  └───┬────┘                                              │
+  │      │ （两者都完成后才继续）                                   │
+  │      &#9660;                                                 │
+  │     END                                                  │
+  └──────────────────────────────────────────────────────────┘
+        │
+        &#9660;
+  返回最终 state &#8594; UploadResponse</div>
+
+<h3>5.2 各节点详细职责</h3>
+
+<h4>节点1: init_doc_node（顺序执行）</h4>
+<p><strong>触发条件</strong>：Pipeline 启动后第一个执行。</p>
+<div class="flow-chart">init_doc_node(state)
+  │
+  ├─ MCP: check_version(operator_name, content_hash)
+  │    └─ 查询数据库，返回 {status: "new"|"unchanged"|"updated", version, doc_id}
+  │
+  ├─ 如果 status == "unchanged"（内容完全未变）:
+  │    ├─ MCP: get_parsed(operator_name, existing_version)
+  │    └─ 返回 {status="unchanged", doc_id, sections, cann_version, error=None}
+  │
+  └─ 如果 status == "new" 或 "updated":
+       ├─ MCP: save_doc(operator_name, content) → {operator_id, version, doc_id}
+       ├─ MCP: parse_doc(content) → ParsedOperatorDocument
+       ├─ MCP: save_parsed(operator_name, version, parsed_dict)
+       └─ 返回 {status, version, doc_id, cann_version, sections, error=None}</div>
+<p><strong>输出状态</strong>：<code>operator_id</code>, <code>doc_id</code>, <code>version</code>, <code>sections</code>, <code>cann_version</code>, <code>status</code>, <code>error</code></p>
+
+<h4>路由函数：_should_continue</h4>
+<pre><code>def _should_continue(state: dict) -&gt; list[str]:
+    if state.get("status") in ("error",):
+        return END                    # 终止 Pipeline
+    return ["product_support", "parse_params"]  # 扇出到两个并行节点</code></pre>
+
+<h4>节点2a: product_support_node（与 2b 并行执行）</h4>
+<p><strong>流程</strong>：MCP 获取文档 → 查找 product_support section → LLM 提取产品支持表 → MCP 保存到 document_versions.product_support。</p>
+<p><strong>输出状态</strong>：<code>product_support: list[dict]</code>, <code>error</code></p>
+
+<h4>节点2b: parse_params_node（与 2a 并行执行）</h4>
+<p><strong>流程</strong>：MCP 获取文档 → 查找 function_prototype section → LLM 提取函数参数列表 → 展开为参数记录 → MCP 保存到 parameters 表。</p>
+<p><strong>输出状态</strong>：<code>parameters: list[dict]</code>, <code>error</code></p>
+
+<h4>节点3: param_desc_extract_node（顺序执行，等待 2a 和 2b 都完成）</h4>
+<p><strong>流程</strong>：</p>
+<div class="flow-chart">param_desc_extract_node(state)
+  │
+  ├─ MCP: query_params_by_doc_id(doc_id) → 当前版本的参数列表
+  ├─ MCP: get_section(doc_id, "params_get_workspace") + get_section("params_execute")
+  │
+  ├─ 按函数名拆分：GetWorkspaceSize → ws_content, Execute → exe_content
+  │
+  ├─ 并发 LLM（asyncio.Semaphore(5)）:
+  │    └─ PARAM_DESC_EXTRACT_PROMPT.format(param_name, section_content)
+  │       └─ 生成标准 Markdown 表格描述 + 正则提取 direction
+  │
+  ├─ MCP: update_param_descriptions(doc_id, updates)
+  │    └─ 批量 UPDATE parameters 表的 direction、description 等字段
+  │
+  └─ return {"parameters": all_updates, "error": None}  ← 参数写入state传递给下游</div>
+<p><strong>输出状态</strong>：<code>parameters: list[dict]</code>, <code>error</code></p>
+<p><strong>注意</strong>：<code>_extract_one()</code> 中 <code>data_type</code>、<code>data_format</code>、<code>shape</code>、<code>memory_desc</code> 仍硬编码为空字符串。其中 <code>shape</code> 由下游 <code>shape_extract</code> 填充，<code>data_type</code> 由下游 <code>dtype_extract</code> <span class="tag-new">NEW</span> 填充。</p>
+
+<h4>节点4a: shape_extract_node（与 4b 并行执行）</h4>
+<p><strong>触发条件</strong>：param_desc_extract_node 完成后，与 dtype_extract_node <strong>同时启动</strong>。</p>
+<p><strong>流程</strong>：</p>
+<div class="flow-chart">shape_extract_node(state)
+  │
+  ├─ state.get("parameters", [])  ← 从 state 读，不调 MCP 查询
+  ├─ 过滤 description 非空的参数
+  │
+  ├─ 逐参数并发 LLM（asyncio.Semaphore(5)）:
+  │    └─ SHAPE_EXTRACT_PROMPT.format(param_name=..., params_text=description)
+  │       └─ 判断前置条件（"当.../如果.../若..." → 忽略）
+  │       └─ 无条件 → 提取 shape 值
+  │       └─ 返回 JSON: {"param_name": "...", "shape": "..."}
+  │
+  └─ MCP: update_param_shape(doc_id, shape_updates)
+       └─ 专用工具，SQL 只更新 shape 列</div>
+<p><strong>输出状态</strong>：<code>error</code></p>
+
+<h4>节点4b: dtype_extract_node（与 4a 并行执行）<span class="tag-new">NEW</span></h4>
+<p><strong>触发条件</strong>：param_desc_extract_node 完成后，与 shape_extract_node <strong>同时启动</strong>。</p>
+<p><strong>流程</strong>：</p>
+<div class="flow-chart">dtype_extract_node(state)
+  │
+  ├─ state.get("parameters", [])  ← 从 state 读，不调 MCP 查询
+  ├─ 过滤 description 非空的参数
+  │
+  ├─ 逐参数并发 LLM（asyncio.Semaphore(5)）:
+  │    └─ DTYPE_EXTRACT_PROMPT.format(param_name=..., params_text=description)
+  │       └─ 从 Markdown 表格 "数据类型" 行提取
+  │       └─ 返回 JSON: {"param_name": "...", "dtype": "..."}
+  │       └─ 代码层 .upper() 统一为大写
+  │
+  └─ MCP: update_param_dtype(doc_id, dtype_updates)
+       └─ 专用工具，SQL 只更新 dtype_desc 列</div>
+<p><strong>输出状态</strong>：<code>error</code></p>
+<p><strong>与 4a 的关系</strong>：两个节点代码结构完全相同，仅 prompt、提取目标列、MCP 工具不同。都从 <code>state.parameters</code> 读取，各自写入独立列（<code>shape</code> vs <code>dtype_desc</code>），互不冲突。</p>
+
+<h3>5.3 执行时序总结</h3>
+<div class="flow-chart">时间轴 ->
+
+t0:  init_doc ──────────────────────┐
+                                     │ (扇出)
+t1:               ┌─────────────────┴──────────────────┐
+                  &#9660;                                     &#9660;
+t2:        product_support                      parse_params
+           (LLM 提取产品表)                     (LLM 提取参数列表)
+                  │                                     │
+t3:               └─────────────────┬──────────────────┘
+                                     │ (扇入)
+t4:                                 &#9660;
+                           param_desc_extract
+                           (LLM并发提取描述, 返回parameters到state)
+                                     │
+t5:                    ┌────────────┴────────────┐
+                        │ (扇出 — 两个节点同时执行)   │
+t6:                     &#9660;                         &#9660;
+                  shape_extract              dtype_extract  <span class="tag-new">NEW</span>
+               (逐参数LLM提取shape)         (逐参数LLM提取数据类型)
+                        │                         │
+t7:                     └────────────┬────────────┘
+                                     │ (扇入)
+t8:                                 &#9660;
+                                   END</div>
+
+<p><strong>MCP 通信模式</strong>：每个节点每次调用 MCP 工具时，<code>MCPClient._call_tool()</code> 会<strong>启动一个新的 MCP Server 子进程</strong>（<code>async with stdio_client</code>），调用完成后进程退出。整个 Pipeline 执行一次约产生 8-10 次子进程启动。参数查询仅在 <code>param_desc_extract</code> 中进行一次，下游节点通过 state 传递数据，避免重复 MCP 查询。</p>
+
+<hr>
+
+<h2>6. 数据库 Schema</h2>
+<pre><code>-- 算子注册表
+operators (
+    id INTEGER PK,
+    name TEXT NOT NULL UNIQUE,
+    source_url TEXT,
+    created_at TEXT
+)
+
+-- 文档版本表（每次上传新版本追加一行）
+document_versions (
+    id INTEGER PK,
+    operator_id INTEGER FK -> operators(id),
+    version INTEGER NOT NULL,
+    content TEXT NOT NULL,        -- 原始 Markdown 全文
+    content_hash TEXT NOT NULL,   -- SHA256
+    parsed_data TEXT,             -- JSON: ParsedOperatorDocument
+    product_support TEXT,         -- JSON: [{product, supported}]
+    created_at TEXT,
+    UNIQUE(operator_id, version)
+)
+
+-- 参数表
+parameters (
+    id INTEGER PK,
+    doc_id INTEGER FK -> document_versions(id),
+    function_name TEXT NOT NULL,
+    param_name TEXT NOT NULL,
+    param_type TEXT DEFAULT '',
+    direction TEXT DEFAULT 'input',  -- 'input' | 'output' (param_desc_extract填充)
+    description TEXT,                -- Markdown 格式 (param_desc_extract填充)
+    usage_notes TEXT,                -- 暂无提取
+    dtype_desc TEXT,                 -- 数据类型 (dtype_extract填充) <span class="tag-new">NEW</span>
+    dformat_desc TEXT,               -- 暂无提取
+    shape TEXT,                      -- shape (shape_extract填充)
+    memory_desc TEXT,                -- 暂无提取
+    created_at TEXT,
+    UNIQUE(doc_id, function_name, param_name)
+)</code></pre>
+
+<hr>
+
+<h2>7. API 接口</h2>
+<table>
+<thead><tr><th>方法</th><th>路径</th><th>作用</th><th>流程</th></tr></thead>
+<tbody>
+<tr><td>GET</td><td><code>/</code></td><td>返回 static/index.html 测试页面</td><td>静态文件</td></tr>
+<tr><td>GET</td><td><code>/health</code></td><td>健康检查</td><td>直接返回 <code>{"status": "ok"}</code></td></tr>
+<tr><td>POST</td><td><code>/api/v1/upload</code></td><td>上传算子文档，触发完整 Pipeline</td><td>init_doc -> [product_support || parse_params] -> param_desc_extract -> [shape_extract || dtype_extract]</td></tr>
+<tr><td>GET</td><td><code>/api/v1/operators</code></td><td>列出所有已注册算子及最新版本</td><td>MCP: query_operators</td></tr>
+<tr><td>GET</td><td><code>/api/v1/operators/{name}</code></td><td>获取算子的完整解析数据</td><td>MCP: get_parsed(name, ?version)</td></tr>
+<tr><td>GET</td><td><code>/api/v1/parameters</code></td><td>查询参数列表（可选 ?operator_name 过滤）</td><td>MCP: query_params(operator_name?)</td></tr>
+</tbody>
+</table>
+<hr>
+
+<h2>8. 配置项 (.env)</h2>
+<table>
+<thead><tr><th>变量</th><th>默认值</th><th>说明</th></tr></thead>
+<tbody>
+<tr><td><code>LLM_PROVIDER</code></td><td><code>zai</code></td><td>LLM 提供商：<code>zai</code> 或 <code>deepseek</code></td></tr>
+<tr><td><code>LLM_TEMPERATURE</code></td><td><code>0.7</code></td><td>LLM 温度（全局默认，节点内覆盖为 0.1）</td></tr>
+<tr><td><code>ZAI_API_KEY</code></td><td>(空)</td><td>Z.AI GLM API Key</td></tr>
+<tr><td><code>ZAI_BASE_URL</code></td><td><code>https://api.z.ai/api/paas/v4/</code></td><td>Z.AI 端点</td></tr>
+<tr><td><code>ZAI_MODEL</code></td><td><code>glm-5.1</code></td><td>Z.AI 模型名</td></tr>
+<tr><td><code>DEEPSEEK_API_KEY</code></td><td>(空)</td><td>DeepSeek API Key</td></tr>
+<tr><td><code>DEEPSEEK_BASE_URL</code></td><td><code>https://api.deepseek.com</code></td><td>DeepSeek 端点</td></tr>
+<tr><td><code>DEEPSEEK_MODEL</code></td><td><code>deepseek-v4-flash</code></td><td>DeepSeek 模型名</td></tr>
+<tr><td><code>DATABASE_PATH</code></td><td><code>data/operator_agent.db</code></td><td>SQLite 数据库路径</td></tr>
+<tr><td><code>OPERATORS_DIR</code></td><td><code>operators</code></td><td>算子文档目录</td></tr>
+<tr><td><code>LOG_LEVEL</code></td><td><code>INFO</code></td><td>日志级别</td></tr>
+<tr><td><code>DEBUG</code></td><td><code>false</code></td><td>调试模式</td></tr>
+</tbody>
+</table>
+<hr>
+
+<h2>9. 已知问题与待改进项</h2>
+
+<h3>性能</h3>
+<ol>
+<li><strong>每次工具调用启动新进程</strong>：<code>MCPClient._call_tool()</code> 每次创建新的 MCP Server 子进程，无连接复用，频繁启动开销大</li>
+<li><strong>同步 SQLite</strong>：MCP Server 全部使用同步 SQLite（<code>aiosqlite</code> 在依赖中声明但未使用）</li>
+</ol>
+
+<h3>代码质量</h3>
+<ol start="3">
+<li><strong><code>_parse_json_response</code> 重复</strong>：<code>parse_params.py</code> 和 <code>product_support.py</code> 中相同函数各一份</li>
+<li><strong><code>param_desc_extract_node</code> 字段填充不全</strong>：<code>_extract_one()</code> 中 <code>usage_notes</code>、<code>data_format</code>、<code>memory_desc</code> 仍硬编码为空字符串，暂无 LLM 提取逻辑</li>
+<li><strong>两个并行节点 Semaphore 独立</strong>：shape_extract 和 dtype_extract 各自 Semaphore(5)，并行时实际 LLM 调用峰值可达 10，可能触发 API 限流</li>
+</ol>
+
+<h3>安全</h3>
+<ol start="6">
+<li><strong><code>.env</code> 含真实 API Key</strong>：DeepSeek 密钥被写入 <code>.env</code> 文件（建议轮换并使用 Secret Manager）</li>
+<li><strong>未集成 bandit 扫描</strong>：CLAUDE.md 要求 <code>bandit -r src/</code>，但未配置</li>
+</ol>
+
+<h3>测试</h3>
+<ol start="8">
+<li><strong>测试覆盖严重不足</strong>：仅 <code>mcp_server/parsers/</code> 有 34 个测试（25->34 已增加），agent 包全部无测试</li>
+<li><strong>无 CI/CD</strong>：没有 GitHub Actions、Dockerfile 或部署配置</li>
+</ol>
+
+<h3>文档/结构</h3>
+<ol start="10">
+<li><strong>CLAUDE.md 架构图过时</strong>：描述 <code>src/agent/</code>、<code>src/api/</code> 扁平结构，实际为 <code>packages/*/src/</code> monorepo</li>
+<li><strong>LangGraph Tools 存根</strong>：<code>agent/tools/</code> 下的 <code>@tool</code> 定义未被节点使用（节点直接调 MCPClient）</li>
+</ol>
+
+<h3>前端</h3>
+<ol start="12">
+<li><del>字段名不匹配</del> &check; 已修复 — MCP 层 dict key 从 <code>dtype_desc</code>/<code>dformat_desc</code> 重命名为 <code>data_type</code>/<code>data_format</code></li>
+<li><strong>Markdown 渲染与双过滤器</strong>：已集成 marked.js CDN，"描述"列渲染 Markdown 格式。新增函数名下拉过滤器，与算子过滤器联动，客户端过滤。</li>
+</ol>
+<hr>
+
+<h2>10. 架构设计文档引用</h2>
+<table>
+<thead><tr><th>文档</th><th>路径</th><th>作用</th></tr></thead>
+<tbody>
+<tr><td>系统设计</td><td><code>docs/design.md</code></td><td>完整系统设计，含 12 节点 Pipeline 规划</td></tr>
+<tr><td>实现计划</td><td><code>docs/plan.md</code></td><td>分阶段实现计划 v1.0</td></tr>
+<tr><td>文档结构</td><td><code>docs/operator_doc_struct.md</code></td><td>CANN 算子文档结构分析</td></tr>
+<tr><td>提取指南</td><td><code>docs/prompts/*.md</code></td><td>各阶段 LLM 提取提示模板（7 个）</td></tr>
+<tr><td>项目总览</td><td><code>docs/project_summary.html</code></td><td>本文件 — 项目全貌</td></tr>
+<tr><td>提取节点详解</td><td><code>docs/dtype_schema.html</code></td><td>shape_extract + dtype_extract 节点实现文档</td></tr>
+</tbody>
+</table>
+
+</body>
+</html>
