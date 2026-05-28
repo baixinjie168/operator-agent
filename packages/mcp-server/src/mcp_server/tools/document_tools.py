@@ -339,6 +339,30 @@ def update_param_descriptions(doc_id: int, updates: list[dict]) -> dict:
     return {"updated": count}
 
 
+def update_param_shape(doc_id: int, updates: list[dict]) -> dict:
+    """Batch update only the shape field of parameters.
+
+    Args:
+        doc_id: Primary key of document_versions table.
+        updates: List of dicts with keys: function_name, param_name, shape.
+
+    Returns:
+        dict with count of updated parameters.
+    """
+    db = get_db()
+    conn = db.conn
+    count = 0
+    for u in updates:
+        cursor = conn.execute(
+            "UPDATE parameters SET shape = ? "
+            "WHERE doc_id = ? AND function_name = ? AND param_name = ?",
+            (u.get("shape", ""), doc_id, u.get("function_name", ""), u.get("param_name", "")),
+        )
+        count += cursor.rowcount
+    conn.commit()
+    return {"updated": count}
+
+
 def query_parameters(operator_name: str | None = None) -> list[dict]:
     """Query parameters from the database, optionally filtered by operator name.
 

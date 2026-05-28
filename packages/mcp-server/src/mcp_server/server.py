@@ -11,19 +11,22 @@ from mcp.server.fastmcp import FastMCP
 from mcp_server.db import get_db
 from mcp_server.tools.document_tools import (
     check_document_version,
+    do_save_product_support,
     get_parsed_document,
     get_section_by_type,
     list_all_operators,
     parse_document,
     query_parameters,
     query_params_by_doc_id,
-    update_param_descriptions,
     save_document,
     save_parameters,
     save_parsed_document,
-    do_save_product_support,
+    update_param_descriptions,
 )
 from mcp_server.tools.document_tools import get_parsed_by_doc_id as _get_parsed_by_doc_id
+from mcp_server.tools.document_tools import (
+    update_param_shape as _update_param_shape,
+)
 
 mcp = FastMCP("operator-agent-mcp-server")
 
@@ -222,6 +225,22 @@ def update_param_descs(doc_id: int, updates: str) -> str:
     """
     data = json.loads(updates)
     result = update_param_descriptions(doc_id, data)
+    return json.dumps(result, ensure_ascii=False)
+
+
+@mcp.tool()
+def update_param_shape(doc_id: int, updates: str) -> str:
+    """Batch update only the shape field of parameters.
+
+    Args:
+        doc_id: Primary key of document_versions table.
+        updates: JSON string — array of dicts with function_name, param_name, shape.
+
+    Returns:
+        JSON string with count of updated parameters.
+    """
+    data = json.loads(updates)
+    result = _update_param_shape(doc_id, data)
     return json.dumps(result, ensure_ascii=False)
 
 

@@ -29,22 +29,21 @@ class MCPClient:
 
     async def _call_tool(self, tool_name: str, arguments: dict[str, Any]) -> Any:
         """Start MCP server subprocess, call a tool, and return the result."""
-        async with stdio_client(self._params) as (read, write):
-            async with ClientSession(read, write) as session:
-                await session.initialize()
-                result = await session.call_tool(tool_name, arguments)
+        async with stdio_client(self._params) as (read, write), ClientSession(read, write) as session:
+            await session.initialize()
+            result = await session.call_tool(tool_name, arguments)
 
-                if result.isError:
-                    error_msg = result.content[0].text if result.content else "Unknown MCP error"
-                    raise RuntimeError(f"MCP tool '{tool_name}' error: {error_msg}")
+            if result.isError:
+                error_msg = result.content[0].text if result.content else "Unknown MCP error"
+                raise RuntimeError(f"MCP tool '{tool_name}' error: {error_msg}")
 
-                if result.content:
-                    text = result.content[0].text
-                    try:
-                        return json.loads(text)
-                    except (json.JSONDecodeError, TypeError):
-                        return text
-                return None
+            if result.content:
+                text = result.content[0].text
+                try:
+                    return json.loads(text)
+                except (json.JSONDecodeError, TypeError):
+                    return text
+            return None
 
     async def check_version(self, operator_name: str, content_hash: str) -> dict:
         """Check document version status."""
@@ -123,6 +122,13 @@ class MCPClient:
     async def update_param_descriptions(self, doc_id: int, updates: list[dict]) -> dict:
         """Batch update parameter description fields."""
         return await self._call_tool("update_param_descs", {
+            "doc_id": doc_id,
+            "updates": json.dumps(updates, ensure_ascii=False),
+        })
+
+    async def update_param_shape(self, doc_id: int, updates: list[dict]) -> dict:
+        """Batch update only the shape field of parameters."""
+        return await self._call_tool("update_param_shape", {
             "doc_id": doc_id,
             "updates": json.dumps(updates, ensure_ascii=False),
         })
