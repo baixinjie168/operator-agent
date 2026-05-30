@@ -128,12 +128,23 @@
     background: #fffbeb;
     border-color: #f59e0b;
   }
+  .mermaid {
+    display: flex;
+    justify-content: center;
+    margin: 1.5rem 0;
+    overflow-x: auto;
+  }
+  .mermaid svg {
+    max-width: 100%;
+    height: auto;
+  }
   @media (max-width: 768px) {
     body { padding: 1rem; }
     table { font-size: 0.8rem; }
     th, td { padding: 0.4rem 0.5rem; }
   }
 </style>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
 </head>
 <body>
 
@@ -143,7 +154,7 @@
 
 <h2>1. 项目定位</h2>
 <p>基于 <strong>LangGraph + MCP</strong> 的 CANN 算子文档自动化处理系统。将华为昇腾平台的算子 Markdown 文档解析为结构化数据，经 LLM 提取参数、约束、产品支持信息，最终生成 Python 测试用例。</p>
-<p><strong>当前完成度</strong>：约 50%，文档解析、数据库层、Pipeline 全部 7 个节点（含 shape/dtype/optional 提取）可运行。约束提取、人工审核、测试用例生成尚未实现。</p>
+<p><strong>当前完成度</strong>：约 50%，文档解析、数据库层、Pipeline 全部 8 个节点（含 src_content 提取、shape/dtype/optional 提取）可运行。约束提取、人工审核、测试用例生成尚未实现。</p>
 <hr>
 
 <h2>2. 技术栈</h2>
@@ -184,12 +195,12 @@
 │   │       ├── __main__.py          # 入口：初始化 DB，调用 mcp.run()
 │   │       ├── db.py                # Database 类 + get_db() 单例，同步 SQLite + WAL
 │   │       ├── schema.sql           # 3 张表：operators, document_versions, parameters
-│   │       ├── server.py            # FastMCP 实例，注册 16 个 tool + 2 个 resource
+│   │       ├── server.py            # FastMCP 实例，注册 17 个 tool + 2 个 resource
 │   │       ├── parsers/
 │   │       │   ├── section_splitter.py  # 基于 markdown-it-py token 的章节分割
 │   │       │   └── document_parser.py   # 章节分类 + 产品支持表解析 + 函数签名提取
 │   │       └── tools/
-│   │           └── document_tools.py    # 16 个 MCP tool 实现函数（纯同步）
+│   │           └── document_tools.py    # 17 个 MCP tool 实现函数（纯同步）
 │   │
 │   └── agent/                       # 应用层（FastAPI + LangGraph Pipeline）
 │       └── src/agent/
@@ -204,9 +215,11 @@
 │           │   ├── init_doc.py      # 节点1：版本检查 -> 保存 -> 解析
 │           │   ├── product_support.py   # 节点2a（并行）：LLM 提取产品支持表
 │           │   ├── parse_params.py      # 节点2b（并行）：LLM 提取函数参数
-│           │   ├── param_desc_extract.py # 节点3：双Section路由 + LLM并发提取参数描述
-│           │   ├── shape_extract.py     # 节点4a（并行）：逐参数LLM提取无条件shape
-│           │   └── dtype_extract.py     # 节点4b（并行）：逐参数LLM提取数据类型
+│           │   ├── src_content_extract.py # 节点3：双Section路由 + LLM并发提取参数原文
+│           │   ├── param_desc_extract.py # 节点4：从src_content生成结构化参数描述表格
+│           │   ├── shape_extract.py     # 节点5a（并行）：逐参数LLM提取无条件shape
+│           │   ├── dtype_extract.py     # 节点5b（并行）：逐参数LLM提取数据类型
+│           │   └── optional_extract.py  # 节点5c（并行）：逐参数LLM判断可选性
 │           ├── routes/
 │           │   ├── upload.py        # POST /api/v1/upload — 触发 Pipeline
 │           │   └── query.py         # GET /api/v1/operators, /operators/{name}, /parameters
@@ -214,7 +227,7 @@
 │           │   ├── upload.py        # UploadResponse
 │           │   └── query.py         # OperatorSummary, OperatorListResponse, OperatorDetailResponse, ParameterItem, ParameterListResponse
 │           ├── prompts/
-│           │   ├── __init__.py      # 5个Prompt: PRODUCT_SUPPORT, PARAM_DESC, SHAPE, DTYPE, OPTIONAL
+│           │   ├── __init__.py      # 6个Prompt: PRODUCT_SUPPORT, SRC_CONTENT, PARAM_DESC, SHAPE, DTYPE, OPTIONAL
 │           │   └── system.py        # SYSTEM_PROMPT（未使用）
 │           ├── tools/
 │           │   ├── document_tools.py    # 5 个 @tool 装饰的 LangGraph 工具（节点未使用）
@@ -225,13 +238,12 @@
 ├── operators/                       # ~736 个 CANN 算子 Markdown 源文档
 │   ├── (root)/, cv/, math/, nn/, trans/
 ├── tests/                           # 测试（仅 mcp_server/parsers 有 34 个测试）
-├── docs/                            # 设计文档 + LLM 提取提示指南
-│   ├── design.md                    # 完整设计文档 v0.2
-│   ├── plan.md                      # 实现计划 v1.0
+├── docs/                            # 文档 + LLM 提取提示指南 + 提取结果
 │   ├── project_summary.html         # 项目总览 (HTML)
-│   ├── dtype_schema.html            # shape/dtype 提取节点详细文档
-│   ├── optional-schema.html           # is_optional 字段 + optional_extract 节点实现方案
-│   └── prompts/                     # 7 个提取阶段的提示模板
+│   ├── prompts/                     # 7 个提取阶段的提示模板
+│   ├── self-prompts/                # 自提取提示模板
+│   ├── aclnnAdaLayerNorm/           # 提取结果示例（JSON + 错误日志）
+│   └── constraints-demo/            # 30 个算子约束提取 JSON 示例
 ├── data/operator_agent.db           # SQLite 数据库（运行时生成）
 ├── CLAUDE.md                        # 项目级 Claude Code 指引
 ├── pyproject.toml                   # 根工作区配置（ruff, mypy, pytest）
@@ -253,63 +265,40 @@
 <h2>5. 核心流程：文档上传 Pipeline</h2>
 
 <h3>5.1 整体架构</h3>
-<div class="flow-chart">用户上传 .md 文件
-        │
-        &#9660;
-  FastAPI upload_document()
-    - 提取 operator_name（正则匹配标题）
-    - 计算 SHA256 content_hash
-    - 构造初始状态 {operator_name, content, content_hash}
-        │
-        &#9660;
-  graph.ainvoke(initial_state)
-        │
-        &#9660;
-  ┌──────────────────────────────────────────────────────────┐
-  │                  LangGraph Pipeline                       │
-  │                                                          │
-  │  START                                                   │
-  │    │                                                     │
-  │    &#9660;                                                     │
-  │  init_doc               （顺序，第1步）                      │
-  │    │                                                     │
-  │    ├── error ───────────&#9654; END                           │
-  │    ├── unchanged &#9654; END ⚠ (当前代码有bug，仍继续执行)     │
-  │    │                                                     │
-  │    &#9660; (status = new/updated)                           │
-  │  ┌────┴────────────┐                                     │
-  │  │ PARALLEL FAN-OUT │                                    │
-  │  │ （同时执行两个节点）  │                                    │
-  │  ├────────┬─────────┤                                    │
-  │  &#9660;        &#9660;                                          │
-  │  product  parse                                    │
-  │  _support _params                                      │
-  │  （并行2a） （并行2b）                                       │
-  │  │        │                                              │
-  │  └───┬────┘                                              │
-  │      │ （两者都完成后才继续）                                   │
-  │      &#9660;                                                 │
-  │  param_desc_extract    （顺序，第3步）                         │
-  │      │                                                  │
-  │      │ 返回 {parameters: [...], error: None} 到 state     │
-  │      │                                                  │
-  │  ┌────┴──────────────┐                                   │
-  │  │ PARALLEL FAN-OUT  │                                   │
-  │  │ （同时执行三个节点）  │                                   │
-  │  ├────────┬─────────┬─────────┤                         │
-  │  &#9660;        &#9660;         &#9660;                               │
-  │  shape    dtype    optional                             │
-  │  _extract _extract _extract                             │
-  │  （并行4a） （并行4b） （并行4c）                              │
-  │  │        │        │                                    │
-  │  └───┬────┼────────┘                                    │
-  │      │ （三者都完成后才继续）                                  │
-  │      &#9660;                                               │
-  │     END                                                  │
-  └──────────────────────────────────────────────────────────┘
-        │
-        &#9660;
-  返回最终 state &#8594; UploadResponse</div>
+<pre class="mermaid">
+flowchart TD
+    A([上传 .md 文件]) --> B["FastAPI upload_document()\n提取 operator_name\n计算 SHA256 content_hash\n构造初始状态"]
+    B --> C["init_doc (节点1)\nMCP: check_version\nsave_doc / parse_doc / save_parsed"]
+    C --> D{status == error?}
+    D -- 是 --> E([END])
+    D -- 否 --> F{status == unchanged?}
+    F -- 是 --> G["END ⚠ bug\n仍继续执行"]
+    F -- 否 --> H["product_support (2a)\nLLM 提取产品支持表"]
+    F -- 否 --> I["parse_params (2b)\nLLM 提取函数参数"]
+    H --> J["src_content_extract (3)\nLLM 并发提取参数原文\nMCP: update_param_src_content"]
+    I --> J
+    J --> K["param_desc_extract (4)\n从 src_content 生成描述表格\nMCP: update_param_descriptions"]
+    K --> L["shape_extract (5a)\nLLM 提取 shape"]
+    K --> M["dtype_extract (5b)\nLLM 提取 dtype"]
+    K --> N["optional_extract (5c)\nLLM 判断 is_optional"]
+    L --> O([END\n返回 UploadResponse])
+    M --> O
+    N --> O
+
+    style A fill:#f0fff4,stroke:#48bb78,color:#22543d
+    style E fill:#fff5f5,stroke:#e53e3e,color:#742a2a
+    style G fill:#fffaf0,stroke:#dd6b20,color:#7b341e
+    style D fill:#fffff0,stroke:#d69e2e
+    style F fill:#fffff0,stroke:#d69e2e
+    style H fill:#ebf8ff,stroke:#3182ce
+    style I fill:#ebf8ff,stroke:#3182ce
+    style J fill:#faf5ff,stroke:#805ad5
+    style K fill:#faf5ff,stroke:#805ad5
+    style L fill:#ebf8ff,stroke:#3182ce
+    style M fill:#ebf8ff,stroke:#3182ce
+    style N fill:#ebf8ff,stroke:#3182ce
+    style O fill:#fff5f5,stroke:#e53e3e,color:#742a2a
+</pre>
 
 <h3>5.2 各节点详细职责</h3>
 
@@ -346,9 +335,9 @@
 <p><strong>流程</strong>：MCP 获取文档 → 查找 function_prototype section → LLM 提取函数参数列表 → 展开为参数记录 → MCP 保存到 parameters 表。</p>
 <p><strong>输出状态</strong>：<code>parameters: list[dict]</code>, <code>error</code></p>
 
-<h4>节点3: param_desc_extract_node（顺序执行，等待 2a 和 2b 都完成）</h4>
+<h4>节点3: src_content_extract_node（顺序执行，等待 2a 和 2b 都完成）</h4>
 <p><strong>流程</strong>：</p>
-<div class="flow-chart">param_desc_extract_node(state)
+<div class="flow-chart">src_content_extract_node(state)
   │
   ├─ MCP: query_params_by_doc_id(doc_id) → 当前版本的参数列表
   ├─ MCP: get_section(doc_id, "params_get_workspace") + get_section("params_execute")
@@ -356,8 +345,25 @@
   ├─ 按函数名拆分：GetWorkspaceSize → ws_content, Execute → exe_content
   │
   ├─ 并发 LLM（asyncio.Semaphore(5)）:
-  │    └─ PARAM_DESC_EXTRACT_PROMPT.format(param_name, section_content)
-  │       └─ 生成标准 Markdown 表格描述 + 正则提取 direction
+  │    └─ SRC_CONTENT_EXTRACT_PROMPT.format(param_name, content)
+  │       └─ 从文档章节中提取参数的原始描述文本
+  │
+  ├─ MCP: update_param_src_content(doc_id, updates)
+  │    └─ 批量 UPDATE parameters 表的 src_content 字段
+  │
+  └─ return {"parameters": all_updates, "error": None}  ← 参数写入state传递给下游</div>
+<p><strong>输出状态</strong>：<code>parameters: list[dict]</code>, <code>error</code></p>
+
+<h4>节点4: param_desc_extract_node（顺序执行，等待节点3完成）</h4>
+<p><strong>流程</strong>：</p>
+<div class="flow-chart">param_desc_extract_node(state)
+  │
+  ├─ state.get("parameters", [])  ← 从 state 读取（由节点3填充的 src_content）
+  ├─ 过滤 src_content 非空的参数
+  │
+  ├─ 并发 LLM（asyncio.Semaphore(5)）:
+  │    └─ PARAM_DESC_EXTRACT_PROMPT.format(param_name, src_content)
+  │       └─ 从原文生成结构化 Markdown 表格描述 + 正则提取 direction
   │
   ├─ MCP: update_param_descriptions(doc_id, updates)
   │    └─ 批量 UPDATE parameters 表的 direction、description 等字段
@@ -366,7 +372,7 @@
 <p><strong>输出状态</strong>：<code>parameters: list[dict]</code>, <code>error</code></p>
 <p><strong>注意</strong>：<code>_extract_one()</code> 中 <code>data_type</code>、<code>data_format</code>、<code>shape</code>、<code>memory_desc</code> 仍硬编码为空字符串。其中 <code>shape</code> 由下游 <code>shape_extract</code> 填充，<code>data_type</code> 由 <code>dtype_extract</code> 填充，<code>is_optional</code> 由 <code>optional_extract</code> 填充。</p>
 
-<h4>节点4a: shape_extract_node（与 4b、4c 并行执行）</h4>
+<h4>节点5a: shape_extract_node（与 5b、5c 并行执行）</h4>
 <p><strong>触发条件</strong>：param_desc_extract_node 完成后，与 dtype_extract_node、optional_extract_node <strong>同时启动</strong>。</p>
 <p><strong>流程</strong>：</p>
 <div class="flow-chart">shape_extract_node(state)
@@ -384,7 +390,7 @@
        └─ 专用工具，SQL 只更新 shape 列</div>
 <p><strong>输出状态</strong>：<code>error</code></p>
 
-<h4>节点4b: dtype_extract_node（与 4a、4c 并行执行）</h4>
+<h4>节点5b: dtype_extract_node（与 5a、5c 并行执行）</h4>
 <p><strong>触发条件</strong>：param_desc_extract_node 完成后，与 shape_extract_node、optional_extract_node <strong>同时启动</strong>。</p>
 <p><strong>流程</strong>：</p>
 <div class="flow-chart">dtype_extract_node(state)
@@ -401,9 +407,9 @@
   └─ MCP: update_param_dtype(doc_id, dtype_updates)
        └─ 专用工具，SQL 只更新 dtype_desc 列</div>
 <p><strong>输出状态</strong>：<code>error</code></p>
-<p><strong>与 4a 的关系</strong>：三个节点代码结构完全相同，仅 prompt、提取目标列、MCP 工具不同。都从 <code>state.parameters</code> 读取，各自写入独立列（<code>shape</code> / <code>dtype_desc</code> / <code>is_optional</code>），互不冲突。</p>
+<p><strong>与 5a 的关系</strong>：三个节点代码结构完全相同，仅 prompt、提取目标列、MCP 工具不同。都从 <code>state.parameters</code> 读取，各自写入独立列（<code>shape</code> / <code>dtype_desc</code> / <code>is_optional</code>），互不冲突。</p>
 
-<h4>节点4c: optional_extract_node（与 4a、4b 并行执行）</h4>
+<h4>节点5c: optional_extract_node（与 5a、5b 并行执行）</h4>
 <p><strong>触发条件</strong>：param_desc_extract_node 完成后，与 shape/dtype <strong>同时启动</strong>。</p>
 <p><strong>流程</strong>：</p>
 <div class="flow-chart">optional_extract_node(state)
@@ -423,33 +429,30 @@
 <p><strong>输出状态</strong>：<code>error</code></p>
 
 <h3>5.3 执行时序总结</h3>
-<div class="flow-chart">时间轴 ->
+<pre class="mermaid">
+gantt
+    title Pipeline 执行时序
+    dateFormat X
+    axisFormat %s
 
-t0:  init_doc ──────────────────────┐
-                                     │ (扇出)
-t1:               ┌─────────────────┴──────────────────┐
-                  &#9660;                                     &#9660;
-t2:        product_support                      parse_params
-           (LLM 提取产品表)                     (LLM 提取参数列表)
-                  │                                     │
-t3:               └─────────────────┬──────────────────┘
-                                     │ (扇入)
-t4:                                 &#9660;
-                           param_desc_extract
-                           (LLM并发提取描述, 返回parameters到state)
-                                     │
-t5:                    ┌────────────┴────────────┐
-                        │ (扇出 — 三个节点同时执行)   │
-t6:                     &#9660;                         &#9660;
-                  shape_extract         dtype_extract        optional_extract
-               (逐参数LLM提取shape)    (逐参数LLM提取数据类型)   (逐参数LLM判断可选)
-                        │                         │
-t7:                     └────────────┬────────────┘
-                                     │ (扇入)
-t8:                                 &#9660;
-                                   END</div>
+    section 顺序
+    init_doc (版本检查+保存+解析) :0, 1
 
-<p><strong>MCP 通信模式</strong>：每个节点每次调用 MCP 工具时，<code>MCPClient._call_tool()</code> 会<strong>启动一个新的 MCP Server 子进程</strong>（<code>async with stdio_client</code>），调用完成后进程退出。整个 Pipeline 执行一次约产生 9-11 次子进程启动。参数查询仅在 <code>param_desc_extract</code> 中进行一次，下游节点通过 state 传递数据，避免重复 MCP 查询。</p>
+    section 并行 2a/2b
+    product_support (LLM 提取产品表) :1, 3
+    parse_params (LLM 提取参数列表) :1, 3
+
+    section 顺序
+    src_content_extract (LLM 并发提取原文) :3, 4
+    param_desc_extract (生成描述表格) :4, 5
+
+    section 并行 5a/5b/5c
+    shape_extract (逐参数提取 shape) :5, 7
+    dtype_extract (逐参数提取 dtype) :5, 7
+    optional_extract (逐参数判断可选) :5, 7
+</pre>
+
+<p><strong>MCP 通信模式</strong>：每个节点每次调用 MCP 工具时，<code>MCPClient._call_tool()</code> 会<strong>启动一个新的 MCP Server 子进程</strong>（<code>async with stdio_client</code>），调用完成后进程退出。整个 Pipeline 执行一次约产生 ~16 次子进程启动。参数查询在 <code>src_content_extract</code> 中进行一次，下游节点通过 state 传递数据，避免重复 MCP 查询。</p>
 
 <hr>
 
@@ -483,7 +486,7 @@ parameters (
     param_name TEXT NOT NULL,
     param_type TEXT DEFAULT '',
     direction TEXT DEFAULT 'input',  -- 'input' | 'output' (param_desc_extract填充)
-    src_content TEXT,                -- 原始参数描述 Markdown (param_desc_extract填充)
+    src_content TEXT,                -- 原始参数描述 Markdown (src_content_extract填充) (ALTER TABLE 迁移v3添加)
     description TEXT,                -- Markdown 格式 (param_desc_extract填充)
     usage_notes TEXT,                -- 暂无提取
     dtype_desc TEXT,                 -- 数据类型 (dtype_extract填充)
@@ -506,7 +509,7 @@ idx_parameters_doc_id ON parameters(doc_id)</code></pre>
 <tbody>
 <tr><td>GET</td><td><code>/</code></td><td>返回 static/index.html 测试页面</td><td>静态文件</td></tr>
 <tr><td>GET</td><td><code>/health</code></td><td>健康检查</td><td>直接返回 <code>{"status": "ok"}</code></td></tr>
-<tr><td>POST</td><td><code>/api/v1/upload</code></td><td>上传算子文档，触发完整 Pipeline</td><td>init_doc -> [product_support || parse_params] -> param_desc_extract -> [shape_extract || dtype_extract || optional_extract]</td></tr>
+<tr><td>POST</td><td><code>/api/v1/upload</code></td><td>上传算子文档，触发完整 Pipeline</td><td>init_doc -> [product_support || parse_params] -> src_content_extract -> param_desc_extract -> [shape_extract || dtype_extract || optional_extract]</td></tr>
 <tr><td>GET</td><td><code>/api/v1/operators</code></td><td>列出所有已注册算子及最新版本</td><td>MCP: query_operators</td></tr>
 <tr><td>GET</td><td><code>/api/v1/operators/{name}</code></td><td>获取算子的完整解析数据</td><td>MCP: get_parsed(name, ?version)</td></tr>
 <tr><td>GET</td><td><code>/api/v1/parameters</code></td><td>查询参数列表（可选 ?operator_name 过滤）</td><td>MCP: query_params(operator_name?)</td></tr>
@@ -574,7 +577,7 @@ idx_parameters_doc_id ON parameters(doc_id)</code></pre>
 <h3>前端</h3>
 <ol start="12">
 <li><del>字段名不匹配</del> &check; 已修复 — MCP 层 dict key 从 <code>dtype_desc</code>/<code>dformat_desc</code> 重命名为 <code>data_type</code>/<code>data_format</code></li>
-<li><strong><code>nodes/__init__.py</code> 未同步</strong>：只导出 3 个旧节点（init_doc, parse_params, product_support），未包含后续新增的 4 个节点（param_desc_extract, shape_extract, dtype_extract, optional_extract）。</li>
+<li><strong><code>nodes/__init__.py</code> 未同步</strong>：只导出 4 个旧节点（init_doc, parse_params, product_support, src_content_extract），未包含后续新增的 4 个节点（param_desc_extract, shape_extract, dtype_extract, optional_extract）。</li>
 <li><strong>Markdown 渲染与双过滤器</strong>：已集成 marked.js CDN，"描述"列渲染 Markdown 格式。新增函数名下拉过滤器，与算子过滤器联动，客户端过滤。</li>
 </ol>
 <hr>
@@ -583,18 +586,44 @@ idx_parameters_doc_id ON parameters(doc_id)</code></pre>
 <table>
 <thead><tr><th>文档</th><th>路径</th><th>作用</th></tr></thead>
 <tbody>
-<tr><td>系统设计</td><td><code>docs/design.md</code></td><td>完整系统设计，含 12 节点 Pipeline 规划</td></tr>
-<tr><td>实现计划</td><td><code>docs/plan.md</code></td><td>分阶段实现计划 v1.0</td></tr>
-<tr><td>文档结构</td><td><code>docs/operator_doc_struct.md</code></td><td>CANN 算子文档结构分析</td></tr>
 <tr><td>提取指南</td><td><code>docs/prompts/*.md</code></td><td>各阶段 LLM 提取提示模板（7 个）</td></tr>
 <tr><td>自提取提示</td><td><code>docs/self-prompts/extract.md</code></td><td>自动提取过程提示模板</td></tr>
 <tr><td>项目总览 (HTML)</td><td><code>docs/project_summary.html</code></td><td>本文件 — 项目全貌</td></tr>
-<tr><td>项目总览 (MD)</td><td><code>docs/project_summary.md</code></td><td>项目全览 Markdown 版本</td></tr>
-<tr><td>提取节点详解</td><td><code>docs/dtype_schema.html</code></td><td>shape_extract + dtype_extract 节点实现文档</td></tr>
-<tr><td>dtype 描述详解</td><td><code>docs/dtype_desc_schema.html</code></td><td>dtype_desc 字段详细文档</td></tr>
-<tr><td>可选性判断</td><td><code>docs/optional-schema.html</code></td><td>is_optional 字段 + optional_extract 节点实现方案</td></tr>
+<tr><td>提取结果示例</td><td><code>docs/aclnnAdaLayerNorm/</code></td><td>aclnnAdaLayerNorm 算子提取结果（JSON + 错误日志，含版本迭代）</td></tr>
+<tr><td>约束提取 Demo</td><td><code>docs/constraints-demo/</code></td><td>30 个算子约束提取 JSON 示例</td></tr>
 </tbody>
 </table>
+
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'base',
+    themeVariables: {
+      primaryColor: '#edf2f7',
+      primaryTextColor: '#1a1a2e',
+      primaryBorderColor: '#4a5568',
+      lineColor: '#4a5568',
+      secondaryColor: '#ebf8ff',
+      tertiaryColor: '#faf5ff',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif',
+      fontSize: '13px'
+    },
+    flowchart: {
+      useMaxWidth: true,
+      htmlLabels: true,
+      curve: 'basis',
+      padding: 15
+    },
+    gantt: {
+      useMaxWidth: true,
+      fontSize: 12,
+      barHeight: 24,
+      barGap: 6,
+      topPadding: 40,
+      sectionFontSize: 13
+    }
+  });
+</script>
 
 </body>
 </html>

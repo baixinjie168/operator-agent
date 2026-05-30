@@ -25,6 +25,9 @@ from mcp_server.tools.document_tools import (
 )
 from mcp_server.tools.document_tools import get_parsed_by_doc_id as _get_parsed_by_doc_id
 from mcp_server.tools.document_tools import (
+    update_param_dformat as _update_param_dformat,
+)
+from mcp_server.tools.document_tools import (
     update_param_dtype as _update_param_dtype,
 )
 from mcp_server.tools.document_tools import (
@@ -266,6 +269,22 @@ def update_param_dtype(doc_id: int, updates: str) -> str:
     """
     data = json.loads(updates)
     result = _update_param_dtype(doc_id, data)
+    return json.dumps(result, ensure_ascii=False)
+
+
+@mcp.tool()
+def update_param_dformat(doc_id: int, updates: str) -> str:
+    """Batch update only the dformat_desc field of parameters.
+
+    Args:
+        doc_id: Primary key of document_versions table.
+        updates: JSON string — array of dicts with function_name, param_name, dformat.
+
+    Returns:
+        JSON string with count of updated parameters.
+    """
+    data = json.loads(updates)
+    result = _update_param_dformat(doc_id, data)
     return json.dumps(result, ensure_ascii=False)
 
 

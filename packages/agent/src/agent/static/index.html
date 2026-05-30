@@ -108,11 +108,11 @@
   .panel.active { display: flex; flex-direction: column; }
 
   /* Parameters table */
-  .params-table { width: 100%; border-collapse: collapse; font-size: .85rem; }
-  .params-table th { background: #f3f4f6; padding: 10px 12px; text-align: left; border: 1px solid #e5e7eb; font-weight: 600; color: #374151; white-space: nowrap; position: sticky; top: 0; z-index: 1; }
-  .params-table td { padding: 8px 12px; border: 1px solid #e5e7eb; vertical-align: top; }
+  .params-table { width: 100%; border-collapse: collapse; font-size: .8rem; }
+  .params-table th { background: #f3f4f6; padding: 6px 8px; text-align: left; border: 1px solid #e5e7eb; font-weight: 600; color: #374151; white-space: nowrap; position: sticky; top: 0; z-index: 1; }
+  .params-table td { padding: 5px 8px; border: 1px solid #e5e7eb; vertical-align: top; }
   .params-table tr:hover td { background: #f9fafb; }
-  .params-table .td-desc { max-width: 360px; line-height: 1.6; }
+  .params-table .td-desc { max-width: 280px; line-height: 1.5; }
   .dir-input { background: #dbeafe; color: #1d4ed8; padding: 2px 8px; border-radius: 10px; font-size: .75rem; font-weight: 600; }
   .dir-output { background: #fef3c7; color: #92400e; padding: 2px 8px; border-radius: 10px; font-size: .75rem; font-weight: 600; }
   .opt-yes { background: #dcfce7; color: #166534; padding: 2px 8px; border-radius: 10px; font-size: .75rem; font-weight: 600; }
@@ -652,7 +652,7 @@ async function loadParams() {
 
     contentEl.innerHTML = '<table class="params-table"><thead><tr>' +
       '<th>算子名称</th><th>版本</th><th>函数名</th><th>参数名</th><th>类型</th><th>方向</th><th>可选</th>' +
-      '<th>原文引用</th><th>描述</th><th>数据类型</th><th>格式</th><th>Shape</th>' +
+      '<th>原文引用</th><th>描述</th><th>数据类型</th><th>数据格式</th><th>Shape</th>' +
       '</tr></thead><tbody>' +
       filtered.map((p, idx) => '<tr>' +
         '<td><strong>' + escapeHtml(p.operator_name) + '</strong></td>' +
@@ -663,7 +663,7 @@ async function loadParams() {
         '<td>' + dirBadge(p.direction) + '</td>' +
         '<td>' + optBadge(p.is_optional) + '</td>' +
         '<td class="td-src">' + (p.src_content
-          ? '<textarea readonly rows="3" style="width:100%;border:1px solid #ddd;border-radius:4px;padding:6px;font-family:monospace;font-size:.8rem;background:#fffbeb;resize:vertical">' + escapeHtml(stripMarkup(p.src_content)) + '</textarea>'
+          ? '<textarea readonly rows="2" style="width:100%;border:1px solid #ddd;border-radius:4px;padding:4px;font-family:monospace;font-size:.75rem;background:#fffbeb;resize:vertical">' + escapeHtml(stripMarkup(p.src_content)) + '</textarea>'
           : '-') + '</td>' +
         '<td>' + (p.description
           ? '<a class="desc-link" data-idx="' + idx + '" onclick="openDescModalByIdx(this)">查看描述</a>'

@@ -140,6 +140,13 @@ class MCPClient:
             "updates": json.dumps(updates, ensure_ascii=False),
         })
 
+    async def update_param_dformat(self, doc_id: int, updates: list[dict]) -> dict:
+        """Batch update only the dformat_desc field of parameters."""
+        return await self._call_tool("update_param_dformat", {
+            "doc_id": doc_id,
+            "updates": json.dumps(updates, ensure_ascii=False),
+        })
+
     async def update_param_optional(self, doc_id: int, updates: list[dict]) -> dict:
         """Batch update only the is_optional field of parameters."""
         return await self._call_tool("update_param_optional", {

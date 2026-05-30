@@ -110,6 +110,25 @@ OPTIONAL_EXTRACT_PROMPT = """\
 """
 
 
+DFORMAT_EXTRACT_PROMPT = """\
+你是一个参数数据格式提取专家。从下面参数的 Markdown 表格描述中，提取其数据格式（Data Format）。
+
+规则：
+1. 首先看"数据格式"行，如果有具体值（不是"（无）"、"无"、空），则直接提取
+2. 如果"数据格式"行是"（无）"，再看"描述"和"使用说明"行中是否有数据格式相关信息
+3. 常见数据格式示例：ND, NC, NCL, NCHW, NCDHW, NHWC, NWC, NC1HWC0, NC1HWC0_C4,
+   FRACTAL_Z, FRACTAL_NZ, FRACTAL_ZZ, FRACTAL_ZN_LSTM, NDHWC, NDC1HWC0
+4. 提取的数据格式值必须统一为大写
+5. 如果完全没有数据格式相关信息，dformat设为空字符串
+
+严格按以下JSON格式返回，不要添加任何其他文字：
+{{"param_name": "{param_name}", "dformat": "提取的数据格式或空字符串"}}
+
+参数描述：
+{params_text}
+"""
+
+
 SHAPE_EXTRACT_PROMPT = """\
 你是一个参数shape提取专家。从下面参数的 Markdown 表格描述中，提取其维度(shape)信息。
 

@@ -2,7 +2,7 @@
 
 Provides a deterministic pipeline graph for structured processing:
 InitDoc → [ProductSupport ∥ ParseParams] → SrcContentExtract → ParamDescExtract
-       → [ShapeExtract ∥ DtypeExtract ∥ OptionalExtract] → END
+       → [ShapeExtract ∥ DtypeExtract ∥ DFormatExtract ∥ OptionalExtract] → END
 """
 
 import logging
@@ -10,6 +10,7 @@ import logging
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
+from agent.nodes.dformat_extract import dformat_extract_node
 from agent.nodes.dtype_extract import dtype_extract_node
 from agent.nodes.init_doc import init_doc_node
 from agent.nodes.optional_extract import optional_extract_node
@@ -37,7 +38,7 @@ def create_pipeline_graph() -> CompiledStateGraph:
     Flow:
     InitDoc → [error → END |
                ProductSupport ∥ ParseParams → SrcContentExtract →
-               ParamDescExtract → [ShapeExtract ∥ DtypeExtract ∥ OptionalExtract] → END]
+               ParamDescExtract → [ShapeExtract ∥ DtypeExtract ∥ DFormatExtract ∥ OptionalExtract] → END]
 
     Returns a LangGraph ``CompiledStateGraph`` using ``PipelineState``.
     """
@@ -49,6 +50,7 @@ def create_pipeline_graph() -> CompiledStateGraph:
     graph.add_node("param_desc_extract", param_desc_extract_node)
     graph.add_node("shape_extract", shape_extract_node)
     graph.add_node("dtype_extract", dtype_extract_node)
+    graph.add_node("dformat_extract", dformat_extract_node)
     graph.add_node("optional_extract", optional_extract_node)
     graph.add_edge(START, "init_doc")
     graph.add_conditional_edges("init_doc", _should_continue)
@@ -57,8 +59,10 @@ def create_pipeline_graph() -> CompiledStateGraph:
     graph.add_edge("src_content_extract", "param_desc_extract")
     graph.add_edge("param_desc_extract", "shape_extract")
     graph.add_edge("param_desc_extract", "dtype_extract")
+    graph.add_edge("param_desc_extract", "dformat_extract")
     graph.add_edge("param_desc_extract", "optional_extract")
     graph.add_edge("shape_extract", END)
     graph.add_edge("dtype_extract", END)
+    graph.add_edge("dformat_extract", END)
     graph.add_edge("optional_extract", END)
     return graph.compile(name="operator-pipeline")
