@@ -28,6 +28,7 @@ class ParameterItem(BaseModel):
     param_name: str
     param_type: str = ""
     direction: str = "input"
+    src_content: str = ""
     description: str | None = None
     usage_notes: str | None = None
     data_type: str | None = None

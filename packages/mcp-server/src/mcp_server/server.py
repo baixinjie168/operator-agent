@@ -28,7 +28,13 @@ from mcp_server.tools.document_tools import (
     update_param_dtype as _update_param_dtype,
 )
 from mcp_server.tools.document_tools import (
+    update_param_optional as _update_param_optional,
+)
+from mcp_server.tools.document_tools import (
     update_param_shape as _update_param_shape,
+)
+from mcp_server.tools.document_tools import (
+    update_param_src_content as _update_param_src_content,
 )
 
 mcp = FastMCP("operator-agent-mcp-server")
@@ -260,6 +266,38 @@ def update_param_dtype(doc_id: int, updates: str) -> str:
     """
     data = json.loads(updates)
     result = _update_param_dtype(doc_id, data)
+    return json.dumps(result, ensure_ascii=False)
+
+
+@mcp.tool()
+def update_param_optional(doc_id: int, updates: str) -> str:
+    """Batch update only the is_optional field of parameters.
+
+    Args:
+        doc_id: Primary key of document_versions table.
+        updates: JSON string — array of dicts with function_name, param_name, is_optional.
+
+    Returns:
+        JSON string with count of updated parameters.
+    """
+    data = json.loads(updates)
+    result = _update_param_optional(doc_id, data)
+    return json.dumps(result, ensure_ascii=False)
+
+
+@mcp.tool()
+def update_param_src_content(doc_id: int, updates: str) -> str:
+    """Batch update only the src_content field of parameters.
+
+    Args:
+        doc_id: Primary key of document_versions table.
+        updates: JSON string — array of dicts with function_name, param_name, src_content.
+
+    Returns:
+        JSON string with count of updated parameters.
+    """
+    data = json.loads(updates)
+    result = _update_param_src_content(doc_id, data)
     return json.dumps(result, ensure_ascii=False)
 
 

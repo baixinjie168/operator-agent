@@ -138,12 +138,12 @@
 <body>
 
 <h1>Operator Agent 项目总览</h1>
-<blockquote>生成日期: 2026-05-28 | 更新日期: 2026-05-28 | 基于代码实际状态</blockquote>
+<blockquote>生成日期: 2026-05-28 | 更新日期: 2026-05-30 | 基于代码实际状态</blockquote>
 <hr>
 
 <h2>1. 项目定位</h2>
 <p>基于 <strong>LangGraph + MCP</strong> 的 CANN 算子文档自动化处理系统。将华为昇腾平台的算子 Markdown 文档解析为结构化数据，经 LLM 提取参数、约束、产品支持信息，最终生成 Python 测试用例。</p>
-<p><strong>当前完成度</strong>：约 35%，文档解析、数据库层、基础 Pipeline 可运行。约束提取、人工审核、测试用例生成尚未实现。</p>
+<p><strong>当前完成度</strong>：约 50%，文档解析、数据库层、Pipeline 全部 7 个节点（含 shape/dtype/optional 提取）可运行。约束提取、人工审核、测试用例生成尚未实现。</p>
 <hr>
 
 <h2>2. 技术栈</h2>
@@ -184,12 +184,12 @@
 │   │       ├── __main__.py          # 入口：初始化 DB，调用 mcp.run()
 │   │       ├── db.py                # Database 类 + get_db() 单例，同步 SQLite + WAL
 │   │       ├── schema.sql           # 3 张表：operators, document_versions, parameters
-│   │       ├── server.py            # FastMCP 实例，注册 15 个 tool + 2 个 resource
+│   │       ├── server.py            # FastMCP 实例，注册 16 个 tool + 2 个 resource
 │   │       ├── parsers/
 │   │       │   ├── section_splitter.py  # 基于 markdown-it-py token 的章节分割
 │   │       │   └── document_parser.py   # 章节分类 + 产品支持表解析 + 函数签名提取
 │   │       └── tools/
-│   │           └── document_tools.py    # 14 个 MCP tool 实现函数（纯同步）
+│   │           └── document_tools.py    # 16 个 MCP tool 实现函数（纯同步）
 │   │
 │   └── agent/                       # 应用层（FastAPI + LangGraph Pipeline）
 │       └── src/agent/
@@ -206,30 +206,31 @@
 │           │   ├── parse_params.py      # 节点2b（并行）：LLM 提取函数参数
 │           │   ├── param_desc_extract.py # 节点3：双Section路由 + LLM并发提取参数描述
 │           │   ├── shape_extract.py     # 节点4a（并行）：逐参数LLM提取无条件shape
-│           │   └── dtype_extract.py     # 节点4b（并行）：逐参数LLM提取数据类型  <span class="tag-new">NEW</span>
+│           │   └── dtype_extract.py     # 节点4b（并行）：逐参数LLM提取数据类型
 │           ├── routes/
 │           │   ├── upload.py        # POST /api/v1/upload — 触发 Pipeline
 │           │   └── query.py         # GET /api/v1/operators, /operators/{name}, /parameters
 │           ├── schemas/
 │           │   ├── upload.py        # UploadResponse
-│           │   └── query.py         # OperatorListResponse, OperatorDetailResponse, ParameterListResponse
+│           │   └── query.py         # OperatorSummary, OperatorListResponse, OperatorDetailResponse, ParameterItem, ParameterListResponse
 │           ├── prompts/
-│           │   ├── __init__.py      # 4个Prompt: PRODUCT_SUPPORT, PARAM_DESC, SHAPE, DTYPE
+│           │   ├── __init__.py      # 5个Prompt: PRODUCT_SUPPORT, PARAM_DESC, SHAPE, DTYPE, OPTIONAL
 │           │   └── system.py        # SYSTEM_PROMPT（未使用）
 │           ├── tools/
-│           │   ├── document_tools.py    # @tool 装饰的 LangGraph 工具（节点未使用）
-│           │   └── section_tools.py     # 存根工具
+│           │   ├── document_tools.py    # 5 个 @tool 装饰的 LangGraph 工具（节点未使用）
+│           │   └── section_tools.py     # 2 个存根工具
 │           └── static/
 │               └── index.html       # 单页测试管理 UI（文档解析 + 查询 + 参数表）
 │
-├── operators/                       # ~510 个 CANN 算子 Markdown 源文档
+├── operators/                       # ~736 个 CANN 算子 Markdown 源文档
 │   ├── (root)/, cv/, math/, nn/, trans/
-├── tests/                           # 测试（仅 mcp_server/parsers 有 25 个测试）
+├── tests/                           # 测试（仅 mcp_server/parsers 有 34 个测试）
 ├── docs/                            # 设计文档 + LLM 提取提示指南
 │   ├── design.md                    # 完整设计文档 v0.2
 │   ├── plan.md                      # 实现计划 v1.0
 │   ├── project_summary.html         # 项目总览 (HTML)
 │   ├── dtype_schema.html            # shape/dtype 提取节点详细文档
+│   ├── optional-schema.html           # is_optional 字段 + optional_extract 节点实现方案
 │   └── prompts/                     # 7 个提取阶段的提示模板
 ├── data/operator_agent.db           # SQLite 数据库（运行时生成）
 ├── CLAUDE.md                        # 项目级 Claude Code 指引
@@ -273,36 +274,37 @@
   │  init_doc               （顺序，第1步）                      │
   │    │                                                     │
   │    ├── error ───────────&#9654; END                           │
+  │    ├── unchanged &#9654; END ⚠ (当前代码有bug，仍继续执行)     │
   │    │                                                     │
-  │    &#9660; (status = new/unchanged/updated)                    │
-  │  ┌─────────────────────┐                                 │
-  │  │   PARALLEL FAN-OUT   │                                │
-  │  │   （同时执行两个节点）    │                                │
-  │  ├─────────┬───────────┤                                 │
-  │  &#9660;         &#9660;                                           │
-  │  product   parse                                         │
-  │  _support  _params                                       │
-  │  （并行2a）  （并行2b）                                       │
-  │  │         │                                             │
-  │  └────┬────┘                                             │
-  │       │ （两者都完成后才继续）                                  │
-  │       &#9660;                                                │
-  │  param_desc_extract    （顺序，第3步）                         │
-  │       │                                                  │
-  │       │ 返回 {parameters: [...], error: None} 到 state     │
-  │       │                                                  │
+  │    &#9660; (status = new/updated)                           │
   │  ┌────┴────────────┐                                     │
   │  │ PARALLEL FAN-OUT │                                    │
   │  │ （同时执行两个节点）  │                                    │
   │  ├────────┬─────────┤                                    │
   │  &#9660;        &#9660;                                          │
-  │  shape    dtype                                           │
-  │  _extract _extract  <span class="tag-new">NEW</span>                                    │
-  │  （并行4a） （并行4b）                                       │
+  │  product  parse                                    │
+  │  _support _params                                      │
+  │  （并行2a） （并行2b）                                       │
   │  │        │                                              │
   │  └───┬────┘                                              │
   │      │ （两者都完成后才继续）                                   │
   │      &#9660;                                                 │
+  │  param_desc_extract    （顺序，第3步）                         │
+  │      │                                                  │
+  │      │ 返回 {parameters: [...], error: None} 到 state     │
+  │      │                                                  │
+  │  ┌────┴──────────────┐                                   │
+  │  │ PARALLEL FAN-OUT  │                                   │
+  │  │ （同时执行三个节点）  │                                   │
+  │  ├────────┬─────────┬─────────┤                         │
+  │  &#9660;        &#9660;         &#9660;                               │
+  │  shape    dtype    optional                             │
+  │  _extract _extract _extract                             │
+  │  （并行4a） （并行4b） （并行4c）                              │
+  │  │        │        │                                    │
+  │  └───┬────┼────────┘                                    │
+  │      │ （三者都完成后才继续）                                  │
+  │      &#9660;                                               │
   │     END                                                  │
   └──────────────────────────────────────────────────────────┘
         │
@@ -334,6 +336,7 @@
     if state.get("status") in ("error",):
         return END                    # 终止 Pipeline
     return ["product_support", "parse_params"]  # 扇出到两个并行节点</code></pre>
+<div class="callout">⚠ <code>status=="unchanged"</code> 时仍扇出到并行节点，导致不必要的 MCP 重复调用。应在此处加入 <code>"unchanged"</code> 判断直接终止 Pipeline。</div>
 
 <h4>节点2a: product_support_node（与 2b 并行执行）</h4>
 <p><strong>流程</strong>：MCP 获取文档 → 查找 product_support section → LLM 提取产品支持表 → MCP 保存到 document_versions.product_support。</p>
@@ -361,10 +364,10 @@
   │
   └─ return {"parameters": all_updates, "error": None}  ← 参数写入state传递给下游</div>
 <p><strong>输出状态</strong>：<code>parameters: list[dict]</code>, <code>error</code></p>
-<p><strong>注意</strong>：<code>_extract_one()</code> 中 <code>data_type</code>、<code>data_format</code>、<code>shape</code>、<code>memory_desc</code> 仍硬编码为空字符串。其中 <code>shape</code> 由下游 <code>shape_extract</code> 填充，<code>data_type</code> 由下游 <code>dtype_extract</code> <span class="tag-new">NEW</span> 填充。</p>
+<p><strong>注意</strong>：<code>_extract_one()</code> 中 <code>data_type</code>、<code>data_format</code>、<code>shape</code>、<code>memory_desc</code> 仍硬编码为空字符串。其中 <code>shape</code> 由下游 <code>shape_extract</code> 填充，<code>data_type</code> 由 <code>dtype_extract</code> 填充，<code>is_optional</code> 由 <code>optional_extract</code> 填充。</p>
 
-<h4>节点4a: shape_extract_node（与 4b 并行执行）</h4>
-<p><strong>触发条件</strong>：param_desc_extract_node 完成后，与 dtype_extract_node <strong>同时启动</strong>。</p>
+<h4>节点4a: shape_extract_node（与 4b、4c 并行执行）</h4>
+<p><strong>触发条件</strong>：param_desc_extract_node 完成后，与 dtype_extract_node、optional_extract_node <strong>同时启动</strong>。</p>
 <p><strong>流程</strong>：</p>
 <div class="flow-chart">shape_extract_node(state)
   │
@@ -381,8 +384,8 @@
        └─ 专用工具，SQL 只更新 shape 列</div>
 <p><strong>输出状态</strong>：<code>error</code></p>
 
-<h4>节点4b: dtype_extract_node（与 4a 并行执行）<span class="tag-new">NEW</span></h4>
-<p><strong>触发条件</strong>：param_desc_extract_node 完成后，与 shape_extract_node <strong>同时启动</strong>。</p>
+<h4>节点4b: dtype_extract_node（与 4a、4c 并行执行）</h4>
+<p><strong>触发条件</strong>：param_desc_extract_node 完成后，与 shape_extract_node、optional_extract_node <strong>同时启动</strong>。</p>
 <p><strong>流程</strong>：</p>
 <div class="flow-chart">dtype_extract_node(state)
   │
@@ -398,7 +401,26 @@
   └─ MCP: update_param_dtype(doc_id, dtype_updates)
        └─ 专用工具，SQL 只更新 dtype_desc 列</div>
 <p><strong>输出状态</strong>：<code>error</code></p>
-<p><strong>与 4a 的关系</strong>：两个节点代码结构完全相同，仅 prompt、提取目标列、MCP 工具不同。都从 <code>state.parameters</code> 读取，各自写入独立列（<code>shape</code> vs <code>dtype_desc</code>），互不冲突。</p>
+<p><strong>与 4a 的关系</strong>：三个节点代码结构完全相同，仅 prompt、提取目标列、MCP 工具不同。都从 <code>state.parameters</code> 读取，各自写入独立列（<code>shape</code> / <code>dtype_desc</code> / <code>is_optional</code>），互不冲突。</p>
+
+<h4>节点4c: optional_extract_node（与 4a、4b 并行执行）</h4>
+<p><strong>触发条件</strong>：param_desc_extract_node 完成后，与 shape/dtype <strong>同时启动</strong>。</p>
+<p><strong>流程</strong>：</p>
+<div class="flow-chart">optional_extract_node(state)
+  │
+  ├─ state.get("parameters", [])  ← 从 state 读，不调 MCP 查询
+  ├─ 过滤 description 非空的参数
+  │
+  ├─ 逐参数并发 LLM（asyncio.Semaphore(5)）:
+  │    └─ OPTIONAL_EXTRACT_PROMPT.format(param_name=..., name_has_optional=..., params_text=description)
+  │       └─ 判断描述中是否包含可选关键词
+  │       └─ 参数名含 Optional → 传给 LLM 提示排除干扰
+  │       └─ 返回 JSON: {"param_name": "...", "is_optional": true/false}
+  │       └─ 代码层归一化为 0/1
+  │
+  └─ MCP: update_param_optional(doc_id, optional_updates)
+       └─ 专用工具，SQL 只更新 is_optional 列</div>
+<p><strong>输出状态</strong>：<code>error</code></p>
 
 <h3>5.3 执行时序总结</h3>
 <div class="flow-chart">时间轴 ->
@@ -417,17 +439,17 @@ t4:                                 &#9660;
                            (LLM并发提取描述, 返回parameters到state)
                                      │
 t5:                    ┌────────────┴────────────┐
-                        │ (扇出 — 两个节点同时执行)   │
+                        │ (扇出 — 三个节点同时执行)   │
 t6:                     &#9660;                         &#9660;
-                  shape_extract              dtype_extract  <span class="tag-new">NEW</span>
-               (逐参数LLM提取shape)         (逐参数LLM提取数据类型)
+                  shape_extract         dtype_extract        optional_extract
+               (逐参数LLM提取shape)    (逐参数LLM提取数据类型)   (逐参数LLM判断可选)
                         │                         │
 t7:                     └────────────┬────────────┘
                                      │ (扇入)
 t8:                                 &#9660;
                                    END</div>
 
-<p><strong>MCP 通信模式</strong>：每个节点每次调用 MCP 工具时，<code>MCPClient._call_tool()</code> 会<strong>启动一个新的 MCP Server 子进程</strong>（<code>async with stdio_client</code>），调用完成后进程退出。整个 Pipeline 执行一次约产生 8-10 次子进程启动。参数查询仅在 <code>param_desc_extract</code> 中进行一次，下游节点通过 state 传递数据，避免重复 MCP 查询。</p>
+<p><strong>MCP 通信模式</strong>：每个节点每次调用 MCP 工具时，<code>MCPClient._call_tool()</code> 会<strong>启动一个新的 MCP Server 子进程</strong>（<code>async with stdio_client</code>），调用完成后进程退出。整个 Pipeline 执行一次约产生 9-11 次子进程启动。参数查询仅在 <code>param_desc_extract</code> 中进行一次，下游节点通过 state 传递数据，避免重复 MCP 查询。</p>
 
 <hr>
 
@@ -461,15 +483,20 @@ parameters (
     param_name TEXT NOT NULL,
     param_type TEXT DEFAULT '',
     direction TEXT DEFAULT 'input',  -- 'input' | 'output' (param_desc_extract填充)
+    src_content TEXT,                -- 原始参数描述 Markdown (param_desc_extract填充)
     description TEXT,                -- Markdown 格式 (param_desc_extract填充)
     usage_notes TEXT,                -- 暂无提取
-    dtype_desc TEXT,                 -- 数据类型 (dtype_extract填充) <span class="tag-new">NEW</span>
+    dtype_desc TEXT,                 -- 数据类型 (dtype_extract填充)
     dformat_desc TEXT,               -- 暂无提取
     shape TEXT,                      -- shape (shape_extract填充)
+    is_optional     INTEGER NOT NULL DEFAULT 0,  -- 0/1 (optional_extract填充) (ALTER TABLE 迁移添加)
     memory_desc TEXT,                -- 暂无提取
     created_at TEXT,
     UNIQUE(doc_id, function_name, param_name)
-)</code></pre>
+)
+
+-- 索引
+idx_parameters_doc_id ON parameters(doc_id)</code></pre>
 
 <hr>
 
@@ -479,7 +506,7 @@ parameters (
 <tbody>
 <tr><td>GET</td><td><code>/</code></td><td>返回 static/index.html 测试页面</td><td>静态文件</td></tr>
 <tr><td>GET</td><td><code>/health</code></td><td>健康检查</td><td>直接返回 <code>{"status": "ok"}</code></td></tr>
-<tr><td>POST</td><td><code>/api/v1/upload</code></td><td>上传算子文档，触发完整 Pipeline</td><td>init_doc -> [product_support || parse_params] -> param_desc_extract -> [shape_extract || dtype_extract]</td></tr>
+<tr><td>POST</td><td><code>/api/v1/upload</code></td><td>上传算子文档，触发完整 Pipeline</td><td>init_doc -> [product_support || parse_params] -> param_desc_extract -> [shape_extract || dtype_extract || optional_extract]</td></tr>
 <tr><td>GET</td><td><code>/api/v1/operators</code></td><td>列出所有已注册算子及最新版本</td><td>MCP: query_operators</td></tr>
 <tr><td>GET</td><td><code>/api/v1/operators/{name}</code></td><td>获取算子的完整解析数据</td><td>MCP: get_parsed(name, ?version)</td></tr>
 <tr><td>GET</td><td><code>/api/v1/parameters</code></td><td>查询参数列表（可选 ?operator_name 过滤）</td><td>MCP: query_params(operator_name?)</td></tr>
@@ -491,8 +518,9 @@ parameters (
 <table>
 <thead><tr><th>变量</th><th>默认值</th><th>说明</th></tr></thead>
 <tbody>
+<tr><td><code>PROJECT_NAME</code></td><td><code>operator-agent</code></td><td>项目名称</td></tr>
 <tr><td><code>LLM_PROVIDER</code></td><td><code>zai</code></td><td>LLM 提供商：<code>zai</code> 或 <code>deepseek</code></td></tr>
-<tr><td><code>LLM_TEMPERATURE</code></td><td><code>0.7</code></td><td>LLM 温度（全局默认，节点内覆盖为 0.1）</td></tr>
+<tr><td><code>LLM_TEMPERATURE</code></td><td><code>0.7</code></td><td>LLM 温度（0.0-2.0，节点内覆盖为 0.1）</td></tr>
 <tr><td><code>ZAI_API_KEY</code></td><td>(空)</td><td>Z.AI GLM API Key</td></tr>
 <tr><td><code>ZAI_BASE_URL</code></td><td><code>https://api.z.ai/api/paas/v4/</code></td><td>Z.AI 端点</td></tr>
 <tr><td><code>ZAI_MODEL</code></td><td><code>glm-5.1</code></td><td>Z.AI 模型名</td></tr>
@@ -501,6 +529,8 @@ parameters (
 <tr><td><code>DEEPSEEK_MODEL</code></td><td><code>deepseek-v4-flash</code></td><td>DeepSeek 模型名</td></tr>
 <tr><td><code>DATABASE_PATH</code></td><td><code>data/operator_agent.db</code></td><td>SQLite 数据库路径</td></tr>
 <tr><td><code>OPERATORS_DIR</code></td><td><code>operators</code></td><td>算子文档目录</td></tr>
+<tr><td><code>MCP_SERVER_COMMAND</code></td><td><code>{sys.executable} -m mcp_server</code></td><td>MCP Server 启动命令</td></tr>
+<tr><td><code>STATIC_DIR</code></td><td>(自动计算)</td><td>前端静态文件路径</td></tr>
 <tr><td><code>LOG_LEVEL</code></td><td><code>INFO</code></td><td>日志级别</td></tr>
 <tr><td><code>DEBUG</code></td><td><code>false</code></td><td>调试模式</td></tr>
 </tbody>
@@ -518,8 +548,9 @@ parameters (
 <h3>代码质量</h3>
 <ol start="3">
 <li><strong><code>_parse_json_response</code> 重复</strong>：<code>parse_params.py</code> 和 <code>product_support.py</code> 中相同函数各一份</li>
-<li><strong><code>param_desc_extract_node</code> 字段填充不全</strong>：<code>_extract_one()</code> 中 <code>usage_notes</code>、<code>data_format</code>、<code>memory_desc</code> 仍硬编码为空字符串，暂无 LLM 提取逻辑</li>
-<li><strong>两个并行节点 Semaphore 独立</strong>：shape_extract 和 dtype_extract 各自 Semaphore(5)，并行时实际 LLM 调用峰值可达 10，可能触发 API 限流</li>
+<li><strong><code>param_desc_extract_node</code> 字段填充不全</strong>：<code>_extract_one()</code> 中 <code>usage_notes</code>、<code>data_format</code>、<code>memory_desc</code> 仍硬编码为空字符串；<code>parse_params.py</code> 使用内联 prompt 而非从 <code>prompts/__init__.py</code> 导入</li>
+<li><strong>三个并行节点 Semaphore 独立</strong>：shape_extract、dtype_extract、optional_extract 各自 Semaphore(5)，并行时实际 LLM 调用峰值可达 15，可能触发 API 限流</li>
+<li><strong><code>_should_continue</code> 路由缺陷</strong>：<code>_should_continue</code> 仅检查 <code>status=="error"</code> 终止 Pipeline，<code>status=="unchanged"</code> 时仍扇出到 product_support + parse_params，导致不必要的 MCP 调用。应改为 <code>status in ("error", "unchanged")</code> 或 <code>unchanged</code> 时直接 END</li>
 </ol>
 
 <h3>安全</h3>
@@ -543,6 +574,7 @@ parameters (
 <h3>前端</h3>
 <ol start="12">
 <li><del>字段名不匹配</del> &check; 已修复 — MCP 层 dict key 从 <code>dtype_desc</code>/<code>dformat_desc</code> 重命名为 <code>data_type</code>/<code>data_format</code></li>
+<li><strong><code>nodes/__init__.py</code> 未同步</strong>：只导出 3 个旧节点（init_doc, parse_params, product_support），未包含后续新增的 4 个节点（param_desc_extract, shape_extract, dtype_extract, optional_extract）。</li>
 <li><strong>Markdown 渲染与双过滤器</strong>：已集成 marked.js CDN，"描述"列渲染 Markdown 格式。新增函数名下拉过滤器，与算子过滤器联动，客户端过滤。</li>
 </ol>
 <hr>
@@ -555,8 +587,12 @@ parameters (
 <tr><td>实现计划</td><td><code>docs/plan.md</code></td><td>分阶段实现计划 v1.0</td></tr>
 <tr><td>文档结构</td><td><code>docs/operator_doc_struct.md</code></td><td>CANN 算子文档结构分析</td></tr>
 <tr><td>提取指南</td><td><code>docs/prompts/*.md</code></td><td>各阶段 LLM 提取提示模板（7 个）</td></tr>
-<tr><td>项目总览</td><td><code>docs/project_summary.html</code></td><td>本文件 — 项目全貌</td></tr>
+<tr><td>自提取提示</td><td><code>docs/self-prompts/extract.md</code></td><td>自动提取过程提示模板</td></tr>
+<tr><td>项目总览 (HTML)</td><td><code>docs/project_summary.html</code></td><td>本文件 — 项目全貌</td></tr>
+<tr><td>项目总览 (MD)</td><td><code>docs/project_summary.md</code></td><td>项目全览 Markdown 版本</td></tr>
 <tr><td>提取节点详解</td><td><code>docs/dtype_schema.html</code></td><td>shape_extract + dtype_extract 节点实现文档</td></tr>
+<tr><td>dtype 描述详解</td><td><code>docs/dtype_desc_schema.html</code></td><td>dtype_desc 字段详细文档</td></tr>
+<tr><td>可选性判断</td><td><code>docs/optional-schema.html</code></td><td>is_optional 字段 + optional_extract 节点实现方案</td></tr>
 </tbody>
 </table>
 

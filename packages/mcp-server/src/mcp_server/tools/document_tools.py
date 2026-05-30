@@ -246,14 +246,15 @@ def save_parameters(doc_id: int, parameters: list[dict]) -> dict:
         conn.execute(
             "INSERT OR REPLACE INTO parameters "
             "(doc_id, function_name, param_name, param_type, "
-            "direction, description, usage_notes, dtype_desc, dformat_desc, shape, memory_desc) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "direction, src_content, description, usage_notes, dtype_desc, dformat_desc, shape, memory_desc) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 doc_id,
                 param.get("function_name", ""),
                 param.get("param_name", ""),
                 param.get("param_type", ""),
                 param.get("direction", "input"),
+                param.get("src_content", ""),
                 param.get("description", ""),
                 param.get("usage_notes", ""),
                 param.get("data_type", ""),
@@ -280,7 +281,7 @@ def query_params_by_doc_id(doc_id: int) -> list[dict]:
     conn = db.conn
     rows = conn.execute(
         "SELECT id, function_name, param_name, param_type, direction, "
-        "description, usage_notes, dtype_desc, dformat_desc, shape, memory_desc "
+        "src_content, description, usage_notes, dtype_desc, dformat_desc, shape, memory_desc, is_optional "
         "FROM parameters WHERE doc_id = ? ORDER BY function_name, direction, param_name",
         (doc_id,),
     ).fetchall()
@@ -291,12 +292,14 @@ def query_params_by_doc_id(doc_id: int) -> list[dict]:
             "param_name": r[2],
             "param_type": r[3],
             "direction": r[4],
-            "description": r[5],
-            "usage_notes": r[6],
-            "data_type": r[7],
-            "data_format": r[8],
-            "shape": r[9],
-            "memory_desc": r[10],
+            "src_content": r[5],
+            "description": r[6],
+            "usage_notes": r[7],
+            "data_type": r[8],
+            "data_format": r[9],
+            "shape": r[10],
+            "memory_desc": r[11],
+            "is_optional": r[12],
         }
         for r in rows
     ]
@@ -387,6 +390,54 @@ def update_param_dtype(doc_id: int, updates: list[dict]) -> dict:
     return {"updated": count}
 
 
+def update_param_optional(doc_id: int, updates: list[dict]) -> dict:
+    """Batch update only the is_optional field of parameters.
+
+    Args:
+        doc_id: Primary key of document_versions table.
+        updates: List of dicts with keys: function_name, param_name, is_optional.
+
+    Returns:
+        dict with count of updated parameters.
+    """
+    db = get_db()
+    conn = db.conn
+    count = 0
+    for u in updates:
+        cursor = conn.execute(
+            "UPDATE parameters SET is_optional = ? "
+            "WHERE doc_id = ? AND function_name = ? AND param_name = ?",
+            (u.get("is_optional", 0), doc_id, u.get("function_name", ""), u.get("param_name", "")),
+        )
+        count += cursor.rowcount
+    conn.commit()
+    return {"updated": count}
+
+
+def update_param_src_content(doc_id: int, updates: list[dict]) -> dict:
+    """Batch update only the src_content field of parameters.
+
+    Args:
+        doc_id: Primary key of document_versions table.
+        updates: List of dicts with keys: function_name, param_name, src_content.
+
+    Returns:
+        dict with count of updated parameters.
+    """
+    db = get_db()
+    conn = db.conn
+    count = 0
+    for u in updates:
+        cursor = conn.execute(
+            "UPDATE parameters SET src_content = ? "
+            "WHERE doc_id = ? AND function_name = ? AND param_name = ?",
+            (u.get("src_content", ""), doc_id, u.get("function_name", ""), u.get("param_name", "")),
+        )
+        count += cursor.rowcount
+    conn.commit()
+    return {"updated": count}
+
+
 def query_parameters(operator_name: str | None = None) -> list[dict]:
     """Query parameters from the database, optionally filtered by operator name.
 
@@ -402,8 +453,8 @@ def query_parameters(operator_name: str | None = None) -> list[dict]:
     if operator_name:
         rows = conn.execute(
             "SELECT p.id, o.name, dv.version, p.function_name, p.param_name, "
-            "p.param_type, p.direction, p.description, p.usage_notes, "
-            "p.dtype_desc, p.dformat_desc, p.shape, p.memory_desc "
+            "p.param_type, p.direction, p.src_content, p.description, p.usage_notes, "
+            "p.dtype_desc, p.dformat_desc, p.shape, p.memory_desc, p.is_optional "
             "FROM parameters p "
             "JOIN document_versions dv ON p.doc_id = dv.id "
             "JOIN operators o ON dv.operator_id = o.id "
@@ -413,8 +464,8 @@ def query_parameters(operator_name: str | None = None) -> list[dict]:
     else:
         rows = conn.execute(
             "SELECT p.id, o.name, dv.version, p.function_name, p.param_name, "
-            "p.param_type, p.direction, p.description, p.usage_notes, "
-            "p.dtype_desc, p.dformat_desc, p.shape, p.memory_desc "
+            "p.param_type, p.direction, p.src_content, p.description, p.usage_notes, "
+            "p.dtype_desc, p.dformat_desc, p.shape, p.memory_desc, p.is_optional "
             "FROM parameters p "
             "JOIN document_versions dv ON p.doc_id = dv.id "
             "JOIN operators o ON dv.operator_id = o.id "
@@ -430,12 +481,14 @@ def query_parameters(operator_name: str | None = None) -> list[dict]:
             "param_name": r[4],
             "param_type": r[5],
             "direction": r[6],
-            "description": r[7],
-            "usage_notes": r[8],
-            "data_type": r[9],
-            "data_format": r[10],
-            "shape": r[11],
-            "memory_desc": r[12],
+            "src_content": r[7],
+            "description": r[8],
+            "usage_notes": r[9],
+            "data_type": r[10],
+            "data_format": r[11],
+            "shape": r[12],
+            "memory_desc": r[13],
+            "is_optional": r[14],
         }
         for r in rows
     ]

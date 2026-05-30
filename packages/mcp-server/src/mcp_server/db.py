@@ -31,6 +31,20 @@ class Database:
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA foreign_keys=ON")
         self._conn.executescript(_load_schema())
+        # 迁移：v2 — 新增 is_optional 列
+        try:
+            self._conn.execute(
+                "ALTER TABLE parameters ADD COLUMN is_optional INTEGER NOT NULL DEFAULT 0"
+            )
+        except sqlite3.OperationalError:
+            pass
+        # 迁移：v3 — 新增 src_content 列
+        try:
+            self._conn.execute(
+                "ALTER TABLE parameters ADD COLUMN src_content TEXT"
+            )
+        except sqlite3.OperationalError:
+            pass
         self._conn.commit()
 
     @property

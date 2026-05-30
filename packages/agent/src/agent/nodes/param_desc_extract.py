@@ -1,4 +1,4 @@
-"""ParamDescExtract node: extract parameter descriptions via LLM and update DB."""
+"""ParamDescExtract node: extract parameter markdown descriptions from src_content via LLM."""
 
 import asyncio
 import logging
@@ -34,19 +34,15 @@ def _parse_direction(desc: str) -> str:
 
 
 async def param_desc_extract_node(state: PipelineState) -> dict[str, Any]:
-    """Extract detailed descriptions for each parameter via LLM and update DB.
+    """Extract structured markdown descriptions from src_content via LLM.
 
-    Flow:
-    1. Query parameters by doc_id via MCP
-    2. Fetch both params_get_workspace and params_execute section content
-    3. Route GetWorkspaceSize parameters → params_get_workspace content,
-       Execute parameters → params_execute content
-    4. If the required section is missing, skip those parameters with a warning
-    5. Call LLM concurrently (limit 5) for each parameter to extract description
-    6. Batch update descriptions via MCP
+    Reads parameters (with src_content) from state, populated by the
+    upstream src_content_extract_node. For each parameter with non-empty
+    src_content, calls LLM to produce a structured markdown table.
     """
     doc_id = state.get("doc_id", 0)
     operator_name = state.get("operator_name", "")
+    parameters = state.get("parameters", [])
 
     logger.info("ParamDescExtract: received state doc_id=%s for %s", doc_id, operator_name)
 
@@ -54,34 +50,26 @@ async def param_desc_extract_node(state: PipelineState) -> dict[str, Any]:
         logger.warning("ParamDescExtract: no doc_id in state, skipping")
         return {"error": None}
 
+    with_src = [p for p in parameters if p.get("src_content")]
+    if not with_src:
+        logger.info("ParamDescExtract: no parameters with src_content for doc_id=%s, skipping", doc_id)
+        return {"error": None}
+
     try:
-        params = await _mcp_client.query_params_by_doc_id(doc_id)
-        if not params:
-            logger.info("ParamDescExtract: no parameters for doc_id=%s, skipping", doc_id)
-            return {"error": None}
-
-        # Get both section types: GetWorkspaceSize and Execute
-        ws_section = await _mcp_client.get_section(doc_id, "params_get_workspace")
-        ws_content = ws_section.get("content", "") if ws_section else ""
-
-        exe_section = await _mcp_client.get_section(doc_id, "params_execute")
-        exe_content = exe_section.get("content", "") if exe_section else ""
-
-        # Split parameters by function type
-        ws_params = [p for p in params if p.get("function_name", "").endswith("GetWorkspaceSize")]
-        exe_params = [p for p in params if not p.get("function_name", "").endswith("GetWorkspaceSize")]
-
         llm = _create_llm()
         sem = asyncio.Semaphore(_CONCURRENCY_LIMIT)
 
-        async def _extract_one(param: dict, content: str) -> dict:
+        async def _extract_one(param: dict) -> dict | None:
             async with sem:
-                desc = await _extract_desc(llm, param["param_name"], content)
+                desc = await _extract_desc(llm, param["param_name"], param["src_content"])
+                if not desc:
+                    return None
                 direction = _parse_direction(desc)
                 return {
                     "function_name": param["function_name"],
                     "param_name": param["param_name"],
                     "direction": direction,
+                    "src_content": param.get("src_content", ""),
                     "description": desc,
                     "usage_notes": "",
                     "data_type": "",
@@ -90,38 +78,15 @@ async def param_desc_extract_node(state: PipelineState) -> dict[str, Any]:
                     "memory_desc": "",
                 }
 
-        all_updates: list[dict] = []
-
-        # Process GetWorkspaceSize function parameters
-        if ws_params:
-            if ws_content:
-                updates = await asyncio.gather(*[_extract_one(p, ws_content) for p in ws_params])
-                all_updates.extend(u for u in updates if u["description"])
-            else:
-                logger.warning(
-                    "ParamDescExtract: params_get_workspace section not found for doc_id=%s, "
-                    "skipping %d GetWorkspaceSize parameters",
-                    doc_id, len(ws_params),
-                )
-
-        # Process Execute function parameters
-        if exe_params:
-            if exe_content:
-                updates = await asyncio.gather(*[_extract_one(p, exe_content) for p in exe_params])
-                all_updates.extend(u for u in updates if u["description"])
-            else:
-                logger.warning(
-                    "ParamDescExtract: params_execute section not found for doc_id=%s, "
-                    "skipping %d Execute parameters",
-                    doc_id, len(exe_params),
-                )
+        results = await asyncio.gather(*[_extract_one(p) for p in with_src])
+        all_updates = [r for r in results if r is not None and r.get("description")]
 
         if all_updates:
             result = await _mcp_client.update_param_descriptions(doc_id, all_updates)
             logger.info(
                 "ParamDescExtract: updated %d/%d parameters for doc_id=%s",
                 result.get("updated", 0),
-                len(params),
+                len(with_src),
                 doc_id,
             )
         else:
@@ -143,9 +108,9 @@ def _create_llm() -> ChatOpenAI:
     )
 
 
-async def _extract_desc(llm: ChatOpenAI, param_name: str, content: str) -> str:
-    """Call LLM to extract description for a single parameter."""
-    prompt = PARAM_DESC_EXTRACT_PROMPT.format(param_name=param_name, content=content)
+async def _extract_desc(llm: ChatOpenAI, param_name: str, src_content: str) -> str:
+    """Call LLM to extract markdown table from the parameter's source content."""
+    prompt = PARAM_DESC_EXTRACT_PROMPT.format(param_name=param_name, src_content=src_content)
     response = await llm.ainvoke(prompt)
     text = response.content if hasattr(response, "content") else str(response)
     return text.strip()

@@ -1,7 +1,8 @@
 """LangGraph pipeline graph for operator document processing.
 
 Provides a deterministic pipeline graph for structured processing:
-InitDoc → [ProductSupport ∥ ParseParams] → ParamDescExtract → [ShapeExtract ∥ DtypeExtract] → END
+InitDoc → [ProductSupport ∥ ParseParams] → SrcContentExtract → ParamDescExtract
+       → [ShapeExtract ∥ DtypeExtract ∥ OptionalExtract] → END
 """
 
 import logging
@@ -9,12 +10,14 @@ import logging
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
+from agent.nodes.dtype_extract import dtype_extract_node
 from agent.nodes.init_doc import init_doc_node
+from agent.nodes.optional_extract import optional_extract_node
 from agent.nodes.param_desc_extract import param_desc_extract_node
 from agent.nodes.parse_params import parse_params_node
 from agent.nodes.product_support import product_support_node
-from agent.nodes.dtype_extract import dtype_extract_node
 from agent.nodes.shape_extract import shape_extract_node
+from agent.nodes.src_content_extract import src_content_extract_node
 from agent.nodes.state import PipelineState
 
 logger = logging.getLogger(__name__)
@@ -33,8 +36,8 @@ def create_pipeline_graph() -> CompiledStateGraph:
 
     Flow:
     InitDoc → [error → END |
-               ProductSupport ∥ ParseParams → ParamDescExtract →
-               [ShapeExtract ∥ DtypeExtract] → END]
+               ProductSupport ∥ ParseParams → SrcContentExtract →
+               ParamDescExtract → [ShapeExtract ∥ DtypeExtract ∥ OptionalExtract] → END]
 
     Returns a LangGraph ``CompiledStateGraph`` using ``PipelineState``.
     """
@@ -42,15 +45,20 @@ def create_pipeline_graph() -> CompiledStateGraph:
     graph.add_node("init_doc", init_doc_node)
     graph.add_node("product_support", product_support_node)
     graph.add_node("parse_params", parse_params_node)
+    graph.add_node("src_content_extract", src_content_extract_node)
     graph.add_node("param_desc_extract", param_desc_extract_node)
     graph.add_node("shape_extract", shape_extract_node)
     graph.add_node("dtype_extract", dtype_extract_node)
+    graph.add_node("optional_extract", optional_extract_node)
     graph.add_edge(START, "init_doc")
     graph.add_conditional_edges("init_doc", _should_continue)
-    graph.add_edge("product_support", "param_desc_extract")
-    graph.add_edge("parse_params", "param_desc_extract")
+    graph.add_edge("product_support", "src_content_extract")
+    graph.add_edge("parse_params", "src_content_extract")
+    graph.add_edge("src_content_extract", "param_desc_extract")
     graph.add_edge("param_desc_extract", "shape_extract")
     graph.add_edge("param_desc_extract", "dtype_extract")
+    graph.add_edge("param_desc_extract", "optional_extract")
     graph.add_edge("shape_extract", END)
     graph.add_edge("dtype_extract", END)
+    graph.add_edge("optional_extract", END)
     return graph.compile(name="operator-pipeline")

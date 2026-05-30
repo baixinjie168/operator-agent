@@ -139,3 +139,17 @@ class MCPClient:
             "doc_id": doc_id,
             "updates": json.dumps(updates, ensure_ascii=False),
         })
+
+    async def update_param_optional(self, doc_id: int, updates: list[dict]) -> dict:
+        """Batch update only the is_optional field of parameters."""
+        return await self._call_tool("update_param_optional", {
+            "doc_id": doc_id,
+            "updates": json.dumps(updates, ensure_ascii=False),
+        })
+
+    async def update_param_src_content(self, doc_id: int, updates: list[dict]) -> dict:
+        """Batch update only the src_content field of parameters."""
+        return await self._call_tool("update_param_src_content", {
+            "doc_id": doc_id,
+            "updates": json.dumps(updates, ensure_ascii=False),
+        })

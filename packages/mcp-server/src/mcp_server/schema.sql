@@ -24,12 +24,14 @@ CREATE TABLE IF NOT EXISTS parameters (
     param_name      TEXT NOT NULL,
     param_type      TEXT NOT NULL DEFAULT '',
     direction       TEXT NOT NULL DEFAULT 'input',
+    src_content      TEXT,
     description     TEXT,
     usage_notes     TEXT,
     dtype_desc      TEXT,
     dformat_desc    TEXT,
     shape           TEXT,
     memory_desc     TEXT,
+    is_optional     INTEGER NOT NULL DEFAULT 0,
     created_at      TEXT DEFAULT (datetime('now')),
     UNIQUE(doc_id, function_name, param_name)
 );

@@ -47,6 +47,7 @@ class ParsedParameter(BaseModel):
     param_name: str
     param_type: str = ""
     direction: ParamDirection = ParamDirection.INPUT
+    src_content: str = ""
     description: str = ""
     usage_notes: str = ""
     data_type: str = ""
