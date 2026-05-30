@@ -211,17 +211,18 @@ def list_all_operators() -> list[dict]:
     conn = db.conn
 
     rows = conn.execute(
-        "SELECT o.name, o.source_url, o.created_at, "
+        "SELECT o.id, o.name, o.source_url, o.created_at, "
         "  (SELECT MAX(dv.version) FROM document_versions dv WHERE dv.operator_id = o.id) AS latest_version "
         "FROM operators o ORDER BY o.name"
     ).fetchall()
 
     return [
         {
-            "name": r[0],
-            "source_url": r[1],
-            "created_at": r[2],
-            "latest_version": r[3],
+            "id": r[0],
+            "name": r[1],
+            "source_url": r[2],
+            "created_at": r[3],
+            "latest_version": r[4],
         }
         for r in rows
     ]

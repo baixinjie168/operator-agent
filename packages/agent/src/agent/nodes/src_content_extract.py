@@ -10,6 +10,8 @@ from agent.core.config import settings
 from agent.mcp_client import MCPClient
 from agent.nodes.state import PipelineState
 from agent.prompts import SRC_CONTENT_EXTRACT_PROMPT
+from agent.runtime.context import get_context
+from agent.runtime.events import EventType, SpanStatus, SpanType
 
 logger = logging.getLogger(__name__)
 
@@ -17,28 +19,17 @@ _mcp_client = MCPClient()
 
 _CONCURRENCY_LIMIT = 5
 
+_STEP_NAME = "src_content_extract"
+_STEP_LABEL = "源文本提取"
+
 
 def _parse_src_content(raw: str) -> str:
-    """Clean up LLM source content output.
-
-    Returns empty string if the content is essentially empty or "(无)".
-    """
     if not raw or raw.strip() in ("（无）", "(无)", "无"):
         return ""
     return raw.strip()
 
 
 async def src_content_extract_node(state: PipelineState) -> dict[str, Any]:
-    """Extract original source text fragments for each parameter via LLM.
-
-    Flow:
-    1. Query parameters by doc_id via MCP
-    2. Fetch both params_get_workspace and params_execute section content
-    3. Route GetWorkspaceSize params → ws_content, Execute params → exe_content
-    4. Call LLM concurrently (limit 5) for each parameter to extract source text
-    5. Batch update src_content via MCP
-    6. Return parameters with src_content to state
-    """
     doc_id = state.get("doc_id", 0)
     operator_name = state.get("operator_name", "")
 
@@ -65,20 +56,91 @@ async def src_content_extract_node(state: PipelineState) -> dict[str, Any]:
 
         llm = _create_llm()
         sem = asyncio.Semaphore(_CONCURRENCY_LIMIT)
+        ctx = get_context()
 
         async def _extract_one(param: dict, content: str) -> dict | None:
-            async with sem:
-                raw = await _extract_src(llm, param["param_name"], content)
+            param_name = param["param_name"]
+            function_name = param.get("function_name", "")
+            parent_span_id = ctx.current_span_id if ctx else None
+            param_span = None
+
+            if ctx and ctx.manager:
+                param_span = ctx.manager.open_span(
+                    run_id=ctx.run_id,
+                    parent_span_id=parent_span_id,
+                    span_type=SpanType.NODE,
+                    name=f"{_STEP_NAME}:{function_name}:{param_name}",
+                )
+                ctx.manager.emit(EventType.PARAM_STEP_START, ctx.run_id, param_span, {
+                    "agent_id": "doc",
+                    "node_id": _STEP_NAME,
+                    "param_name": param_name,
+                    "function_name": function_name,
+                    "step_name": _STEP_NAME,
+                    "message": f"参数 {param_name} {_STEP_LABEL} 开始...",
+                })
+
+            try:
+                async with sem:
+                    raw = await _extract_src(llm, param_name, content)
                 src_content = _parse_src_content(raw)
+
+                if ctx and ctx.manager and param_span:
+                    ctx.manager.close_span(ctx.run_id, param_span, SpanStatus.SUCCESS)
+                    ctx.manager.emit(EventType.PARAM_STEP_COMPLETE, ctx.run_id, param_span, {
+                        "agent_id": "doc",
+                        "node_id": _STEP_NAME,
+                        "param_name": param_name,
+                        "function_name": function_name,
+                        "step_name": _STEP_NAME,
+                        "message": f"参数 {param_name} {_STEP_LABEL} 完成",
+                        "result_preview": src_content[:200] if src_content else "",
+                        "has_result": bool(src_content),
+                    })
+
                 if not src_content:
                     return None
                 return {
-                    "function_name": param["function_name"],
-                    "param_name": param["param_name"],
+                    "function_name": function_name,
+                    "param_name": param_name,
                     "src_content": src_content,
                 }
+            except Exception as exc:
+                if ctx and ctx.manager and param_span:
+                    ctx.manager.close_span(ctx.run_id, param_span, SpanStatus.ERROR, error=str(exc))
+                    ctx.manager.emit(EventType.PARAM_STEP_ERROR, ctx.run_id, param_span, {
+                        "agent_id": "doc",
+                        "node_id": _STEP_NAME,
+                        "param_name": param_name,
+                        "function_name": function_name,
+                        "step_name": _STEP_NAME,
+                        "message": f"参数 {param_name} {_STEP_LABEL} 失败: {exc}",
+                        "error": str(exc),
+                    })
+                return None
 
         all_updates: list[dict] = []
+
+        def _emit_skip(param: dict, reason: str) -> None:
+            param_name = param["param_name"]
+            function_name = param.get("function_name", "")
+            if ctx and ctx.manager:
+                skip_span = ctx.manager.open_span(
+                    run_id=ctx.run_id,
+                    parent_span_id=ctx.current_span_id if ctx else None,
+                    span_type=SpanType.NODE,
+                    name=f"{_STEP_NAME}:{function_name}:{param_name}",
+                )
+                ctx.manager.close_span(ctx.run_id, skip_span, SpanStatus.SUCCESS)
+                ctx.manager.emit(EventType.PARAM_STEP_ERROR, ctx.run_id, skip_span, {
+                    "agent_id": "doc",
+                    "node_id": _STEP_NAME,
+                    "param_name": param_name,
+                    "function_name": function_name,
+                    "step_name": _STEP_NAME,
+                    "message": f"参数 {param_name} {_STEP_LABEL} 已跳过: {reason}",
+                    "error": reason,
+                })
 
         if ws_params:
             if ws_content:
@@ -91,6 +153,8 @@ async def src_content_extract_node(state: PipelineState) -> dict[str, Any]:
                     doc_id,
                     len(ws_params),
                 )
+                for p in ws_params:
+                    _emit_skip(p, "文档中未找到 GetWorkspaceSize 参数说明段落")
 
         if exe_params:
             if exe_content:
@@ -102,6 +166,8 @@ async def src_content_extract_node(state: PipelineState) -> dict[str, Any]:
                     doc_id,
                     len(exe_params),
                 )
+                for p in exe_params:
+                    _emit_skip(p, "文档中未找到执行函数参数说明段落")
 
         if all_updates:
             result = await _mcp_client.update_param_src_content(doc_id, all_updates)

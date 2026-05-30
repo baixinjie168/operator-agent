@@ -11,6 +11,8 @@ from agent.core.config import settings
 from agent.mcp_client import MCPClient
 from agent.nodes.state import PipelineState
 from agent.prompts import PARAM_DESC_EXTRACT_PROMPT
+from agent.runtime.context import get_context
+from agent.runtime.events import EventType, SpanStatus, SpanType
 
 logger = logging.getLogger(__name__)
 
@@ -18,15 +20,13 @@ _mcp_client = MCPClient()
 
 _CONCURRENCY_LIMIT = 5
 
+_STEP_NAME = "param_desc_extract"
+_STEP_LABEL = "参数描述提取"
+
 _DIRECTION_RE = re.compile(r"\|\s*输入\s*/\s*输出\s*\|\s*(输入|输出)\s*\|")
 
 
 def _parse_direction(desc: str) -> str:
-    """Extract direction from the LLM-generated markdown table.
-
-    Matches rows like ``| 输入/输出 | 输入 |`` or ``| 输入/输出 | 输出 |``
-    and maps them to ``"input"`` / ``"output"``.
-    """
     m = _DIRECTION_RE.search(desc)
     if not m:
         return ""
@@ -34,12 +34,6 @@ def _parse_direction(desc: str) -> str:
 
 
 async def param_desc_extract_node(state: PipelineState) -> dict[str, Any]:
-    """Extract structured markdown descriptions from src_content via LLM.
-
-    Reads parameters (with src_content) from state, populated by the
-    upstream src_content_extract_node. For each parameter with non-empty
-    src_content, calls LLM to produce a structured markdown table.
-    """
     doc_id = state.get("doc_id", 0)
     operator_name = state.get("operator_name", "")
     parameters = state.get("parameters", [])
@@ -51,6 +45,30 @@ async def param_desc_extract_node(state: PipelineState) -> dict[str, Any]:
         return {"error": None}
 
     with_src = [p for p in parameters if p.get("src_content")]
+    without_src = [p for p in parameters if not p.get("src_content")]
+
+    ctx = get_context()
+    if without_src and ctx and ctx.manager:
+        for p in without_src:
+            pn = p.get("param_name", "")
+            fn = p.get("function_name", "")
+            skip_span = ctx.manager.open_span(
+                run_id=ctx.run_id,
+                parent_span_id=ctx.current_span_id,
+                span_type=SpanType.NODE,
+                name=f"{_STEP_NAME}:{fn}:{pn}",
+            )
+            ctx.manager.close_span(ctx.run_id, skip_span, SpanStatus.SUCCESS)
+            ctx.manager.emit(EventType.PARAM_STEP_ERROR, ctx.run_id, skip_span, {
+                "agent_id": "doc",
+                "node_id": _STEP_NAME,
+                "param_name": pn,
+                "function_name": fn,
+                "step_name": _STEP_NAME,
+                "message": f"参数 {pn} {_STEP_LABEL} 已跳过: 无源文本内容",
+                "error": "无源文本内容",
+            })
+
     if not with_src:
         logger.info("ParamDescExtract: no parameters with src_content for doc_id=%s, skipping", doc_id)
         return {"error": None}
@@ -58,16 +76,66 @@ async def param_desc_extract_node(state: PipelineState) -> dict[str, Any]:
     try:
         llm = _create_llm()
         sem = asyncio.Semaphore(_CONCURRENCY_LIMIT)
+        ctx = get_context()
 
         async def _extract_one(param: dict) -> dict | None:
-            async with sem:
-                desc = await _extract_desc(llm, param["param_name"], param["src_content"])
+            param_name = param["param_name"]
+            function_name = param.get("function_name", "")
+            parent_span_id = ctx.current_span_id if ctx else None
+            param_span = None
+
+            if ctx and ctx.manager:
+                param_span = ctx.manager.open_span(
+                    run_id=ctx.run_id,
+                    parent_span_id=parent_span_id,
+                    span_type=SpanType.NODE,
+                    name=f"{_STEP_NAME}:{function_name}:{param_name}",
+                )
+                ctx.manager.emit(EventType.PARAM_STEP_START, ctx.run_id, param_span, {
+                    "agent_id": "doc",
+                    "node_id": _STEP_NAME,
+                    "param_name": param_name,
+                    "function_name": function_name,
+                    "step_name": _STEP_NAME,
+                    "message": f"参数 {param_name} {_STEP_LABEL} 开始...",
+                })
+
+            try:
+                async with sem:
+                    desc = await _extract_desc(llm, param_name, param["src_content"])
                 if not desc:
+                    if ctx and ctx.manager and param_span:
+                        ctx.manager.close_span(ctx.run_id, param_span, SpanStatus.SUCCESS)
+                        ctx.manager.emit(EventType.PARAM_STEP_COMPLETE, ctx.run_id, param_span, {
+                            "agent_id": "doc",
+                            "node_id": _STEP_NAME,
+                            "param_name": param_name,
+                            "function_name": function_name,
+                            "step_name": _STEP_NAME,
+                            "message": f"参数 {param_name} {_STEP_LABEL} 无结果",
+                            "result_preview": "",
+                            "has_result": False,
+                        })
                     return None
+
                 direction = _parse_direction(desc)
+
+                if ctx and ctx.manager and param_span:
+                    ctx.manager.close_span(ctx.run_id, param_span, SpanStatus.SUCCESS)
+                    ctx.manager.emit(EventType.PARAM_STEP_COMPLETE, ctx.run_id, param_span, {
+                        "agent_id": "doc",
+                        "node_id": _STEP_NAME,
+                        "param_name": param_name,
+                        "function_name": function_name,
+                        "step_name": _STEP_NAME,
+                        "message": f"参数 {param_name} {_STEP_LABEL} 完成",
+                        "result_preview": desc[:200],
+                        "has_result": True,
+                    })
+
                 return {
-                    "function_name": param["function_name"],
-                    "param_name": param["param_name"],
+                    "function_name": function_name,
+                    "param_name": param_name,
                     "direction": direction,
                     "src_content": param.get("src_content", ""),
                     "description": desc,
@@ -77,18 +145,27 @@ async def param_desc_extract_node(state: PipelineState) -> dict[str, Any]:
                     "shape": "",
                     "memory_desc": "",
                 }
+            except Exception as exc:
+                if ctx and ctx.manager and param_span:
+                    ctx.manager.close_span(ctx.run_id, param_span, SpanStatus.ERROR, error=str(exc))
+                    ctx.manager.emit(EventType.PARAM_STEP_ERROR, ctx.run_id, param_span, {
+                        "agent_id": "doc",
+                        "node_id": _STEP_NAME,
+                        "param_name": param_name,
+                        "function_name": function_name,
+                        "step_name": _STEP_NAME,
+                        "message": f"参数 {param_name} {_STEP_LABEL} 失败: {exc}",
+                        "error": str(exc),
+                    })
+                return None
 
         results = await asyncio.gather(*[_extract_one(p) for p in with_src])
         all_updates = [r for r in results if r is not None and r.get("description")]
 
         if all_updates:
             result = await _mcp_client.update_param_descriptions(doc_id, all_updates)
-            logger.info(
-                "ParamDescExtract: updated %d/%d parameters for doc_id=%s",
-                result.get("updated", 0),
-                len(with_src),
-                doc_id,
-            )
+            updated = result.get("updated", 0)
+            logger.info("ParamDescExtract: updated %d/%d parameters for doc_id=%s", updated, len(with_src), doc_id)
         else:
             logger.info("ParamDescExtract: no descriptions extracted for doc_id=%s", doc_id)
 

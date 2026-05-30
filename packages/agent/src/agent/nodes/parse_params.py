@@ -73,13 +73,7 @@ async def parse_params_node(state: PipelineState) -> dict[str, Any]:
             return {"parameters": [], "error": None}
 
         parameters = _flatten_to_parameters(functions)
-        logger.info(
-            "ParseParams: extracted %d parameters from %d functions for %s v%s",
-            len(parameters),
-            len(functions),
-            operator_name,
-            version,
-        )
+        logger.info("ParseParams: extracted %d parameters from %d functions", len(parameters), len(functions))
 
         await _mcp_client.save_parameters(doc_id, parameters)
         logger.info("ParseParams: persisted %d parameters for doc_id=%s", len(parameters), doc_id)

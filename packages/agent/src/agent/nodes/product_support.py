@@ -49,14 +49,9 @@ async def product_support_node(state: PipelineState) -> dict[str, Any]:
             return {"product_support": [], "error": None}
 
         products = await _extract_via_llm(content)
-        logger.info(
-            "ProductSupport: extracted %d products for %s",
-            len(products),
-            operator_name,
-        )
+        logger.info("ProductSupport: extracted %d products for %s", len(products), operator_name)
 
         await _mcp_client.save_product_support(doc_id, products)
-        logger.info("ProductSupport: saved %d products for doc_id=%s", len(products), doc_id)
 
         return {"product_support": products, "error": None}
 

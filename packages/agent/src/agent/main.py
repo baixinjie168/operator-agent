@@ -1,17 +1,23 @@
 """FastAPI application factory for the operator-agent main system."""
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from agent.core.config import settings
 from agent.core.logging import setup_logging
+from agent.db import get_db
 from agent.routes.query import router as query_router
+from agent.routes.runs import router as runs_router
 from agent.routes.upload import router as upload_router
+from agent.runtime import RuntimeManager
 
 
 def create_app() -> FastAPI:
     setup_logging(settings.log_level)
+
+    get_db()
 
     app = FastAPI(
         title=settings.project_name,
@@ -19,8 +25,19 @@ def create_app() -> FastAPI:
         description="Operator Agent - CANN operator constraint extraction and test generation",
     )
 
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    app.state.runtime_manager = RuntimeManager()
+
     app.include_router(upload_router)
     app.include_router(query_router)
+    app.include_router(runs_router)
 
     @app.get("/health")
     async def health() -> dict:

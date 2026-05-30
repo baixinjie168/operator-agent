@@ -1,0 +1,104 @@
+{
+    "version": "0.2.0",
+    "compounds": [
+        {
+            "name": "Full Stack: Backend + Frontend",
+            "configurations": [
+                "FastAPI: Run Server",
+                "Frontend: HTTP Server"
+            ],
+            "presentation": {
+                "hidden": false,
+                "group": "full-stack",
+                "order": 1
+            }
+        }
+    ],
+    "configurations": [
+        {
+            "name": "FastAPI: Run Server",
+            "type": "debugpy",
+            "request": "launch",
+            "python": "${workspaceFolder}/.venv/Scripts/python.exe",
+            "module": "uvicorn",
+            "args": [
+                "agent.main:create_app",
+                "--factory",
+                "--reload",
+                "--host",
+                "0.0.0.0",
+                "--port",
+                "8000"
+            ],
+            "jinja": true,
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/packages/agent/src;${workspaceFolder}/packages/shared/src;${workspaceFolder}/packages/mcp-server/src"
+            },
+            "envFile": "${workspaceFolder}/.env",
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Frontend: HTTP Server",
+            "type": "debugpy",
+            "request": "launch",
+            "python": "${workspaceFolder}/.venv/Scripts/python.exe",
+            "module": "http.server",
+            "args": [
+                "8080",
+                "--directory",
+                "${workspaceFolder}/../operator-agent-ui"
+            ],
+            "cwd": "${workspaceFolder}/../operator-agent-ui",
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "MCP Server: Run",
+            "type": "debugpy",
+            "request": "launch",
+            "python": "${workspaceFolder}/.venv/Scripts/python.exe",
+            "module": "mcp_server",
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/packages/mcp-server/src;${workspaceFolder}/packages/shared/src"
+            },
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "pytest: All Tests",
+            "type": "debugpy",
+            "request": "launch",
+            "python": "${workspaceFolder}/.venv/Scripts/python.exe",
+            "module": "pytest",
+            "args": [
+                "${workspaceFolder}/tests",
+                "-v",
+                "--timeout",
+                "30"
+            ],
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/packages/agent/src;${workspaceFolder}/packages/shared/src;${workspaceFolder}/packages/mcp-server/src;${workspaceFolder}/tests"
+            },
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "pytest: Current File",
+            "type": "debugpy",
+            "request": "launch",
+            "python": "${workspaceFolder}/.venv/Scripts/python.exe",
+            "module": "pytest",
+            "args": [
+                "${file}",
+                "-v",
+                "--timeout",
+                "30"
+            ],
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/packages/agent/src;${workspaceFolder}/packages/shared/src;${workspaceFolder}/packages/mcp-server/src;${workspaceFolder}/tests"
+            },
+            "console": "integratedTerminal"
+        }
+    ]
+}

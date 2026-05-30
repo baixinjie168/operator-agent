@@ -38,3 +38,33 @@ CREATE TABLE IF NOT EXISTS parameters (
 
 CREATE INDEX IF NOT EXISTS idx_parameters_doc_id
     ON parameters(doc_id);
+
+CREATE TABLE IF NOT EXISTS pipeline_runs (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id          TEXT NOT NULL UNIQUE,
+    operator_id     INTEGER REFERENCES operators(id),
+    doc_id          INTEGER REFERENCES document_versions(id),
+    operator_name   TEXT NOT NULL,
+    status          TEXT NOT NULL DEFAULT 'running',
+    content_hash    TEXT NOT NULL,
+    result_json     TEXT,
+    error           TEXT,
+    created_at      TEXT DEFAULT (datetime('now')),
+    completed_at    TEXT
+);
+
+CREATE TABLE IF NOT EXISTS pipeline_events (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id      TEXT NOT NULL REFERENCES pipeline_runs(run_id),
+    seq         INTEGER NOT NULL,
+    event_type  TEXT NOT NULL,
+    data_json   TEXT NOT NULL,
+    created_at  TEXT DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_pipeline_runs_operator
+    ON pipeline_runs(operator_id);
+CREATE INDEX IF NOT EXISTS idx_pipeline_runs_run_id
+    ON pipeline_runs(run_id);
+CREATE INDEX IF NOT EXISTS idx_pipeline_events_run
+    ON pipeline_events(run_id, seq);

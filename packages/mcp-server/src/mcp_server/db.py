@@ -10,8 +10,16 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+_PROJECT_ROOT = Path(__file__).resolve().parents[4]
 DEFAULT_DB_PATH = "data/operator_agent.db"
 SCHEMA_PATH = Path(__file__).parent / "schema.sql"
+
+
+def _resolve_path(db_path: str) -> Path:
+    p = Path(db_path)
+    if not p.is_absolute():
+        p = _PROJECT_ROOT / p
+    return p
 
 
 def _load_schema() -> str:
@@ -22,7 +30,7 @@ class Database:
     """Synchronous SQLite database wrapper."""
 
     def __init__(self, db_path: str = DEFAULT_DB_PATH) -> None:
-        self._db_path = Path(db_path)
+        self._db_path = _resolve_path(db_path)
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn: sqlite3.Connection | None = None
 
@@ -31,21 +39,14 @@ class Database:
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA foreign_keys=ON")
         self._conn.executescript(_load_schema())
-        # 迁移：v2 — 新增 is_optional 列
-        try:
-            self._conn.execute(
-                "ALTER TABLE parameters ADD COLUMN is_optional INTEGER NOT NULL DEFAULT 0"
-            )
-        except sqlite3.OperationalError:
-            pass
-        # 迁移：v3 — 新增 src_content 列
-        try:
-            self._conn.execute(
-                "ALTER TABLE parameters ADD COLUMN src_content TEXT"
-            )
-        except sqlite3.OperationalError:
-            pass
         self._conn.commit()
+        self._migrate()
+
+    def _migrate(self) -> None:
+        existing = {r[1] for r in self._conn.execute("PRAGMA table_info(parameters)").fetchall()}
+        if "src_content" not in existing:
+            self._conn.execute("ALTER TABLE parameters ADD COLUMN src_content TEXT")
+            self._conn.commit()
 
     @property
     def conn(self) -> sqlite3.Connection:

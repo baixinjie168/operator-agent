@@ -12,6 +12,8 @@ from agent.core.config import settings
 from agent.mcp_client import MCPClient
 from agent.nodes.state import PipelineState
 from agent.prompts import OPTIONAL_EXTRACT_PROMPT
+from agent.runtime.context import get_context
+from agent.runtime.events import EventType, SpanStatus, SpanType
 
 logger = logging.getLogger(__name__)
 
@@ -19,22 +21,13 @@ _mcp_client = MCPClient()
 
 _CONCURRENCY_LIMIT = 5
 
+_STEP_NAME = "optional_extract"
+_STEP_LABEL = "可选提取"
+
 _JSON_BLOCK_RE = re.compile(r"```(?:json)?\s*([\s\S]*?)```", re.IGNORECASE)
 
 
 async def optional_extract_node(state: PipelineState) -> dict[str, Any]:
-    """Judge whether each parameter is optional from its description and persist to DB.
-
-    Reads parameters from state (populated by param_desc_extract) instead of
-    making a redundant MCP query. Each parameter gets its own LLM call
-    for precise判断, with controlled concurrency.
-
-    Flow:
-    1. Read parameters from state.parameters (no MCP query needed)
-    2. Filter to parameters with non-empty descriptions
-    3. Concurrent LLM call per parameter (Semaphore controlled)
-    4. Batch update is_optional field via MCP
-    """
     doc_id = state.get("doc_id", 0)
     operator_name = state.get("operator_name", "")
 
@@ -51,16 +44,90 @@ async def optional_extract_node(state: PipelineState) -> dict[str, Any]:
             return {"error": None}
 
         described = [p for p in params if p.get("description")]
+        undescribed = [p for p in params if not p.get("description")]
+
+        if undescribed and ctx and ctx.manager:
+            for p in undescribed:
+                pn = p.get("param_name", "")
+                fn = p.get("function_name", "")
+                skip_span = ctx.manager.open_span(
+                    run_id=ctx.run_id,
+                    parent_span_id=ctx.current_span_id,
+                    span_type=SpanType.NODE,
+                    name=f"{_STEP_NAME}:{fn}:{pn}",
+                )
+                ctx.manager.close_span(ctx.run_id, skip_span, SpanStatus.SUCCESS)
+                ctx.manager.emit(EventType.PARAM_STEP_ERROR, ctx.run_id, skip_span, {
+                    "agent_id": "doc",
+                    "node_id": _STEP_NAME,
+                    "param_name": pn,
+                    "function_name": fn,
+                    "step_name": _STEP_NAME,
+                    "message": f"参数 {pn} {_STEP_LABEL} 已跳过: 无参数描述",
+                    "error": "无参数描述",
+                })
+
         if not described:
             logger.info("OptionalExtract: no parameters with descriptions for doc_id=%s, skipping", doc_id)
             return {"error": None}
 
         llm = _create_llm()
         sem = asyncio.Semaphore(_CONCURRENCY_LIMIT)
+        ctx = get_context()
 
         async def _extract_one(param: dict) -> dict | None:
-            async with sem:
-                return await _extract_optional(llm, param)
+            param_name = param.get("param_name", "")
+            function_name = param.get("function_name", "")
+            parent_span_id = ctx.current_span_id if ctx else None
+            param_span = None
+
+            if ctx and ctx.manager:
+                param_span = ctx.manager.open_span(
+                    run_id=ctx.run_id,
+                    parent_span_id=parent_span_id,
+                    span_type=SpanType.NODE,
+                    name=f"{_STEP_NAME}:{function_name}:{param_name}",
+                )
+                ctx.manager.emit(EventType.PARAM_STEP_START, ctx.run_id, param_span, {
+                    "agent_id": "doc",
+                    "node_id": _STEP_NAME,
+                    "param_name": param_name,
+                    "function_name": function_name,
+                    "step_name": _STEP_NAME,
+                    "message": f"参数 {param_name} {_STEP_LABEL} 开始...",
+                })
+
+            try:
+                async with sem:
+                    result = await _extract_optional(llm, param)
+
+                if ctx and ctx.manager and param_span:
+                    ctx.manager.close_span(ctx.run_id, param_span, SpanStatus.SUCCESS)
+                    ctx.manager.emit(EventType.PARAM_STEP_COMPLETE, ctx.run_id, param_span, {
+                        "agent_id": "doc",
+                        "node_id": _STEP_NAME,
+                        "param_name": param_name,
+                        "function_name": function_name,
+                        "step_name": _STEP_NAME,
+                        "message": f"参数 {param_name} {_STEP_LABEL} 完成",
+                        "result_preview": str(result.get("is_optional", ""))[:200] if result else "",
+                        "has_result": bool(result),
+                    })
+
+                return result
+            except Exception as exc:
+                if ctx and ctx.manager and param_span:
+                    ctx.manager.close_span(ctx.run_id, param_span, SpanStatus.ERROR, error=str(exc))
+                    ctx.manager.emit(EventType.PARAM_STEP_ERROR, ctx.run_id, param_span, {
+                        "agent_id": "doc",
+                        "node_id": _STEP_NAME,
+                        "param_name": param_name,
+                        "function_name": function_name,
+                        "step_name": _STEP_NAME,
+                        "message": f"参数 {param_name} {_STEP_LABEL} 失败: {exc}",
+                        "error": str(exc),
+                    })
+                return None
 
         results = await asyncio.gather(*[_extract_one(p) for p in described])
 

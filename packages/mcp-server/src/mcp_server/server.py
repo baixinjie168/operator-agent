@@ -36,7 +36,6 @@ from mcp_server.tools.document_tools import (
 from mcp_server.tools.document_tools import (
     update_param_src_content as _update_param_src_content,
 )
-
 mcp = FastMCP("operator-agent-mcp-server")
 
 
