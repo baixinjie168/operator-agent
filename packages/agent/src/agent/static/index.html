@@ -116,7 +116,10 @@
   .dir-input { background: #dbeafe; color: #1d4ed8; padding: 2px 8px; border-radius: 10px; font-size: .75rem; font-weight: 600; }
   .dir-output { background: #fef3c7; color: #92400e; padding: 2px 8px; border-radius: 10px; font-size: .75rem; font-weight: 600; }
   .opt-yes { background: #dcfce7; color: #166534; padding: 2px 8px; border-radius: 10px; font-size: .75rem; font-weight: 600; }
-  .opt-no { color: #ccc; }
+  .opt-no { background: #fee2e2; color: #991b1b; padding: 2px 8px; border-radius: 10px; font-size: .75rem; font-weight: 600; }
+  .disc-yes { background: #dcfce7; color: #166534; padding: 2px 8px; border-radius: 10px; font-size: .75rem; font-weight: 600; }
+  .disc-no { background: #fee2e2; color: #991b1b; padding: 2px 8px; border-radius: 10px; font-size: .75rem; font-weight: 600; }
+  .disc-na { background: #f3f4f6; color: #6b7280; padding: 2px 8px; border-radius: 10px; font-size: .75rem; font-weight: 600; }
   .dir-other { background: #f3f4f6; color: #374151; padding: 2px 8px; border-radius: 10px; font-size: .75rem; font-weight: 600; }
 
   /* Markdown description cell styles (used in modal) */
@@ -167,6 +170,30 @@
       <button class="nav-item" onclick="switchTab('params', this)">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>
         文档参数
+      </button>
+      <button class="nav-item" onclick="switchTab('relations', this)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+        参数间约束
+      </button>
+      <button class="nav-item" onclick="switchTab('returncodes', this)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        返回值错误码
+      </button>
+      <button class="nav-item" onclick="switchTab('platforms', this)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+        平台支持
+      </button>
+      <button class="nav-item" onclick="switchTab('signatures', this)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+        函数签名
+      </button>
+      <button class="nav-item" onclick="switchTab('dtypes', this)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+        数据类型组合
+      </button>
+      <button class="nav-item" onclick="switchTab('result', this)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+        约束结果
       </button>
     </nav>
   </aside>
@@ -280,6 +307,123 @@
     </div>
   </div>
 
+  <!-- Relations Panel -->
+  <div class="panel" id="panelRelations">
+    <div class="card" style="flex:1;display:flex;flex-direction:column;min-height:0;overflow:hidden">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+        <h2 style="margin:0">参数间约束 (param_relations)</h2>
+        <div style="display:flex;gap:8px;align-items:center">
+          <select id="relOperatorFilter" onchange="onRelOperatorChange()" style="padding:6px 12px;border:1px solid #ddd;border-radius:6px;font-size:.85rem;min-width:180px">
+            <option value="">全部算子</option>
+          </select>
+          <button class="secondary" onclick="loadRelations()">刷新</button>
+        </div>
+      </div>
+      <div id="relTableWrap" style="flex:1;min-height:0;overflow-y:auto">
+        <div id="relContent"></div>
+        <div class="status" id="relStatus"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Return Codes Panel -->
+  <div class="panel" id="panelReturncodes">
+    <div class="card" style="flex:1;display:flex;flex-direction:column;min-height:0;overflow:hidden">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+        <h2 style="margin:0">返回值错误码 (return_codes)</h2>
+        <div style="display:flex;gap:8px;align-items:center">
+          <select id="rcOperatorFilter" onchange="onRcOperatorChange()" style="padding:6px 12px;border:1px solid #ddd;border-radius:6px;font-size:.85rem;min-width:180px">
+            <option value="">全部算子</option>
+          </select>
+          <button class="secondary" onclick="loadReturnCodes()">刷新</button>
+        </div>
+      </div>
+      <div id="rcTableWrap" style="flex:1;min-height:0;overflow-y:auto">
+        <div id="rcContent"></div>
+        <div class="status" id="rcStatus"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Platform Support Panel -->
+  <div class="panel" id="panelPlatforms">
+    <div class="card" style="flex:1;display:flex;flex-direction:column;min-height:0;overflow:hidden">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+        <h2 style="margin:0">平台支持 (platform_support)</h2>
+        <div style="display:flex;gap:8px;align-items:center">
+          <select id="platOperatorFilter" onchange="onPlatOperatorChange()" style="padding:6px 12px;border:1px solid #ddd;border-radius:6px;font-size:.85rem;min-width:180px">
+            <option value="">全部算子</option>
+          </select>
+          <button class="secondary" onclick="loadPlatforms()">刷新</button>
+        </div>
+      </div>
+      <div id="platTableWrap" style="flex:1;min-height:0;overflow-y:auto">
+        <div id="platContent"></div>
+        <div class="status" id="platStatus"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Function Signatures Panel -->
+  <div class="panel" id="panelSignatures">
+    <div class="card" style="flex:1;display:flex;flex-direction:column;min-height:0;overflow:hidden">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+        <h2 style="margin:0">函数签名 (function_signatures)</h2>
+        <div style="display:flex;gap:8px;align-items:center">
+          <select id="sigOperatorFilter" onchange="onSigOperatorChange()" style="padding:6px 12px;border:1px solid #ddd;border-radius:6px;font-size:.85rem;min-width:180px">
+            <option value="">全部算子</option>
+          </select>
+          <button class="secondary" onclick="loadSignatures()">刷新</button>
+        </div>
+      </div>
+      <div id="sigTableWrap" style="flex:1;min-height:0;overflow-y:auto">
+        <div id="sigContent"></div>
+        <div class="status" id="sigStatus"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Dtype Combinations Panel -->
+  <div class="panel" id="panelDtypes">
+    <div class="card" style="flex:1;display:flex;flex-direction:column;min-height:0;overflow:hidden">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+        <h2 style="margin:0">数据类型组合 (dtype_combinations)</h2>
+        <div style="display:flex;gap:8px;align-items:center">
+          <select id="dtypeOperatorFilter" onchange="onDtypeOperatorChange()" style="padding:6px 12px;border:1px solid #ddd;border-radius:6px;font-size:.85rem;min-width:180px">
+            <option value="">全部算子</option>
+          </select>
+          <select id="dtypeFunctionFilter" onchange="loadDtypeCombos()" style="padding:6px 12px;border:1px solid #ddd;border-radius:6px;font-size:.85rem;min-width:200px">
+            <option value="">全部函数</option>
+          </select>
+          <button class="secondary" onclick="loadDtypeCombos()">刷新</button>
+        </div>
+      </div>
+      <div id="dtypeTableWrap" style="flex:1;min-height:0;overflow-y:auto">
+        <div id="dtypeContent"></div>
+        <div class="status" id="dtypeStatus"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Constraints Result Panel -->
+  <div class="panel" id="panelResult">
+    <div class="card" style="flex:1;display:flex;flex-direction:column;min-height:0;overflow:hidden">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+        <h2 style="margin:0">约束结果 (constraints_result)</h2>
+        <div style="display:flex;gap:8px;align-items:center">
+          <select id="resultOperatorFilter" onchange="onResultOperatorChange()" style="padding:6px 12px;border:1px solid #ddd;border-radius:6px;font-size:.85rem;min-width:180px">
+            <option value="">全部算子</option>
+          </select>
+          <button class="secondary" onclick="loadConstraintsResult()">刷新</button>
+        </div>
+      </div>
+      <div id="resultTableWrap" style="flex:1;min-height:0;overflow-y:auto">
+        <div id="resultContent"></div>
+        <div class="status" id="resultStatus"></div>
+      </div>
+    </div>
+  </div>
+
   <!-- Description Modal -->
   <div id="descModalOverlay" class="modal-overlay" onclick="closeDescModalOutside(event)">
     <div class="modal-box">
@@ -303,6 +447,12 @@ function switchTab(name, el) {
   document.getElementById('panel' + name.charAt(0).toUpperCase() + name.slice(1)).classList.add('active');
   if (name === 'query') loadOperators();
   if (name === 'params') { loadParamOperators(); loadParams(); }
+  if (name === 'relations') { loadRelOperators(); loadRelations(); }
+  if (name === 'returncodes') { loadRcOperators(); loadReturnCodes(); }
+  if (name === 'platforms') { loadPlatOperators(); loadPlatforms(); }
+  if (name === 'signatures') { loadSigOperators(); loadSignatures(); }
+  if (name === 'dtypes') { loadDtypeOperators(); loadDtypeCombos(); }
+  if (name === 'result') { loadResultOperators(); loadConstraintsResult(); }
 }
 
 /* ---------- Parse step helpers ---------- */
@@ -520,34 +670,69 @@ async function loadDetail(name) {
       sectionsHtml = '<div class="empty-state">无 Section 数据</div>';
     }
 
-    // Signatures view
-    let sigsHtml = '';
-    if (doc.function_signatures && doc.function_signatures.length) {
-      sigsHtml = doc.function_signatures.map(sig => `
-        <div class="section-card">
-          <h4>${sig.function_name}</h4>
-          <div class="section-body"><code>${escapeHtml(sig.raw_code)}</code></div>
-          <div style="margin-top:8px;font-size:.85rem;color:#666">
-            <strong>返回类型:</strong> ${sig.return_type}<br>
-            <strong>参数:</strong> ${sig.parameters.join(', ') || 'void'}
-          </div>
-        </div>`).join('');
-    } else {
-      sigsHtml = '<div class="empty-state">无函数签名</div>';
-    }
+    // Signatures view - fetch from new API endpoint
+    let sigsHtml = '<div class="empty-state">加载中...</div>';
+    fetch('/api/v1/signatures?operator_name=' + encodeURIComponent(name))
+      .then(res => res.json())
+      .then(sigData => {
+        const sigs = sigData.signatures || [];
+        if (sigs.length) {
+          const sigsContent = sigs.map(sig => {
+            const paramsList = (sig.parameters || []).map(p =>
+              '<span style="display:inline-block;background:#e0e7ff;color:#3730a3;padding:2px 8px;border-radius:10px;font-size:.75rem;font-weight:600;margin:2px">' +
+              escapeHtml(p.type) + ' <strong>' + escapeHtml(p.name) + '</strong></span>'
+            ).join(' ');
+            return `
+              <div class="section-card">
+                <h4>${sig.function_name}</h4>
+                <div style="margin-bottom:8px;padding:8px;background:#f9fafb;border-radius:4px;font-family:monospace;font-size:.85rem;word-break:break-all">
+                  <code>${escapeHtml(sig.full_signature || sig.raw_code)}</code>
+                </div>
+                <div style="font-size:.85rem;color:#666">
+                  <strong>返回类型:</strong> ${escapeHtml(sig.return_type)}<br>
+                  <strong>参数:</strong><br>${paramsList || 'void'}
+                </div>
+              </div>`;
+          }).join('');
+          document.getElementById('tabSignatures').innerHTML = sigsContent;
+        } else {
+          document.getElementById('tabSignatures').innerHTML = '<div class="empty-state">无函数签名</div>';
+        }
+      })
+      .catch(err => {
+        document.getElementById('tabSignatures').innerHTML = '<div class="empty-state">加载失败: ' + escapeHtml(err.message) + '</div>';
+      });
 
-    // Products view
-    let prodsHtml = '';
-    if (doc.product_support && doc.product_support.length) {
-      prodsHtml = '<table style="width:100%;border-collapse:collapse;font-size:.9rem">' +
-        '<tr style="background:#f3f4f6"><th style="padding:8px;text-align:left;border:1px solid #e5e7eb">产品</th><th style="padding:8px;text-align:center;border:1px solid #e5e7eb">支持</th></tr>' +
-        doc.product_support.map(p =>
-          '<tr><td style="padding:8px;border:1px solid #e5e7eb">' + p.product + '</td>' +
-          '<td style="padding:8px;text-align:center;border:1px solid #e5e7eb">' + (p.supported ? '<span style="color:green">√</span>' : '<span style="color:red">×</span>') + '</td></tr>'
-        ).join('') + '</table>';
-    } else {
-      prodsHtml = '<div class="empty-state">无产品支持数据</div>';
-    }
+    // Products view - fetch from new API endpoint
+    let prodsHtml = '<div class="empty-state">加载中...</div>';
+    fetch('/api/v1/platforms?operator_name=' + encodeURIComponent(name))
+      .then(res => res.json())
+      .then(platData => {
+        const platforms = platData.platforms || [];
+        if (platforms.length) {
+          const prodsContent = '<table style="width:100%;border-collapse:collapse;font-size:.9rem">' +
+            '<tr style="background:#f3f4f6"><th style="padding:8px;text-align:left;border:1px solid #e5e7eb">平台</th><th style="padding:8px;text-align:center;border:1px solid #e5e7eb">支持</th><th style="padding:8px;text-align:center;border:1px solid #e5e7eb">确定性计算</th></tr>' +
+            platforms.map(p => {
+              var det = p.deterministic_computing || {"value":"","src_text":""};
+              var detVal = det.value || "";
+              var detCell = '<td style="padding:8px;text-align:center;border:1px solid #e5e7eb;color:#aaa">-</td>';
+              if (detVal === '确定性') {
+                detCell = '<td style="padding:8px;text-align:center;border:1px solid #e5e7eb;color:green">✓ 确定性</td>';
+              } else if (detVal === '非确定性') {
+                detCell = '<td style="padding:8px;text-align:center;border:1px solid #e5e7eb;color:#d97706">⚠ 非确定性</td>';
+              }
+              return '<tr><td style="padding:8px;border:1px solid #e5e7eb">' + escapeHtml(p.platform_name) + '</td>' +
+              '<td style="padding:8px;text-align:center;border:1px solid #e5e7eb">' + (p.is_supported ? '<span style="color:green">√</span>' : '<span style="color:red">×</span>') + '</td>' +
+              detCell + '</tr>';
+            }).join('') + '</table>';
+          document.getElementById('tabProducts').innerHTML = prodsContent;
+        } else {
+          document.getElementById('tabProducts').innerHTML = '<div class="empty-state">无产品支持数据</div>';
+        }
+      })
+      .catch(err => {
+        document.getElementById('tabProducts').innerHTML = '<div class="empty-state">加载失败: ' + escapeHtml(err.message) + '</div>';
+      });
 
     // Raw JSON view
     const rawHtml = '<pre>' + JSON.stringify(doc, null, 2) + '</pre>';
@@ -647,11 +832,31 @@ async function loadParams() {
     };
     const optBadge = v => {
       if (v === 1 || v === true) return '<span class="opt-yes">可选</span>';
-      return '<span class="opt-no">-</span>';
+      return '<span class="opt-no">必选</span>';
+    };
+    const discBadge = v => {
+      try {
+        const obj = typeof v === 'string' ? JSON.parse(v) : v;
+        if (obj && obj.value === true) return '<span class="disc-yes">√</span>';
+        if (obj && obj.value === false) return '<span class="disc-no">×</span>';
+        if (obj && obj.value === "N/A") return '<span class="disc-na">N/A</span>';
+      } catch (e) {}
+      return '<span class="disc-na">-</span>';
+    };
+    const formatAllowedRange = v => {
+      try {
+        const arr = typeof v === 'string' ? JSON.parse(v) : v;
+        if (!Array.isArray(arr) || arr.length === 0) return '-';
+        return arr.map(item => {
+          const platform = item.platform ? '<strong>[' + escapeHtml(item.platform) + ']</strong> ' : '';
+          return platform + escapeHtml(item.allowed_range_value || '');
+        }).join('<br>');
+      } catch (e) {}
+      return '-';
     };
 
     contentEl.innerHTML = '<table class="params-table"><thead><tr>' +
-      '<th>算子名称</th><th>版本</th><th>函数名</th><th>参数名</th><th>类型</th><th>方向</th><th>可选</th>' +
+      '<th>算子名称</th><th>版本</th><th>函数名</th><th>参数名</th><th>类型</th><th>方向</th><th>可选</th><th>非连续Tensor</th><th>数组长度</th><th>描述摘要</th><th>取值范围</th>' +
       '<th>原文引用</th><th>描述</th><th>数据类型</th><th>数据格式</th><th>Shape</th>' +
       '</tr></thead><tbody>' +
       filtered.map((p, idx) => '<tr>' +
@@ -662,6 +867,10 @@ async function loadParams() {
         '<td>' + escapeHtml(p.param_type) + '</td>' +
         '<td>' + dirBadge(p.direction) + '</td>' +
         '<td>' + optBadge(p.is_optional) + '</td>' +
+        '<td>' + discBadge(p.is_support_discontinuous) + '</td>' +
+        '<td>' + escapeHtml(p.array_length || 'N/A') + '</td>' +
+        '<td>' + escapeHtml(p.param_desc || '-') + '</td>' +
+        '<td>' + formatAllowedRange(p.allowed_range_value) + '</td>' +
         '<td class="td-src">' + (p.src_content
           ? '<textarea readonly rows="2" style="width:100%;border:1px solid #ddd;border-radius:4px;padding:4px;font-family:monospace;font-size:.75rem;background:#fffbeb;resize:vertical">' + escapeHtml(stripMarkup(p.src_content)) + '</textarea>'
           : '-') + '</td>' +
@@ -718,6 +927,579 @@ function closeDescModalOutside(e) {
     closeDescModal();
   }
 }
+
+/* ---------- Relations ---------- */
+async function loadRelOperators() {
+  try {
+    const res = await fetch('/api/v1/operators');
+    const data = await res.json();
+    const select = document.getElementById('relOperatorFilter');
+    const current = select.value;
+    select.innerHTML = '<option value="">全部算子</option>';
+    if (data.operators) {
+      data.operators.forEach(op => {
+        const opt = document.createElement('option');
+        opt.value = op.name;
+        opt.textContent = op.name + (op.latest_version ? ' (v' + op.latest_version + ')' : '');
+        select.appendChild(opt);
+      });
+    }
+    select.value = current;
+  } catch (_) {}
+}
+
+function onRelOperatorChange() {
+  loadRelations();
+}
+
+async function loadRelations() {
+  const statusEl = document.getElementById('relStatus');
+  const contentEl = document.getElementById('relContent');
+  const operatorName = document.getElementById('relOperatorFilter').value;
+
+  statusEl.innerHTML = '<span class="spinner"></span>加载中...';
+  contentEl.innerHTML = '';
+
+  try {
+    const url = '/api/v1/relations' + (operatorName ? '?operator_name=' + encodeURIComponent(operatorName) : '');
+    const res = await fetch(url);
+    const data = await res.json();
+
+    if (!data.relations || data.relations.length === 0) {
+      contentEl.innerHTML = '<div class="empty-state">暂无约束数据</div>';
+      statusEl.textContent = '';
+      return;
+    }
+
+    const grouped = {};
+    data.relations.forEach(r => {
+      const key = r.operator_name + ' / ' + r.function_name;
+      if (!grouped[key]) grouped[key] = [];
+      grouped[key].push(r);
+    });
+
+    const relTypeBadge = t => '<span style="display:inline-block;background:#e0e7ff;color:#3730a3;padding:2px 8px;border-radius:10px;font-size:.75rem;font-weight:600;white-space:nowrap">' + escapeHtml(t) + '</span>';
+
+    let html = '';
+    Object.keys(grouped).sort().forEach(key => {
+      const items = grouped[key];
+      html += '<div style="margin-bottom:16px">';
+      html += '<div style="font-weight:600;font-size:.9rem;color:#374151;margin-bottom:6px;padding:6px 10px;background:#f3f4f6;border-radius:4px">' + escapeHtml(key) + ' <span style="font-weight:400;color:#888;font-size:.8rem">(' + items.length + ' 条)</span></div>';
+      html += '<table class="params-table"><thead><tr>' +
+        '<th>关系类型</th><th>涉及参数</th><th>前置条件</th><th>描述</th><th>原文引用</th>' +
+        '</tr></thead><tbody>';
+      items.forEach(r => {
+        const paramsStr = (r.params || []).join(', ');
+        const precond = r.precondition === '无' ? '-' : escapeHtml(r.precondition);
+        const citation = r.source_citation ? '<span style="font-size:.75rem;color:#888">' + escapeHtml(r.source_citation.length > 80 ? r.source_citation.slice(0, 80) + '...' : r.source_citation) + '</span>' : '-';
+        html += '<tr>' +
+          '<td>' + relTypeBadge(r.relation_type) + '</td>' +
+          '<td>' + escapeHtml(paramsStr) + '</td>' +
+          '<td>' + precond + '</td>' +
+          '<td style="max-width:300px;line-height:1.4">' + escapeHtml(r.description) + '</td>' +
+          '<td style="max-width:200px">' + citation + '</td>' +
+          '</tr>';
+      });
+      html += '</tbody></table></div>';
+    });
+
+    contentEl.innerHTML = html;
+    statusEl.textContent = '共 ' + data.relations.length + ' 条约束';
+  } catch (err) {
+    statusEl.textContent = '加载失败: ' + err.message;
+  }
+}
+
+/* ---------- Return Codes ---------- */
+async function loadRcOperators() {
+  try {
+    const res = await fetch('/api/v1/operators');
+    const data = await res.json();
+    const select = document.getElementById('rcOperatorFilter');
+    const current = select.value;
+    select.innerHTML = '<option value="">全部算子</option>';
+    if (data.operators) {
+      data.operators.forEach(op => {
+        const opt = document.createElement('option');
+        opt.value = op.name;
+        opt.textContent = op.name + (op.latest_version ? ' (v' + op.latest_version + ')' : '');
+        select.appendChild(opt);
+      });
+    }
+    select.value = current;
+  } catch (_) {}
+}
+
+function onRcOperatorChange() {
+  loadReturnCodes();
+}
+
+async function loadReturnCodes() {
+  const statusEl = document.getElementById('rcStatus');
+  const contentEl = document.getElementById('rcContent');
+  const operatorName = document.getElementById('rcOperatorFilter').value;
+
+  statusEl.innerHTML = '<span class="spinner"></span>加载中...';
+  contentEl.innerHTML = '';
+
+  try {
+    const url = '/api/v1/return-codes' + (operatorName ? '?operator_name=' + encodeURIComponent(operatorName) : '');
+    const res = await fetch(url);
+    const data = await res.json();
+
+    if (!data.return_codes || data.return_codes.length === 0) {
+      contentEl.innerHTML = '<div class="empty-state">暂无返回值错误码数据</div>';
+      statusEl.textContent = '';
+      return;
+    }
+
+    // Group by operator_name / function_name
+    const grouped = {};
+    data.return_codes.forEach(rc => {
+      const key = rc.operator_name + ' / ' + rc.function_name;
+      if (!grouped[key]) grouped[key] = [];
+      grouped[key].push(rc);
+    });
+
+    const errorCodeBadge = code => {
+      const color = code >= 500000 ? '#7c3aed' : code >= 300000 ? '#d97706' : '#dc2626';
+      return '<span style="display:inline-block;background:' + color + '22;color:' + color + ';padding:2px 8px;border-radius:10px;font-size:.75rem;font-weight:600;font-family:monospace">' + code + '</span>';
+    };
+
+    let html = '';
+    Object.keys(grouped).sort().forEach(key => {
+      const items = grouped[key];
+      html += '<div style="margin-bottom:16px">';
+      html += '<div style="font-weight:600;font-size:.9rem;color:#374151;margin-bottom:6px;padding:6px 10px;background:#f3f4f6;border-radius:4px">' + escapeHtml(key) + ' <span style="font-weight:400;color:#888;font-size:.8rem">(' + items.length + ' 条)</span></div>';
+      html += '<table class="params-table"><thead><tr>' +
+        '<th>返回码 (return_value)</th><th>错误码</th><th>描述 (descriptions)</th>' +
+        '</tr></thead><tbody>';
+      items.forEach(rc => {
+        const descs = (rc.descriptions || []).map(d =>
+          '<div style="padding:2px 0;border-bottom:1px solid #f3f4f6;font-size:.85rem;line-height:1.5">' + escapeHtml(d) + '</div>'
+        ).join('');
+        html += '<tr>' +
+          '<td><code style="background:#fef3c7;color:#92400e;padding:2px 8px;border-radius:4px;font-size:.8rem;font-weight:600">' + escapeHtml(rc.return_value) + '</code></td>' +
+          '<td>' + errorCodeBadge(rc.error_code) + '</td>' +
+          '<td style="max-width:400px">' + (descs || '<span style="color:#aaa">-</span>') + '</td>' +
+          '</tr>';
+      });
+      html += '</tbody></table></div>';
+    });
+
+    contentEl.innerHTML = html;
+    statusEl.textContent = '共 ' + data.return_codes.length + ' 条错误码';
+  } catch (err) {
+    statusEl.textContent = '加载失败: ' + err.message;
+  }
+}
+
+/* ---------- Platform Support ---------- */
+async function loadPlatOperators() {
+  try {
+    const res = await fetch('/api/v1/operators');
+    const data = await res.json();
+    const select = document.getElementById('platOperatorFilter');
+    const current = select.value;
+    select.innerHTML = '<option value="">全部算子</option>';
+    if (data.operators) {
+      data.operators.forEach(op => {
+        const opt = document.createElement('option');
+        opt.value = op.name;
+        opt.textContent = op.name + (op.latest_version ? ' (v' + op.latest_version + ')' : '');
+        select.appendChild(opt);
+      });
+    }
+    select.value = current;
+  } catch (_) {}
+}
+
+function onPlatOperatorChange() {
+  loadPlatforms();
+}
+
+async function loadPlatforms() {
+  const statusEl = document.getElementById('platStatus');
+  const contentEl = document.getElementById('platContent');
+  const operatorName = document.getElementById('platOperatorFilter').value;
+
+  statusEl.innerHTML = '<span class="spinner"></span>加载中...';
+  contentEl.innerHTML = '';
+
+  try {
+    const url = '/api/v1/platforms' + (operatorName ? '?operator_name=' + encodeURIComponent(operatorName) : '');
+    const res = await fetch(url);
+    const data = await res.json();
+
+    if (!data.platforms || data.platforms.length === 0) {
+      contentEl.innerHTML = '<div class="empty-state">暂无平台支持数据</div>';
+      statusEl.textContent = '';
+      return;
+    }
+
+    // Group by operator_name
+    const grouped = {};
+    data.platforms.forEach(p => {
+      const key = p.operator_name + ' (v' + p.version + ')';
+      if (!grouped[key]) grouped[key] = [];
+      grouped[key].push(p);
+    });
+
+    let html = '';
+    Object.keys(grouped).sort().forEach(key => {
+      const items = grouped[key];
+      const supportedCount = items.filter(p => p.is_supported).length;
+      const detCount = items.filter(p => {
+        var d = p.deterministic_computing || {};
+        return d.value === '确定性';
+      }).length;
+      const detTotal = items.filter(p => {
+        var d = p.deterministic_computing || {};
+        return d.value && d.value !== '';
+      }).length;
+      html += '<div style="margin-bottom:16px">';
+      html += '<div style="font-weight:600;font-size:.9rem;color:#374151;margin-bottom:6px;padding:6px 10px;background:#f3f4f6;border-radius:4px">' +
+        escapeHtml(key) + ' <span style="font-weight:400;color:#888;font-size:.8rem">(' + supportedCount + '/' + items.length + ' 支持';
+      if (detTotal > 0) {
+        html += '，' + detCount + '/' + detTotal + ' 确定性';
+      }
+      html += ')</span></div>';
+      html += '<table class="params-table"><thead><tr>' +
+        '<th>平台名称</th><th style="width:100px;text-align:center">是否支持</th>' +
+        '<th style="width:120px;text-align:center">确定性计算</th><th>原文引用</th>' +
+        '</tr></thead><tbody>';
+      items.forEach(p => {
+        const badge = p.is_supported
+          ? '<span style="display:inline-block;background:#dcfce7;color:#166534;padding:2px 12px;border-radius:10px;font-size:.8rem;font-weight:600">✓ 支持</span>'
+          : '<span style="display:inline-block;background:#fee2e2;color:#991b1b;padding:2px 12px;border-radius:10px;font-size:.8rem;font-weight:600">✗ 不支持</span>';
+        var det = p.deterministic_computing || {"value":"","src_text":""};
+        var detVal = det.value || "";
+        var detBadge = '<span style="color:#aaa">-</span>';
+        if (detVal === '确定性') {
+          detBadge = '<span style="display:inline-block;background:#dcfce7;color:#166534;padding:2px 12px;border-radius:10px;font-size:.8rem;font-weight:600">✓ 确定性</span>';
+        } else if (detVal === '非确定性') {
+          detBadge = '<span style="display:inline-block;background:#fef3c7;color:#92400e;padding:2px 12px;border-radius:10px;font-size:.8rem;font-weight:600">⚠ 非确定性</span>';
+        }
+        html += '<tr>' +
+          '<td>' + escapeHtml(p.platform_name) + '</td>' +
+          '<td style="text-align:center">' + badge + '</td>' +
+          '<td style="text-align:center">' + detBadge + '</td>' +
+          '<td style="font-size:.85rem;line-height:1.5;color:#555">' + escapeHtml(det.src_text || '-') + '</td>' +
+          '</tr>';
+      });
+      html += '</tbody></table></div>';
+    });
+
+    contentEl.innerHTML = html;
+    statusEl.textContent = '共 ' + data.platforms.length + ' 条平台记录';
+  } catch (err) {
+    statusEl.textContent = '加载失败: ' + err.message;
+  }
+}
+
+/* ---------- Function Signatures ---------- */
+async function loadSigOperators() {
+  try {
+    const res = await fetch('/api/v1/operators');
+    const data = await res.json();
+    const select = document.getElementById('sigOperatorFilter');
+    const current = select.value;
+    select.innerHTML = '<option value="">全部算子</option>';
+    if (data.operators) {
+      data.operators.forEach(op => {
+        const opt = document.createElement('option');
+        opt.value = op.name;
+        opt.textContent = op.name + (op.latest_version ? ' (v' + op.latest_version + ')' : '');
+        select.appendChild(opt);
+      });
+    }
+    select.value = current;
+  } catch (_) {}
+}
+
+function onSigOperatorChange() {
+  loadSignatures();
+}
+
+async function loadSignatures() {
+  const statusEl = document.getElementById('sigStatus');
+  const contentEl = document.getElementById('sigContent');
+  const operatorName = document.getElementById('sigOperatorFilter').value;
+
+  statusEl.innerHTML = '<span class="spinner"></span>加载中...';
+  contentEl.innerHTML = '';
+
+  try {
+    const url = '/api/v1/signatures' + (operatorName ? '?operator_name=' + encodeURIComponent(operatorName) : '');
+    const res = await fetch(url);
+    const data = await res.json();
+
+    if (!data.signatures || data.signatures.length === 0) {
+      contentEl.innerHTML = '<div class="empty-state">暂无函数签名数据</div>';
+      statusEl.textContent = '';
+      return;
+    }
+
+    // Group by operator_name / function_name
+    const grouped = {};
+    data.signatures.forEach(sig => {
+      const key = sig.operator_name + ' (v' + sig.version + ')';
+      if (!grouped[key]) grouped[key] = [];
+      grouped[key].push(sig);
+    });
+
+    let html = '';
+    Object.keys(grouped).sort().forEach(key => {
+      const items = grouped[key];
+      html += '<div style="margin-bottom:16px">';
+      html += '<div style="font-weight:600;font-size:.9rem;color:#374151;margin-bottom:6px;padding:6px 10px;background:#f3f4f6;border-radius:4px">' +
+        escapeHtml(key) + ' <span style="font-weight:400;color:#888;font-size:.8rem">(' + items.length + ' 个签名)</span></div>';
+
+      items.forEach(sig => {
+        const paramsList = (sig.parameters || []).map(p =>
+          '<span style="display:inline-block;background:#e0e7ff;color:#3730a3;padding:2px 8px;border-radius:10px;font-size:.75rem;font-weight:600;margin:2px">' +
+          escapeHtml(p.type || '') + ' <strong>' + escapeHtml(p.name || '') + '</strong></span>'
+        ).join(' ');
+
+        html += '<div class="section-card" style="margin-bottom:8px">';
+        html += '<h4 style="margin-bottom:6px">' + escapeHtml(sig.function_name) + '</h4>';
+        html += '<div style="margin-bottom:8px;padding:8px;background:#f9fafb;border-radius:4px;font-family:monospace;font-size:.85rem;word-break:break-all">';
+        html += '<code>' + escapeHtml(sig.full_signature || sig.raw_code || '-') + '</code></div>';
+        html += '<div style="font-size:.85rem;color:#666">';
+        html += '<strong>返回类型:</strong> ' + escapeHtml(sig.return_type || 'void') + '<br>';
+        html += '<strong>参数:</strong> ' + (paramsList || '<span style="color:#aaa">void</span>');
+        html += '</div></div>';
+      });
+
+      html += '</div>';
+    });
+
+    contentEl.innerHTML = html;
+    statusEl.textContent = '共 ' + data.signatures.length + ' 个函数签名';
+  } catch (err) {
+    statusEl.textContent = '加载失败: ' + err.message;
+  }
+}
+
+/* ---------- Dtype Combinations ---------- */
+async function loadDtypeOperators() {
+  try {
+    const res = await fetch('/api/v1/operators');
+    const data = await res.json();
+    const select = document.getElementById('dtypeOperatorFilter');
+    const current = select.value;
+    select.innerHTML = '<option value="">全部算子</option>';
+    if (data.operators) {
+      data.operators.forEach(op => {
+        const opt = document.createElement('option');
+        opt.value = op.name;
+        opt.textContent = op.name + (op.latest_version ? ' (v' + op.latest_version + ')' : '');
+        select.appendChild(opt);
+      });
+    }
+    select.value = current;
+  } catch (_) {}
+}
+
+function onDtypeOperatorChange() {
+  // Reset function filter when operator changes
+  const funcSelect = document.getElementById('dtypeFunctionFilter');
+  funcSelect.innerHTML = '<option value="">全部函数</option>';
+  loadDtypeCombos();
+}
+
+async function loadDtypeCombos() {
+  const statusEl = document.getElementById('dtypeStatus');
+  const contentEl = document.getElementById('dtypeContent');
+  const operatorName = document.getElementById('dtypeOperatorFilter').value;
+  const funcFilter = document.getElementById('dtypeFunctionFilter').value;
+
+  statusEl.innerHTML = '<span class="spinner"></span>加载中...';
+  contentEl.innerHTML = '';
+
+  try {
+    const url = '/api/v1/dtype-combos-list' + (operatorName ? '?operator_name=' + encodeURIComponent(operatorName) : '');
+    const res = await fetch(url);
+    const data = await res.json();
+
+    if (!data.dtype_combos || data.dtype_combos.length === 0) {
+      contentEl.innerHTML = '<div class="empty-state">暂无数据类型组合数据</div>';
+      statusEl.textContent = '';
+      return;
+    }
+
+    // Populate function name dropdown with unique values
+    const funcSelect = document.getElementById('dtypeFunctionFilter');
+    const currentFunc = funcSelect.value;
+    const funcNames = [...new Set(data.dtype_combos.map(d => d.function_name))].sort();
+    funcSelect.innerHTML = '<option value="">全部函数</option>' +
+      funcNames.map(f => '<option value="' + escapeHtml(f) + '">' + escapeHtml(f) + '</option>').join('');
+    funcSelect.value = funcNames.includes(currentFunc) ? currentFunc : '';
+
+    // Client-side function name filter
+    let filtered = data.dtype_combos;
+    if (funcFilter) {
+      filtered = data.dtype_combos.filter(d => d.function_name === funcFilter);
+    }
+
+    if (filtered.length === 0) {
+      contentEl.innerHTML = '<div class="empty-state">无匹配数据</div>';
+      statusEl.textContent = '共 ' + data.dtype_combos.length + ' 条记录，当前筛选 0 条';
+      return;
+    }
+
+    // Group by operator_name / function_name / platform
+    const grouped = {};
+    filtered.forEach(d => {
+      const key = d.operator_name + ' / ' + d.function_name + ' [' + d.platform + ']';
+      if (!grouped[key]) grouped[key] = [];
+      grouped[key].push(d);
+    });
+
+    let html = '';
+    Object.keys(grouped).sort().forEach(key => {
+      const items = grouped[key];
+      html += '<div style="margin-bottom:16px">';
+      html += '<div style="font-weight:600;font-size:.9rem;color:#374151;margin-bottom:6px;padding:6px 10px;background:#f3f4f6;border-radius:4px">' +
+        escapeHtml(key) + ' <span style="font-weight:400;color:#888;font-size:.8rem">(v' + items[0].version + ')</span></div>';
+
+      items.forEach(d => {
+        const combo = d.combo || {};
+        const comboKeys = Object.keys(combo);
+        if (comboKeys.length === 0) return;
+
+        html += '<table class="params-table" style="margin-bottom:8px"><thead><tr>';
+        comboKeys.forEach(k => {
+          html += '<th>' + escapeHtml(k) + '</th>';
+        });
+        html += '</tr></thead><tbody><tr>';
+        comboKeys.forEach(k => {
+          const val = combo[k];
+          const displayVal = Array.isArray(val) ? val.join(', ') : String(val);
+          html += '<td style="font-size:.8rem">' + escapeHtml(displayVal) + '</td>';
+        });
+        html += '</tr></tbody></table>';
+      });
+
+      html += '</div>';
+    });
+
+    contentEl.innerHTML = html;
+    statusEl.textContent = '共 ' + filtered.length + ' 条数据类型组合' + (funcFilter ? '（已筛选）' : '');
+  } catch (err) {
+    statusEl.textContent = '加载失败: ' + err.message;
+  }
+}
+
+/* ---------- Constraints Result ---------- */
+async function loadResultOperators() {
+  try {
+    const res = await fetch('/api/v1/operators');
+    const data = await res.json();
+    const select = document.getElementById('resultOperatorFilter');
+    const current = select.value;
+    select.innerHTML = '<option value="">全部算子</option>';
+    if (data.operators) {
+      data.operators.forEach(op => {
+        const opt = document.createElement('option');
+        opt.value = op.name;
+        opt.textContent = op.name + (op.latest_version ? ' (v' + op.latest_version + ')' : '');
+        select.appendChild(opt);
+      });
+    }
+    select.value = current;
+  } catch (_) {}
+}
+
+function onResultOperatorChange() {
+  loadConstraintsResult();
+}
+
+async function loadConstraintsResult() {
+  const statusEl = document.getElementById('resultStatus');
+  const contentEl = document.getElementById('resultContent');
+  const operatorName = document.getElementById('resultOperatorFilter').value;
+
+  statusEl.innerHTML = '<span class="spinner"></span>加载中...';
+  contentEl.innerHTML = '';
+
+  try {
+    const url = '/api/v1/constraints-result' + (operatorName ? '?operator_name=' + encodeURIComponent(operatorName) : '');
+    const res = await fetch(url);
+    const data = await res.json();
+
+    if (!data.results || data.results.length === 0) {
+      contentEl.innerHTML = '<div class="empty-state">暂无约束结果数据</div>';
+      statusEl.textContent = '';
+      return;
+    }
+
+    let html = '';
+    data.results.forEach(result => {
+      html += '<div style="margin-bottom:20px;border:1px solid #e5e7eb;border-radius:8px;padding:16px">';
+      html += '<h3 style="margin:0 0 12px;color:#374151">' + escapeHtml(result.operator_name) + ' (v' + result.version + ')</h3>';
+
+      // Product Support
+      if (result.product_support && result.product_support.length > 0) {
+        html += '<div style="margin-bottom:12px"><strong>产品支持：</strong>';
+        result.product_support.forEach(ps => {
+          const badge = ps.support
+            ? '<span style="display:inline-block;background:#dcfce7;color:#166534;padding:2px 8px;border-radius:10px;font-size:.75rem;font-weight:600;margin:2px">✓ ' + escapeHtml(ps.product) + '</span>'
+            : '<span style="display:inline-block;background:#fee2e2;color:#991b1b;padding:2px 8px;border-radius:10px;font-size:.75rem;font-weight:600;margin:2px">✗ ' + escapeHtml(ps.product) + '</span>';
+          html += badge;
+        });
+        html += '</div>';
+      }
+
+      // Function Explanation
+      const fnExp = result.function_explanation || {};
+      const fnNames = Object.keys(fnExp);
+      if (fnNames.length > 0) {
+        html += '<div><strong>函数约束详情：</strong>';
+        fnNames.forEach(fn => {
+          const fnData = fnExp[fn];
+          html += '<div style="margin:8px 0;padding:12px;background:#f9fafb;border-radius:6px">';
+          html += '<div style="font-weight:600;color:#4f46e5;margin-bottom:8px">' + escapeHtml(fn) + '</div>';
+
+          // Signature
+          if (fnData.signature && fnData.signature.full_signature) {
+            html += '<div style="font-size:.8rem;color:#666;margin-bottom:8px;font-family:monospace;background:#fff;padding:6px;border-radius:4px">' + escapeHtml(fnData.signature.full_signature) + '</div>';
+          }
+
+          // Params count
+          const paramCount = (fnData.params || []).length;
+          html += '<div style="font-size:.8rem;color:#666">参数: ' + paramCount + ' 个';
+
+          // Relations count
+          const relCount = (fnData.relations || []).length;
+          html += ' | 约束关系: ' + relCount + ' 条';
+
+          // Return codes count
+          const rcCount = (fnData.return_codes || []).length;
+          html += ' | 返回码: ' + rcCount + ' 个';
+
+          // Dtype combos count
+          const dcCount = (fnData.dtype_combinations || []).length;
+          html += ' | 数据类型组合: ' + dcCount + ' 个';
+          html += '</div>';
+
+          html += '</div>';
+        });
+        html += '</div>';
+      } else {
+        html += '<div style="color:#999;font-size:.85rem">无函数约束数据</div>';
+      }
+
+      html += '</div>';
+    });
+
+    contentEl.innerHTML = html;
+    statusEl.textContent = '共 ' + data.results.length + ' 条约束结果';
+  } catch (err) {
+    statusEl.textContent = '加载失败: ' + err.message;
+  }
+}
+
 </script>
 </body>
 </html>

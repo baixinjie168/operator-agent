@@ -18,7 +18,13 @@ _mcp_client = MCPClient()
 
 _CONCURRENCY_LIMIT = 5
 
-_DIRECTION_RE = re.compile(r"\|\s*输入\s*/\s*输出\s*\|\s*(输入|输出)\s*\|")
+_DIRECTION_RE = re.compile(
+    r"\|\s*输入\s*/\s*输出\s*\|\s*(输入|输出|入参|出参|计算输入|计算输出)\s*\|"
+)
+_DIRECTION_LOOSE_RE = re.compile(r"输入\s*/\s*输出\s*\|\s*(.+?)\s*\|")
+
+_INPUT_KEYWORDS = ("输入", "入参", "input")
+_OUTPUT_KEYWORDS = ("输出", "出参", "output")
 
 
 def _parse_direction(desc: str) -> str:
@@ -26,11 +32,31 @@ def _parse_direction(desc: str) -> str:
 
     Matches rows like ``| 输入/输出 | 输入 |`` or ``| 输入/输出 | 输出 |``
     and maps them to ``"input"`` / ``"output"``.
+
+    Also handles variants:
+    - ``| 输入/输出 | 入参 |`` / ``| 输入/输出 | 出参 |``
+    - ``| 输入/输出 | 计算输入 |`` / ``| 输入/输出 | 计算输出 |``
+    - ``| 输入/输出 | 输入（input） |``
+    - ``| 输入/输出 | input |``
+    - ``| 输入/输出 | **输入** |``
     """
     m = _DIRECTION_RE.search(desc)
-    if not m:
-        return ""
-    return "input" if m.group(1) == "输入" else "output"
+    if m:
+        val = m.group(1)
+        if val in ("输入", "入参", "计算输入"):
+            return "input"
+        return "output"
+
+    loose = _DIRECTION_LOOSE_RE.search(desc)
+    if loose:
+        val = loose.group(1).strip().lower()
+        val = val.replace("**", "").replace("*", "")
+        if any(kw in val for kw in _INPUT_KEYWORDS):
+            return "input"
+        if any(kw in val for kw in _OUTPUT_KEYWORDS):
+            return "output"
+
+    return ""
 
 
 async def param_desc_extract_node(state: PipelineState) -> dict[str, Any]:
@@ -68,14 +94,13 @@ async def param_desc_extract_node(state: PipelineState) -> dict[str, Any]:
                 return {
                     "function_name": param["function_name"],
                     "param_name": param["param_name"],
+                    "param_type": param.get("param_type", ""),
                     "direction": direction,
                     "src_content": param.get("src_content", ""),
                     "description": desc,
-                    "usage_notes": "",
                     "data_type": "",
                     "data_format": "",
                     "shape": "",
-                    "memory_desc": "",
                 }
 
         results = await asyncio.gather(*[_extract_one(p) for p in with_src])

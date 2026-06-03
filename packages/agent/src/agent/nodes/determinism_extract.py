@@ -1,0 +1,137 @@
+"""Determinism extract node: extract determinism info from constraints section via LLM."""
+
+from __future__ import annotations
+
+import json
+import logging
+from typing import Any
+
+from langchain_openai import ChatOpenAI
+
+from agent.core.config import settings
+from agent.mcp_client import MCPClient
+from agent.nodes.state import PipelineState
+from agent.prompts import DETERMINISM_EXTRACT_PROMPT
+
+logger = logging.getLogger(__name__)
+
+_mcp_client = MCPClient()
+
+
+def _create_llm() -> ChatOpenAI:
+    return ChatOpenAI(
+        api_key=settings.active_api_key,
+        base_url=settings.active_base_url,
+        model=settings.active_model,
+        temperature=0.0,
+    )
+
+
+async def determinism_extract_node(state: PipelineState) -> dict[str, Any]:
+    """Extract determinism info from the constraints section via LLM.
+
+    Reads constraints section via MCP, calls LLM to extract determinism records,
+    expands empty product to all supported platforms, saves results via MCP.
+    """
+    doc_id = state.get("doc_id")
+    operator_name = state.get("operator_name")
+    if not doc_id or not operator_name:
+        logger.warning("determinism_extract: missing doc_id or operator_name, skipping")
+        return {"error": None}
+
+    try:
+        # Get constraints section
+        section = await _mcp_client.get_section(doc_id, "constraints")
+        if not section or not section.get("content"):
+            logger.info("determinism_extract: no constraints section for doc_id=%s, skipping", doc_id)
+            return {"error": None}
+
+        section_content = section["content"]
+        if "确定性" not in section_content:
+            logger.info("determinism_extract: no determinism mention in constraints, skipping")
+            return {"error": None}
+
+        # Get supported platforms for expansion
+        platforms_data = await _mcp_client.query_platform_support_by_operator(operator_name)
+        supported_platforms = [
+            p["platform_name"] for p in platforms_data if p.get("is_supported")
+        ]
+        platform_list = "\n".join(f"- {p}" for p in supported_platforms) if supported_platforms else "(无已知平台)"
+
+        # Call LLM
+        llm = _create_llm()
+        prompt = DETERMINISM_EXTRACT_PROMPT.format(
+            platform_list=platform_list,
+            section_content=section_content,
+        )
+        response = await llm.ainvoke(prompt)
+        raw_text = response.content if hasattr(response, "content") else str(response)
+
+        # Parse LLM response
+        records = _parse_llm_response(raw_text)
+        if not records:
+            logger.info("determinism_extract: LLM returned no records for %s", operator_name)
+            return {"error": None}
+
+        # Expand empty product to all supported platforms
+        expanded_records = _expand_platforms(records, supported_platforms)
+
+        # Save via MCP
+        result = await _mcp_client.save_determinism(doc_id, expanded_records)
+        logger.info(
+            "determinism_extract: saved %d records for %s (doc_id=%s)",
+            result.get("saved", 0),
+            operator_name,
+            doc_id,
+        )
+        return {"error": None}
+
+    except Exception as e:
+        logger.exception("determinism_extract failed for %s", operator_name)
+        return {"error": str(e)}
+
+
+def _parse_llm_response(raw_text: str) -> list[dict]:
+    """Parse LLM JSON response, handling code blocks and bare JSON."""
+    text = raw_text.strip()
+    # Strip code block
+    if text.startswith("```"):
+        lines = text.split("\n")
+        # Remove first and last lines (```json and ```)
+        lines = [line for line in lines if not line.strip().startswith("```")]
+        text = "\n".join(lines).strip()
+
+    try:
+        data = json.loads(text)
+        if isinstance(data, list):
+            return [
+                {
+                    "product": item.get("product", ""),
+                    "value": bool(item.get("value", False)),
+                    "src_text": item.get("src_text", ""),
+                }
+                for item in data
+                if isinstance(item, dict)
+            ]
+    except json.JSONDecodeError:
+        logger.warning("determinism_extract: failed to parse LLM response: %s", text[:200])
+    return []
+
+
+def _expand_platforms(records: list[dict], supported_platforms: list[str]) -> list[dict]:
+    """Expand records with empty product to all supported platforms."""
+    expanded = []
+    for record in records:
+        product = record.get("product", "").strip()
+        if product:
+            # Has specific platform, keep as-is
+            expanded.append(record)
+        else:
+            # No platform specified, expand to all supported platforms
+            for platform in supported_platforms:
+                expanded.append({
+                    "product": platform,
+                    "value": record["value"],
+                    "src_text": record["src_text"],
+                })
+    return expanded

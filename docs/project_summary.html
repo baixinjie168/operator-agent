@@ -6,158 +6,172 @@
 <title>Operator Agent 项目总览</title>
 <style>
   :root {
-    --bg: #ffffff;
-    --text: #1a1a2e;
-    --text-secondary: #555;
-    --border: #e2e8f0;
-    --code-bg: #f7fafc;
-    --table-stripe: #f8fafc;
-    --table-hover: #edf2f7;
-    --link: #3182ce;
-    --heading: #2d3748;
-    --blockquote-bg: #f0fff4;
-    --blockquote-border: #48bb78;
-    --hr-color: #e2e8f0;
-    --tag-bg: #ebf8ff;
-    --tag-text: #2b6cb0;
-    --new-bg: #e6ffed; --new-border: #34d058;
+    --bg:#fff;--text:#1a1a2e;--text-secondary:#555;--border:#e2e8f0;--code-bg:#f7fafc;
+    --table-stripe:#f8fafc;--table-hover:#edf2f7;--link:#3182ce;--heading:#2d3748;
+    --blockquote-bg:#f0fff4;--blockquote-border:#48bb78;--hr-color:#e2e8f0;
+    --sidebar-w:260px;--sidebar-bg:#f8fafc;--sidebar-hover:#edf2f7;
+    --sidebar-active-bg:#ebf8ff;--sidebar-active-border:#3182ce;
   }
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
-    line-height: 1.8;
-    color: var(--text);
-    background: var(--bg);
-    max-width: 960px;
-    margin: 0 auto;
-    padding: 2rem 1.5rem;
+  *{margin:0;padding:0;box-sizing:border-box}
+  html{height:100%}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+    line-height:1.8;color:var(--text);background:var(--bg);height:100%;overflow:hidden}
+  .layout{display:flex;height:100vh}
+  .sidebar{width:var(--sidebar-w);min-width:var(--sidebar-w);background:var(--sidebar-bg);
+    border-right:1px solid var(--border);overflow-y:auto;padding:1.2rem 0;flex-shrink:0;
+    scrollbar-width:thin;scrollbar-color:#cbd5e0 transparent}
+  .sidebar::-webkit-scrollbar{width:5px}
+  .sidebar::-webkit-scrollbar-thumb{background:#cbd5e0;border-radius:4px}
+  .sidebar-title{font-size:1.05rem;font-weight:700;color:var(--heading);
+    padding:0 1.2rem .8rem;border-bottom:1px solid var(--border);margin-bottom:.5rem}
+  .sidebar-title small{display:block;font-size:.72rem;font-weight:400;color:#a0aec0;margin-top:2px}
+  .nav-list{list-style:none}
+  .nav-list li{position:relative}
+  .nav-item{display:flex;align-items:center;gap:6px;padding:.32rem 1.2rem;font-size:.88rem;
+    color:var(--text-secondary);cursor:pointer;text-decoration:none;
+    border-left:3px solid transparent;transition:all .15s;user-select:none;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .nav-item:hover{background:var(--sidebar-hover);color:var(--heading)}
+  .nav-item.active{background:var(--sidebar-active-bg);color:var(--sidebar-active-border);
+    border-left-color:var(--sidebar-active-border);font-weight:600}
+  .nav-item .arrow{display:inline-block;width:14px;height:14px;text-align:center;
+    font-size:.7rem;line-height:14px;color:#a0aec0;transition:transform .2s;flex-shrink:0}
+  .nav-item .arrow.open{transform:rotate(90deg)}
+  .nav-item .arrow.empty{visibility:hidden}
+  .nav-children{list-style:none;overflow:hidden;max-height:0;transition:max-height .25s ease}
+  .nav-children.open{max-height:2000px}
+  .nav-children .nav-item{padding-left:2.2rem;font-size:.84rem}
+  .nav-children .nav-children .nav-item{padding-left:3.2rem;font-size:.82rem}
+  .main{flex:1;overflow-y:auto;padding:2rem 2.5rem 3rem}
+  .content-section{display:none;max-width:960px}
+  .content-section.active{display:block}
+  .main h1{font-size:1.8rem;border-bottom:3px solid var(--border);padding-bottom:.5rem;margin-bottom:.5rem;color:var(--heading)}
+  .main h2{font-size:1.45rem;margin-top:1.5rem;margin-bottom:.8rem;padding-bottom:.3rem;border-bottom:2px solid var(--border);color:var(--heading)}
+  .main h3{font-size:1.15rem;margin-top:1.4rem;margin-bottom:.5rem;color:var(--heading)}
+  .main h4{font-size:1.02rem;margin-top:1.1rem;margin-bottom:.4rem;color:#4a5568}
+  .main p{margin-bottom:.8rem}
+  .main a{color:var(--link);text-decoration:none}
+  .main a:hover{text-decoration:underline}
+  .main blockquote{background:var(--blockquote-bg);border-left:4px solid var(--blockquote-border);
+    padding:.6rem 1rem;margin:1rem 0;border-radius:0 6px 6px 0;color:var(--text-secondary)}
+  .main hr{border:none;border-top:1px solid var(--hr-color);margin:1.5rem 0}
+  .main code{background:var(--code-bg);padding:.15em .4em;border-radius:4px;
+    font-family:"JetBrains Mono","Fira Code","Cascadia Code",Consolas,monospace;font-size:.9em}
+  .main pre{background:#1e293b;color:#e2e8f0;padding:1.2rem 1.5rem;border-radius:8px;
+    overflow-x:auto;margin:1rem 0;line-height:1.6;font-size:.85rem}
+  .main pre code{background:none;padding:0;color:inherit;font-size:inherit}
+  .main table{width:100%;border-collapse:collapse;margin:1rem 0 1.5rem;font-size:.92rem}
+  .main th,.main td{border:1px solid var(--border);padding:.55rem .85rem;text-align:left}
+  .main th{background:var(--code-bg);font-weight:600;color:var(--heading)}
+  .main tr:nth-child(even) td{background:var(--table-stripe)}
+  .main tr:hover td{background:var(--table-hover)}
+  .main ul,.main ol{margin:.6rem 0 .8rem 1.8rem}
+  .main li{margin-bottom:.25rem}
+  .main strong{color:var(--heading)}
+  .main del{color:#a0aec0}
+  .main .flow-chart{background:var(--code-bg);border:1px solid var(--border);border-radius:8px;
+    padding:1.2rem 1.5rem;margin:1rem 0;font-family:"JetBrains Mono","Fira Code",monospace;
+    font-size:.82rem;line-height:1.7;white-space:pre;overflow-x:auto}
+  .main .callout{padding:.6rem 1rem;margin:1rem 0;border-radius:0 6px 6px 0;
+    border-left:4px solid;background:#fffbeb;border-color:#f59e0b}
+  .main .mermaid{display:flex;justify-content:center;margin:1.5rem 0;overflow-x:auto}
+  .main .mermaid svg{max-width:100%;height:auto}
+  .sidebar-toggle{display:none;position:fixed;bottom:1rem;left:1rem;z-index:1000;
+    width:44px;height:44px;border-radius:50%;border:1px solid var(--border);
+    background:var(--sidebar-bg);cursor:pointer;font-size:1.3rem;
+    box-shadow:0 2px 8px rgba(0,0,0,.12);color:var(--heading)}
+  @media(max-width:860px){
+    .sidebar{position:fixed;left:0;top:0;z-index:999;transform:translateX(-100%);transition:transform .25s}
+    .sidebar.open{transform:translateX(0)}
+    .sidebar-toggle{display:flex;align-items:center;justify-content:center}
+    .main{padding:1.5rem 1rem 3rem}
   }
-  h1 { font-size: 2rem; border-bottom: 3px solid var(--border); padding-bottom: 0.5rem; margin-bottom: 0.5rem; color: var(--heading); }
-  h2 { font-size: 1.5rem; margin-top: 2.5rem; margin-bottom: 1rem; border-bottom: 2px solid var(--border); padding-bottom: 0.3rem; color: var(--heading); }
-  h3 { font-size: 1.2rem; margin-top: 1.8rem; margin-bottom: 0.6rem; color: var(--heading); }
-  h4 { font-size: 1.05rem; margin-top: 1.2rem; margin-bottom: 0.4rem; color: #4a5568; }
-  h5 { font-size: 0.95rem; margin-top: 1rem; margin-bottom: 0.3rem; color: #e53e3e; }
-  p { margin-bottom: 0.8rem; }
-  a { color: var(--link); text-decoration: none; }
-  a:hover { text-decoration: underline; }
-  blockquote {
-    background: var(--blockquote-bg);
-    border-left: 4px solid var(--blockquote-border);
-    padding: 0.6rem 1rem;
-    margin: 1rem 0;
-    border-radius: 0 6px 6px 0;
-    color: var(--text-secondary);
-  }
-  hr { border: none; border-top: 1px solid var(--hr-color); margin: 2rem 0; }
-  code {
-    background: var(--code-bg);
-    padding: 0.15em 0.4em;
-    border-radius: 4px;
-    font-family: "JetBrains Mono", "Fira Code", "Cascadia Code", Consolas, monospace;
-    font-size: 0.9em;
-  }
-  pre {
-    background: #1e293b;
-    color: #e2e8f0;
-    padding: 1.2rem 1.5rem;
-    border-radius: 8px;
-    overflow-x: auto;
-    margin: 1rem 0;
-    line-height: 1.6;
-    font-size: 0.85rem;
-  }
-  pre code {
-    background: none;
-    padding: 0;
-    color: inherit;
-    font-size: inherit;
-  }
-  table {
-    width: 100%;
-    border-collapse: collapse;
-    margin: 1rem 0 1.5rem;
-    font-size: 0.92rem;
-  }
-  th, td {
-    border: 1px solid var(--border);
-    padding: 0.55rem 0.85rem;
-    text-align: left;
-  }
-  th { background: var(--code-bg); font-weight: 600; color: var(--heading); }
-  tr:nth-child(even) td { background: var(--table-stripe); }
-  tr:hover td { background: var(--table-hover); }
-  ul, ol { margin: 0.6rem 0 0.8rem 1.8rem; }
-  li { margin-bottom: 0.25rem; }
-  strong { color: var(--heading); }
-  del { color: #a0aec0; }
-  .tag {
-    display: inline-block;
-    background: var(--tag-bg);
-    color: var(--tag-text);
-    padding: 0.1em 0.55em;
-    border-radius: 4px;
-    font-size: 0.85em;
-    font-weight: 500;
-  }
-  .tag-new {
-    display: inline-block;
-    background: var(--new-bg);
-    color: #22863a;
-    padding: 0.1em 0.55em;
-    border-radius: 4px;
-    font-size: 0.85em;
-    font-weight: 500;
-  }
-  .flow-chart {
-    background: var(--code-bg);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 1.2rem 1.5rem;
-    margin: 1rem 0;
-    font-family: "JetBrains Mono", "Fira Code", monospace;
-    font-size: 0.82rem;
-    line-height: 1.7;
-    white-space: pre;
-    overflow-x: auto;
-  }
-  .callout {
-    padding: 0.6rem 1rem;
-    margin: 1rem 0;
-    border-radius: 0 6px 6px 0;
-    border-left: 4px solid;
-    background: #fffbeb;
-    border-color: #f59e0b;
-  }
-  .mermaid {
-    display: flex;
-    justify-content: center;
-    margin: 1.5rem 0;
-    overflow-x: auto;
-  }
-  .mermaid svg {
-    max-width: 100%;
-    height: auto;
-  }
-  @media (max-width: 768px) {
-    body { padding: 1rem; }
-    table { font-size: 0.8rem; }
-    th, td { padding: 0.4rem 0.5rem; }
-  }
+
+  .node-io{background:#f0f5ff;border:1px solid #c3dafe;border-radius:8px;
+    padding:.8rem 1.2rem;margin:.8rem 0 1.2rem;font-size:.9rem;line-height:1.7}
+  .node-io h3{font-size:.95rem;margin:0 0 .4rem;color:#2b6cb0;border:none;padding:0}
+  .node-io .io-row{display:flex;gap:.5rem;margin-bottom:.25rem}
+  .node-io .io-label{flex-shrink:0;width:5.5em;font-weight:600;color:#4a5568}
+  .node-io .io-val{color:var(--text)}
+  .node-io code{font-size:.85em}
+  .node-io .io-tag{display:inline-block;background:#ebf8ff;color:#2b6cb0;
+    padding:0 .4em;border-radius:3px;font-size:.82em;margin:0 .15em}
+  .node-io .io-tag-sib{background:#faf5ff;color:#805ad5}
+  .node-io .io-tag-down{background:#f0fff4;color:#38a169}
+  .node-io .io-tag-end{background:#fff5f5;color:#e53e3e}
+  .node-io .io-tag-route{background:#fffbeb;color:#d69e2e}
 </style>
 <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
 </head>
 <body>
+<button class="sidebar-toggle" onclick="document.querySelector('.sidebar').classList.toggle('open')">&#9776;</button>
+<div class="layout">
+<nav class="sidebar" id="sidebar">
+  <div class="sidebar-title">Operator Agent<small>项目总览 v2026-06-03</small></div>
+  <ul class="nav-list">
+    <li><a class="nav-item" data-target="sec-overview"><span class="arrow empty">&rsaquo;</span>项目定位</a></li>
+    <li><a class="nav-item" data-target="sec-techstack"><span class="arrow empty">&rsaquo;</span>技术栈</a></li>
+    <li><a class="nav-item" data-target="sec-structure"><span class="arrow empty">&rsaquo;</span>目录结构</a></li>
+    <li><a class="nav-item" data-target="sec-entry"><span class="arrow empty">&rsaquo;</span>入口文件</a></li>
+    <li>
+      <a class="nav-item has-children" data-toggle="ch-pipeline"><span class="arrow">&rsaquo;</span>核心流程 Pipeline</a>
+      <ul class="nav-children" id="ch-pipeline">
+        <li><a class="nav-item" data-target="sec-pipeline-arch"><span class="arrow empty">&rsaquo;</span>整体架构</a></li>
+        <li>
+          <a class="nav-item has-children" data-toggle="ch-nodes"><span class="arrow">&rsaquo;</span>各节点职责</a>
+          <ul class="nav-children" id="ch-nodes">
+            <li><a class="nav-item" data-target="sec-node1"><span class="arrow empty">&rsaquo;</span>节点1: init_doc</a></li>
+            <li><a class="nav-item" data-target="sec-route"><span class="arrow empty">&rsaquo;</span>路由: _should_continue</a></li>
+            <li><a class="nav-item" data-target="sec-node2a"><span class="arrow empty">&rsaquo;</span>节点2a: product_support</a></li>
+            <li><a class="nav-item" data-target="sec-node2b"><span class="arrow empty">&rsaquo;</span>节点2b: parse_params</a></li>
+            <li><a class="nav-item" data-target="sec-node2c"><span class="arrow empty">&rsaquo;</span>节点2c: func_signature</a></li>
+            <li><a class="nav-item" data-target="sec-node3"><span class="arrow empty">&rsaquo;</span>节点3: src_content</a></li>
+            <li><a class="nav-item" data-target="sec-node4"><span class="arrow empty">&rsaquo;</span>节点4: param_desc</a></li>
+            <li><a class="nav-item" data-target="sec-node5a"><span class="arrow empty">&rsaquo;</span>节点5a: shape</a></li>
+            <li><a class="nav-item" data-target="sec-node5b"><span class="arrow empty">&rsaquo;</span>节点5b: dtype</a></li>
+            <li><a class="nav-item" data-target="sec-node5c"><span class="arrow empty">&rsaquo;</span>节点5c: dformat</a></li>
+            <li><a class="nav-item" data-target="sec-node5d"><span class="arrow empty">&rsaquo;</span>节点5d: optional</a></li>
+            <li><a class="nav-item" data-target="sec-node5e"><span class="arrow empty">&rsaquo;</span>节点5e: param_relation</a></li>
+            <li><a class="nav-item" data-target="sec-node5f"><span class="arrow empty">&rsaquo;</span>节点5f: param_attr</a></li>
+            <li><a class="nav-item" data-target="sec-node5g"><span class="arrow empty">&rsaquo;</span>节点5g: array_length</a></li>
+            <li><a class="nav-item" data-target="sec-node5h"><span class="arrow empty">&rsaquo;</span>节点5h: allowed_range</a></li>
+            <li><a class="nav-item" data-target="sec-node5i"><span class="arrow empty">&rsaquo;</span>节点5i: return_codes</a></li>
+            <li><a class="nav-item" data-target="sec-node5j"><span class="arrow empty">&rsaquo;</span>节点5j: determinism</a></li>
+            <li><a class="nav-item" data-target="sec-node5k"><span class="arrow empty">&rsaquo;</span>节点5k: dtype_combo</a></li>
+            <li><a class="nav-item" data-target="sec-node6"><span class="arrow empty">&rsaquo;</span>节点6: assemble_result</a></li>
+          </ul>
+        </li>
+        <li><a class="nav-item" data-target="sec-pipeline-timing"><span class="arrow empty">&rsaquo;</span>执行时序总结</a></li>
+      </ul>
+    </li>
+    <li><a class="nav-item" data-target="sec-db"><span class="arrow empty">&rsaquo;</span>数据库 Schema</a></li>
+    <li><a class="nav-item" data-target="sec-api"><span class="arrow empty">&rsaquo;</span>API 接口</a></li>
+    <li><a class="nav-item" data-target="sec-config"><span class="arrow empty">&rsaquo;</span>配置项 (.env)</a></li>
+    <li>
+      <a class="nav-item has-children" data-toggle="ch-issues"><span class="arrow">&rsaquo;</span>已知问题</a>
+      <ul class="nav-children" id="ch-issues">
+        <li><a class="nav-item" data-target="sec-issue-perf"><span class="arrow empty">&rsaquo;</span>性能</a></li>
+        <li><a class="nav-item" data-target="sec-issue-code"><span class="arrow empty">&rsaquo;</span>代码质量</a></li>
+        <li><a class="nav-item" data-target="sec-issue-sec"><span class="arrow empty">&rsaquo;</span>安全</a></li>
+        <li><a class="nav-item" data-target="sec-issue-test"><span class="arrow empty">&rsaquo;</span>测试</a></li>
+        <li><a class="nav-item" data-target="sec-issue-doc"><span class="arrow empty">&rsaquo;</span>文档/结构</a></li>
+        <li><a class="nav-item" data-target="sec-issue-fe"><span class="arrow empty">&rsaquo;</span>前端</a></li>
+      </ul>
+    </li>
+    <li><a class="nav-item" data-target="sec-refs"><span class="arrow empty">&rsaquo;</span>架构文档引用</a></li>
+  </ul>
+</nav>
+<div class="main" id="mainContent">
+<section class="content-section" id="sec-overview">
+  <h1>Operator Agent 项目总览</h1>
+  <blockquote>生成日期: 2026-05-28 | 更新日期: 2026-06-03 | 基于代码实际状态</blockquote>
+  <h2>项目定位</h2>
+  <p>基于 <strong>LangGraph + MCP</strong> 的 CANN 算子文档自动化处理系统。将华为昇腾平台的算子 Markdown 文档解析为结构化数据，经 LLM 提取参数、约束、产品支持信息，最终生成 Python 测试用例。</p>
+  <p><strong>当前完成度</strong>：约 75%，文档解析、数据库层、Pipeline 全部 16 个节点（含 src_content 提取、function_signature 提取、shape/dtype/dformat/optional/param_attr 提取、array_length 提取、allowed_range 提取、return_code 提取、determinism 提取、dtype_combo 提取、参数关系提取子图、assemble_result 汇编节点）可运行。人工审核、测试用例生成尚未实现。</p>
+</section>
+<section class="content-section" id="sec-techstack">
+<h1>技术栈</h1>
 
-<h1>Operator Agent 项目总览</h1>
-<blockquote>生成日期: 2026-05-28 | 更新日期: 2026-05-30 | 基于代码实际状态</blockquote>
-<hr>
-
-<h2>1. 项目定位</h2>
-<p>基于 <strong>LangGraph + MCP</strong> 的 CANN 算子文档自动化处理系统。将华为昇腾平台的算子 Markdown 文档解析为结构化数据，经 LLM 提取参数、约束、产品支持信息，最终生成 Python 测试用例。</p>
-<p><strong>当前完成度</strong>：约 50%，文档解析、数据库层、Pipeline 全部 8 个节点（含 src_content 提取、shape/dtype/optional 提取）可运行。约束提取、人工审核、测试用例生成尚未实现。</p>
-<hr>
-
-<h2>2. 技术栈</h2>
 <table>
 <thead><tr><th>层级</th><th>技术</th><th>备注</th></tr></thead>
 <tbody>
@@ -171,22 +185,22 @@
 <tr><td>数据库</td><td>SQLite (同步, WAL 模式)</td><td>注意：依赖声明的 aiosqlite 未使用</td></tr>
 <tr><td>Markdown 解析</td><td>markdown-it-py</td><td>仅用于 token 级别的章节分割</td></tr>
 <tr><td>前端</td><td>单页 HTML/JS (内嵌于 static/index.html)</td><td>无前端构建工具</td></tr>
-<tr><td>测试</td><td>pytest + pytest-asyncio + pytest-cov</td><td>仅 mcp_server 有测试</td></tr>
+<tr><td>测试</td><td>pytest + pytest-asyncio + pytest-cov</td><td>mcp_server + agent 均有测试</td></tr>
 <tr><td>类型检查</td><td>mypy (strict)</td><td></td></tr>
 <tr><td>Lint/Format</td><td>ruff + isort</td><td></td></tr>
 </tbody>
 </table>
-<hr>
-
-<h2>3. 目录结构与模块职责</h2>
+</section>
+<section class="content-section" id="sec-structure">
+<h1>目录结构与模块职责</h1>
 <div class="flow-chart">operator-agent/
 ├── packages/
 │   ├── shared/                      # 领域模型层（纯数据结构，无业务逻辑）
 │   │   └── src/shared/
 │   │       ├── exceptions.py        # 异常层次：OperatorAgentError 及 4 个子类
 │   │       └── models/
-│   │           ├── enums.py         # 9 个 StrEnum（DataType, SectionType, LLMProvider 等）
-│   │           ├── operator.py      # 6 个文档解析模型
+│   │           ├── enums.py         # 12 个 StrEnum（DataType, SectionType, LLMProvider, RelationType 等）
+│   │           ├── operator.py      # 6 个文档解析模型（含 ParsedParameter, ParamRelation）
 │   │           ├── constraint.py    # 7 个约束模型
 │   │           └── test_case.py     # 3 个测试用例模型
 │   │
@@ -194,13 +208,13 @@
 │   │   └── src/mcp_server/
 │   │       ├── __main__.py          # 入口：初始化 DB，调用 mcp.run()
 │   │       ├── db.py                # Database 类 + get_db() 单例，同步 SQLite + WAL
-│   │       ├── schema.sql           # 3 张表：operators, document_versions, parameters
-│   │       ├── server.py            # FastMCP 实例，注册 17 个 tool + 2 个 resource
+│   │       ├── schema.sql           # 9 张表：operators, document_versions, parameters, param_relations, function_signatures, platform_support（含 deterministic_computing JSON）, return_codes, dtype_combinations, constraints_result
+│   │       ├── server.py            # FastMCP 实例，注册 40 个 tool + 2 个 resource
 │   │       ├── parsers/
 │   │       │   ├── section_splitter.py  # 基于 markdown-it-py token 的章节分割
 │   │       │   └── document_parser.py   # 章节分类 + 产品支持表解析 + 函数签名提取
 │   │       └── tools/
-│   │           └── document_tools.py    # 17 个 MCP tool 实现函数（纯同步）
+│   │           └── document_tools.py    # 41 个 MCP tool 实现函数（纯同步）
 │   │
 │   └── agent/                       # 应用层（FastAPI + LangGraph Pipeline）
 │       └── src/agent/
@@ -215,42 +229,70 @@
 │           │   ├── init_doc.py      # 节点1：版本检查 -> 保存 -> 解析
 │           │   ├── product_support.py   # 节点2a（并行）：LLM 提取产品支持表
 │           │   ├── parse_params.py      # 节点2b（并行）：LLM 提取函数参数
+│           │   ├── function_signature_extract.py # 节点2c（并行）：LLM 提取函数签名
 │           │   ├── src_content_extract.py # 节点3：双Section路由 + LLM并发提取参数原文
 │           │   ├── param_desc_extract.py # 节点4：从src_content生成结构化参数描述表格
 │           │   ├── shape_extract.py     # 节点5a（并行）：逐参数LLM提取无条件shape
 │           │   ├── dtype_extract.py     # 节点5b（并行）：逐参数LLM提取数据类型
-│           │   └── optional_extract.py  # 节点5c（并行）：逐参数LLM判断可选性
+│           │   ├── dformat_extract.py   # 节点5c（并行）：逐参数LLM提取数据格式
+│           │   ├── optional_extract.py  # 节点5d（并行）：逐参数LLM判断可选性
+│           │   ├── param_attr_extract.py # 节点5f（并行）：正则提取非连续Tensor支持 + param_desc
+│           │   ├── array_length_extract.py # 节点5g（并行）：LLM提取数组长度
+│           │   ├── allowed_range_extract.py # 节点5h（并行）：LLM提取参数取值范围约束
+│           │   ├── return_code_extract.py # 节点5i（并行）：LLM提取返回码/错误码
+│           │   ├── determinism_extract.py # 节点5j（并行）：LLM提取确定性计算信息
+│           │   ├── dtype_combo_extract.py # 节点5k（并行）：LLM提取数据类型组合
+│           │   ├── assemble_result.py # 节点6（顺序）：汇编所有提取结果→constraints_result表
+│           │   └── param_relation_extract/  # 节点5e（并行）：参数耦合关系提取子图
+│           │       ├── __init__.py      # create_param_relation_subgraph() — 子图定义
+│           │       ├── state.py         # RelationExtractState TypedDict
+│           │       ├── prompts.py       # RELATION_EXTRACT_PROMPT（10种关系类型）
+│           │       ├── fetch_sections.py  # 子节点1：MCP获取ws/exe/constraints章节
+│           │       ├── extract_relations.py # 子节点2a/2b（并行）：LLM提取ws/exe关系
+│           │       ├── merge_relations.py   # 子节点3：合并去重ws+exe关系
+│           │       └── save_relations.py    # 子节点4：MCP保存关系到param_relations表
 │           ├── routes/
 │           │   ├── upload.py        # POST /api/v1/upload — 触发 Pipeline
-│           │   └── query.py         # GET /api/v1/operators, /operators/{name}, /parameters
+│           │   └── query.py         # GET /api/v1/operators, /operators/{name}, /parameters 等
 │           ├── schemas/
 │           │   ├── upload.py        # UploadResponse
-│           │   └── query.py         # OperatorSummary, OperatorListResponse, OperatorDetailResponse, ParameterItem, ParameterListResponse
+│           │   └── query.py         # OperatorSummary, OperatorListResponse, OperatorDetailResponse, ParameterItem, ParameterListResponse 等
 │           ├── prompts/
-│           │   ├── __init__.py      # 6个Prompt: PRODUCT_SUPPORT, SRC_CONTENT, PARAM_DESC, SHAPE, DTYPE, OPTIONAL
+│           │   ├── __init__.py      # 14个Prompt: PRODUCT_SUPPORT, SRC_CONTENT, PARAM_DESC, SHAPE, DTYPE, DFORMAT, OPTIONAL, FUNCTION_SIGNATURE_EXTRACT, ARRAY_LENGTH_EXTRACT, ALLOWED_RANGE_EXTRACT, RETURN_CODE_EXTRACT, DETERMINISM_EXTRACT, DTYPE_COMBO_TABLE, DTYPE_CONSTRAINT_TEXT
 │           │   └── system.py        # SYSTEM_PROMPT（未使用）
+│           │   # 另有 param_relation_extract/prompts.py: RELATION_EXTRACT_PROMPT（子图专用）
 │           ├── tools/
 │           │   ├── document_tools.py    # 5 个 @tool 装饰的 LangGraph 工具（节点未使用）
 │           │   └── section_tools.py     # 2 个存根工具
 │           └── static/
-│               └── index.html       # 单页测试管理 UI（文档解析 + 查询 + 参数表）
+│               └── index.html       # 单页测试管理 UI（文档解析 + 查询 + 参数表 + 约束 + 返回码 + 平台支持（含确定性计算））
 │
-├── operators/                       # ~736 个 CANN 算子 Markdown 源文档
+├── operators/                       # ~90+ 个 CANN 算子 Markdown 源文档
 │   ├── (root)/, cv/, math/, nn/, trans/
-├── tests/                           # 测试（仅 mcp_server/parsers 有 34 个测试）
+├── tests/                           # 测试（mcp_server/parsers ~34 个 + agent ~62 个）
 ├── docs/                            # 文档 + LLM 提取提示指南 + 提取结果
 │   ├── project_summary.html         # 项目总览 (HTML)
 │   ├── prompts/                     # 7 个提取阶段的提示模板
 │   ├── self-prompts/                # 自提取提示模板
 │   ├── aclnnAdaLayerNorm/           # 提取结果示例（JSON + 错误日志）
-│   └── constraints-demo/            # 30 个算子约束提取 JSON 示例
+│   ├── aclnnAdaptiveAvgPool2d.html  # 自适应平均池化算子提取结果 (HTML)
+│   ├── constraints-demo/            # 34 个算子约束提取 JSON 示例
+│   ├── allowed_value.html           # 参数取值范围提取方案文档
+│   ├── return_info.html             # 返回码提取方案文档
+│   ├── determinism_extract.html     # 确定性计算提取方案文档
+│   ├── new-schema.html              # 新 Schema 设计文档
+│   ├── platform-inf.html            # 平台支持信息提取文档
+│   ├── shape_summary.html           # Shape 提取总结文档
+│   └── tensor-schema.html           # 非连续Tensor提取方案文档
 ├── data/operator_agent.db           # SQLite 数据库（运行时生成）
+├── re-struct.html                   # 确定性计算重构方案（determinism → platform_support.deterministic_computing）
 ├── CLAUDE.md                        # 项目级 Claude Code 指引
 ├── pyproject.toml                   # 根工作区配置（ruff, mypy, pytest）
 └── .env                             # 环境变量（LLM API Key 等，gitignored）</div>
-<hr>
+</section>
+<section class="content-section" id="sec-entry">
+<h1>入口文件</h1>
 
-<h2>4. 入口文件</h2>
 <table>
 <thead><tr><th>入口</th><th>路径</th><th>启动方式</th></tr></thead>
 <tbody>
@@ -260,11 +302,9 @@
 <tr><td>前端页面</td><td><code>packages/agent/src/agent/static/index.html</code></td><td>访问 <code>http://localhost:8000/</code></td></tr>
 </tbody>
 </table>
-<hr>
-
-<h2>5. 核心流程：文档上传 Pipeline</h2>
-
-<h3>5.1 整体架构</h3>
+</section>
+<section class="content-section" id="sec-pipeline-arch">
+<h1>核心流程：文档上传 Pipeline</h1><h2>整体架构</h2>
 <pre class="mermaid">
 flowchart TD
     A([上传 .md 文件]) --> B["FastAPI upload_document()\n提取 operator_name\n计算 SHA256 content_hash\n构造初始状态"]
@@ -275,34 +315,72 @@ flowchart TD
     F -- 是 --> G["END ⚠ bug\n仍继续执行"]
     F -- 否 --> H["product_support (2a)\nLLM 提取产品支持表"]
     F -- 否 --> I["parse_params (2b)\nLLM 提取函数参数"]
+    F -- 否 --> I2["function_signature_extract (2c)\nLLM 提取函数签名\nMCP: save_function_signatures"]
     H --> J["src_content_extract (3)\nLLM 并发提取参数原文\nMCP: update_param_src_content"]
     I --> J
+    I2 --> J
     J --> K["param_desc_extract (4)\n从 src_content 生成描述表格\nMCP: update_param_descriptions"]
     K --> L["shape_extract (5a)\nLLM 提取 shape"]
     K --> M["dtype_extract (5b)\nLLM 提取 dtype"]
-    K --> N["optional_extract (5c)\nLLM 判断 is_optional"]
-    L --> O([END\n返回 UploadResponse])
-    M --> O
-    N --> O
+    K --> N["dformat_extract (5c)\nLLM 提取数据格式"]
+    K --> P["optional_extract (5d)\nLLM 判断 is_optional"]
+    K --> P2["param_attr_extract (5f)\n正则提取非连续Tensor + param_desc"]
+    K --> P3["array_length_extract (5g)\nLLM提取数组长度"]
+    K --> P4["allowed_range_extract (5h)\nLLM提取参数取值范围约束"]
+    K --> P5["return_code_extract (5i)\nLLM提取返回码/错误码"]
+    K --> P6["determinism_extract (5j)\nLLM提取确定性计算信息\n→ platform_support.deterministic_computing"]
+    K --> P7["dtype_combo_extract (5k)\nLLM提取数据类型组合"]
+    K --> Q["param_relation_extract (5e)\n子图：LLM 提取参数耦合关系"]
+    L --> AR["assemble_result (节点6)\n汇编所有提取结果\n→ constraints_result 表"]
+    M --> AR
+    N --> AR
+    P --> AR
+    P2 --> AR
+    P3 --> AR
+    P4 --> AR
+    P5 --> AR
+    P6 --> AR
+    P7 --> AR
+    Q --> AR
+    AR --> O([END\n返回 UploadResponse])
 
-    style A fill:#f0fff4,stroke:#48bb78,color:#22543d
+    style A fill:#f0fff4,stroke:#48bb78,color:#22243d
     style E fill:#fff5f5,stroke:#e53e3e,color:#742a2a
     style G fill:#fffaf0,stroke:#dd6b20,color:#7b341e
     style D fill:#fffff0,stroke:#d69e2e
     style F fill:#fffff0,stroke:#d69e2e
     style H fill:#ebf8ff,stroke:#3182ce
     style I fill:#ebf8ff,stroke:#3182ce
+    style I2 fill:#ebf8ff,stroke:#3182ce
     style J fill:#faf5ff,stroke:#805ad5
     style K fill:#faf5ff,stroke:#805ad5
     style L fill:#ebf8ff,stroke:#3182ce
     style M fill:#ebf8ff,stroke:#3182ce
     style N fill:#ebf8ff,stroke:#3182ce
+    style P fill:#ebf8ff,stroke:#3182ce
+    style P2 fill:#ebf8ff,stroke:#3182ce
+    style P3 fill:#ebf8ff,stroke:#3182ce
+    style P4 fill:#ebf8ff,stroke:#3182ce
+    style P5 fill:#ebf8ff,stroke:#3182ce
+    style P6 fill:#ebf8ff,stroke:#3182ce
+    style P7 fill:#ebf8ff,stroke:#3182ce
+    style Q fill:#ebf8ff,stroke:#3182ce
+    style AR fill:#faf5ff,stroke:#805ad5
     style O fill:#fff5f5,stroke:#e53e3e,color:#742a2a
 </pre>
+</section>
+<section class="content-section" id="sec-node1">
+<h1>节点1: init_doc_node（顺序执行）</h1>
+<div class="node-io">
+<h3>数据流 &amp; 依赖关系</h3>
+<div class="io-row"><span class="io-label">上游节点</span><span class="io-val"><span class="io-tag">START</span>（Pipeline 入口，由 upload 路由触发）</span></div>
+<div class="io-row"><span class="io-label">同级节点</span><span class="io-val">无</span></div>
+<div class="io-row"><span class="io-label">下游节点</span><span class="io-val"><span class="io-tag io-tag-route">_should_continue 路由</span> → <span class="io-tag io-tag-down">product_support (2a)</span> <span class="io-tag io-tag-down">parse_params (2b)</span> <span class="io-tag io-tag-down">function_signature_extract (2c)</span></span></div>
+<div class="io-row"><span class="io-label">State 输入</span><span class="io-val"><code>operator_name</code>, <code>content</code>, <code>content_hash</code>（upload 路由构造的初始状态）</span></div>
+<div class="io-row"><span class="io-label">State 输出</span><span class="io-val"><code>operator_id</code>, <code>doc_id</code>, <code>version</code>, <code>sections</code>, <code>cann_version</code>, <code>status</code>, <code>error</code></span></div>
+<div class="io-row"><span class="io-label">DB 写入</span><span class="io-val"><code>operators</code> (INSERT), <code>document_versions</code> (INSERT: content, content_hash, parsed_data)</span></div>
+</div>
 
-<h3>5.2 各节点详细职责</h3>
-
-<h4>节点1: init_doc_node（顺序执行）</h4>
 <p><strong>触发条件</strong>：Pipeline 启动后第一个执行。</p>
 <div class="flow-chart">init_doc_node(state)
   │
@@ -320,22 +398,93 @@ flowchart TD
        └─ 返回 {status, version, doc_id, cann_version, sections, error=None}</div>
 <p><strong>输出状态</strong>：<code>operator_id</code>, <code>doc_id</code>, <code>version</code>, <code>sections</code>, <code>cann_version</code>, <code>status</code>, <code>error</code></p>
 
-<h4>路由函数：_should_continue</h4>
+
+</section>
+<section class="content-section" id="sec-route">
+<h1>路由函数：_should_continue</h1>
 <pre><code>def _should_continue(state: dict) -&gt; list[str]:
     if state.get("status") in ("error",):
         return END                    # 终止 Pipeline
-    return ["product_support", "parse_params"]  # 扇出到两个并行节点</code></pre>
+    return ["product_support", "parse_params", "function_signature_extract"]  # 扇出到三个并行节点</code></pre>
 <div class="callout">⚠ <code>status=="unchanged"</code> 时仍扇出到并行节点，导致不必要的 MCP 重复调用。应在此处加入 <code>"unchanged"</code> 判断直接终止 Pipeline。</div>
 
-<h4>节点2a: product_support_node（与 2b 并行执行）</h4>
-<p><strong>流程</strong>：MCP 获取文档 → 查找 product_support section → LLM 提取产品支持表 → MCP 保存到 document_versions.product_support。</p>
+
+</section>
+<section class="content-section" id="sec-node2a">
+<h1>节点2a: product_support_node（与 2b、2c 并行执行）</h1>
+<div class="node-io">
+<h3>数据流 &amp; 依赖关系</h3>
+<div class="io-row"><span class="io-label">上游节点</span><span class="io-val"><span class="io-tag">init_doc (节点1)</span>（通过 _should_continue 路由）</span></div>
+<div class="io-row"><span class="io-label">同级节点</span><span class="io-val"><span class="io-tag io-tag-sib">parse_params (2b)</span> <span class="io-tag io-tag-sib">function_signature_extract (2c)</span> — 三者并行执行</span></div>
+<div class="io-row"><span class="io-label">下游节点</span><span class="io-val"><span class="io-tag io-tag-down">src_content_extract (节点3)</span>（等待 2a+2b+2c 全部完成）</span></div>
+<div class="io-row"><span class="io-label">State 输入</span><span class="io-val"><code>doc_id</code>, <code>sections</code>（来自节点1）</span></div>
+<div class="io-row"><span class="io-label">State 输出</span><span class="io-val"><code>product_support</code>, <code>error</code></span></div>
+<div class="io-row"><span class="io-label">DB 写入</span><span class="io-val"><code>platform_support</code> (UPSERT: platform_name, is_supported; 同时写入 <code>document_versions.product_support</code> JSON)</span></div>
+</div>
+
+<p><strong>流程</strong>：MCP 获取文档 → 查找 product_support section → LLM 提取产品支持表 → MCP 保存到 document_versions.product_support + platform_support 表（UPSERT，保护已有确定性数据）。</p>
 <p><strong>输出状态</strong>：<code>product_support: list[dict]</code>, <code>error</code></p>
 
-<h4>节点2b: parse_params_node（与 2a 并行执行）</h4>
+
+</section>
+<section class="content-section" id="sec-node2b">
+<h1>节点2b: parse_params_node（与 2a、2c 并行执行）</h1>
+<div class="node-io">
+<h3>数据流 &amp; 依赖关系</h3>
+<div class="io-row"><span class="io-label">上游节点</span><span class="io-val"><span class="io-tag">init_doc (节点1)</span>（通过 _should_continue 路由）</span></div>
+<div class="io-row"><span class="io-label">同级节点</span><span class="io-val"><span class="io-tag io-tag-sib">product_support (2a)</span> <span class="io-tag io-tag-sib">function_signature_extract (2c)</span> — 三者并行执行</span></div>
+<div class="io-row"><span class="io-label">下游节点</span><span class="io-val"><span class="io-tag io-tag-down">src_content_extract (节点3)</span>（等待 2a+2b+2c 全部完成）</span></div>
+<div class="io-row"><span class="io-label">State 输入</span><span class="io-val"><code>doc_id</code>, <code>sections</code>（来自节点1）</span></div>
+<div class="io-row"><span class="io-label">State 输出</span><span class="io-val"><code>parameters</code>, <code>error</code></span></div>
+<div class="io-row"><span class="io-label">DB 写入</span><span class="io-val"><code>parameters</code> (INSERT: function_name, param_name, param_type)</span></div>
+</div>
+
 <p><strong>流程</strong>：MCP 获取文档 → 查找 function_prototype section → LLM 提取函数参数列表 → 展开为参数记录 → MCP 保存到 parameters 表。</p>
 <p><strong>输出状态</strong>：<code>parameters: list[dict]</code>, <code>error</code></p>
 
-<h4>节点3: src_content_extract_node（顺序执行，等待 2a 和 2b 都完成）</h4>
+
+</section>
+<section class="content-section" id="sec-node2c">
+<h1>节点2c: function_signature_extract_node（与 2a、2b 并行执行）</h1>
+<div class="node-io">
+<h3>数据流 &amp; 依赖关系</h3>
+<div class="io-row"><span class="io-label">上游节点</span><span class="io-val"><span class="io-tag">init_doc (节点1)</span>（通过 _should_continue 路由）</span></div>
+<div class="io-row"><span class="io-label">同级节点</span><span class="io-val"><span class="io-tag io-tag-sib">product_support (2a)</span> <span class="io-tag io-tag-sib">parse_params (2b)</span> — 三者并行执行</span></div>
+<div class="io-row"><span class="io-label">下游节点</span><span class="io-val"><span class="io-tag io-tag-down">src_content_extract (节点3)</span>（等待 2a+2b+2c 全部完成）</span></div>
+<div class="io-row"><span class="io-label">State 输入</span><span class="io-val"><code>doc_id</code>, <code>sections</code>（来自节点1）</span></div>
+<div class="io-row"><span class="io-label">State 输出</span><span class="io-val"><code>error</code></span></div>
+<div class="io-row"><span class="io-label">DB 写入</span><span class="io-val"><code>function_signatures</code> (DELETE + INSERT: function_name, return_type, parameters, full_signature)</span></div>
+</div>
+
+<p><strong>流程</strong>：MCP 获取 function_prototype section → LLM 提取结构化函数签名（函数名、返回类型、参数列表、完整签名） → MCP 保存到 function_signatures 表。</p>
+<div class="flow-chart">function_signature_extract_node(state)
+  │
+  ├─ MCP: get_section(doc_id, "function_prototype")
+  │    └─ 获取函数原型章节内容
+  │
+  ├─ LLM: FUNCTION_SIGNATURE_EXTRACT_PROMPT.format(content=...)
+  │    └─ 提取每个函数的 function_name, return_type, parameters [{name, type}], full_signature
+  │    └─ 返回 JSON 数组
+  │
+  └─ MCP: save_function_signatures(doc_id, signatures)
+       └─ DELETE + INSERT function_signatures 表</div>
+<p><strong>输出状态</strong>：<code>error</code></p>
+
+
+</section>
+<section class="content-section" id="sec-node3">
+<h1>节点3: src_content_extract_node（顺序执行，等待 2a、2b 和 2c 都完成）</h1>
+<div class="node-io">
+<h3>数据流 &amp; 依赖关系</h3>
+<div class="io-row"><span class="io-label">上游节点</span><span class="io-val"><span class="io-tag">product_support (2a)</span> <span class="io-tag">parse_params (2b)</span> <span class="io-tag">function_signature_extract (2c)</span> — 等待三者全部完成</span></div>
+<div class="io-row"><span class="io-label">同级节点</span><span class="io-val">无（独占顺序执行）</span></div>
+<div class="io-row"><span class="io-label">下游节点</span><span class="io-val"><span class="io-tag io-tag-down">param_desc_extract (节点4)</span></span></div>
+<div class="io-row"><span class="io-label">State 输入</span><span class="io-val"><code>doc_id</code>（来自节点1）, <code>parameters</code>（来自节点2b，含 function_name/param_name/param_type）</span></div>
+<div class="io-row"><span class="io-label">MCP 读取</span><span class="io-val"><code>query_params_by_doc_id(doc_id)</code>, <code>get_section("params_get_workspace")</code>, <code>get_section("params_execute")</code></span></div>
+<div class="io-row"><span class="io-label">State 输出</span><span class="io-val"><code>parameters</code>（追加 src_content 字段）, <code>error</code></span></div>
+<div class="io-row"><span class="io-label">DB 写入</span><span class="io-val"><code>parameters.src_content</code> (UPDATE)</span></div>
+</div>
+
 <p><strong>流程</strong>：</p>
 <div class="flow-chart">src_content_extract_node(state)
   │
@@ -354,7 +503,20 @@ flowchart TD
   └─ return {"parameters": all_updates, "error": None}  ← 参数写入state传递给下游</div>
 <p><strong>输出状态</strong>：<code>parameters: list[dict]</code>, <code>error</code></p>
 
-<h4>节点4: param_desc_extract_node（顺序执行，等待节点3完成）</h4>
+
+</section>
+<section class="content-section" id="sec-node4">
+<h1>节点4: param_desc_extract_node（顺序执行，等待节点3完成）</h1>
+<div class="node-io">
+<h3>数据流 &amp; 依赖关系</h3>
+<div class="io-row"><span class="io-label">上游节点</span><span class="io-val"><span class="io-tag">src_content_extract (节点3)</span></span></div>
+<div class="io-row"><span class="io-label">同级节点</span><span class="io-val">无（独占顺序执行）</span></div>
+<div class="io-row"><span class="io-label">下游节点</span><span class="io-val"><span class="io-tag io-tag-down">shape (5a)</span> <span class="io-tag io-tag-down">dtype (5b)</span> <span class="io-tag io-tag-down">dformat (5c)</span> <span class="io-tag io-tag-down">optional (5d)</span> <span class="io-tag io-tag-down">param_relation (5e)</span> <span class="io-tag io-tag-down">param_attr (5f)</span> <span class="io-tag io-tag-down">array_length (5g)</span> <span class="io-tag io-tag-down">allowed_range (5h)</span> — 8个节点并行扇出</span></div>
+<div class="io-row"><span class="io-label">State 输入</span><span class="io-val"><code>doc_id</code>, <code>parameters</code>（来自节点3，含 src_content）</span></div>
+<div class="io-row"><span class="io-label">State 输出</span><span class="io-val"><code>parameters</code>（追加 description, direction 字段）, <code>error</code></span></div>
+<div class="io-row"><span class="io-label">DB 写入</span><span class="io-val"><code>parameters.description</code>, <code>parameters.direction</code> (UPDATE)</span></div>
+</div>
+
 <p><strong>流程</strong>：</p>
 <div class="flow-chart">param_desc_extract_node(state)
   │
@@ -370,10 +532,24 @@ flowchart TD
   │
   └─ return {"parameters": all_updates, "error": None}  ← 参数写入state传递给下游</div>
 <p><strong>输出状态</strong>：<code>parameters: list[dict]</code>, <code>error</code></p>
-<p><strong>注意</strong>：<code>_extract_one()</code> 中 <code>data_type</code>、<code>data_format</code>、<code>shape</code>、<code>memory_desc</code> 仍硬编码为空字符串。其中 <code>shape</code> 由下游 <code>shape_extract</code> 填充，<code>data_type</code> 由 <code>dtype_extract</code> 填充，<code>is_optional</code> 由 <code>optional_extract</code> 填充。</p>
+<p><strong>注意</strong>：<code>_extract_one()</code> 中 <code>data_type</code>、<code>data_format</code>、<code>shape</code> 仍硬编码为空字符串。其中 <code>shape</code> 由下游 <code>shape_extract</code> 填充，<code>data_type</code> 由 <code>dtype_extract</code> 填充，<code>data_format</code> 由 <code>dformat_extract</code> 填充，<code>is_optional</code> 由 <code>optional_extract</code> 填充，<code>is_support_discontinuous</code> 和 <code>param_desc</code> 由 <code>param_attr_extract</code> 填充，<code>array_length</code> 由 <code>array_length_extract</code> 填充，<code>allowed_range_value</code> 由 <code>allowed_range_extract</code> 填充。<code>usage_notes</code> 和 <code>memory_desc</code> 字段已从数据库和代码中移除。</p>
+<p><strong>direction 提取</strong>：<code>_parse_direction()</code> 从 LLM 生成的 Markdown 表格"| 输入/输出 |"行提取方向，支持匹配 <code>输入</code>/<code>输出</code>/<code>入参</code>/<code>出参</code>/<code>计算输入</code>/<code>计算输出</code> 及英文 <code>input</code>/<code>output</code>。</p>
 
-<h4>节点5a: shape_extract_node（与 5b、5c 并行执行）</h4>
-<p><strong>触发条件</strong>：param_desc_extract_node 完成后，与 dtype_extract_node、optional_extract_node <strong>同时启动</strong>。</p>
+
+</section>
+<section class="content-section" id="sec-node5a">
+<h1>节点5a: shape_extract_node（与 5b、5c、5d、5f、5g、5h 并行执行）</h1>
+<div class="node-io">
+<h3>数据流 &amp; 依赖关系</h3>
+<div class="io-row"><span class="io-label">上游节点</span><span class="io-val"><span class="io-tag">param_desc_extract (节点4)</span></span></div>
+<div class="io-row"><span class="io-label">同级节点</span><span class="io-val"><span class="io-tag io-tag-sib">shape (5a)</span> <span class="io-tag io-tag-sib">dtype (5b)</span> <span class="io-tag io-tag-sib">dformat (5c)</span> <span class="io-tag io-tag-sib">optional (5d)</span> <span class="io-tag io-tag-sib">param_relation (5e)</span> <span class="io-tag io-tag-sib">param_attr (5f)</span> <span class="io-tag io-tag-sib">array_length (5g)</span> <span class="io-tag io-tag-sib">allowed_range (5h)</span> — 8个节点并行（当前为 5a shape）</span></div>
+<div class="io-row"><span class="io-label">下游节点</span><span class="io-val"><span class="io-tag io-tag-end">END</span>（返回 UploadResponse）</span></div>
+<div class="io-row"><span class="io-label">State 输入</span><span class="io-val"><code>doc_id</code>, <code>parameters</code>（来自节点4，含 description）</span></div>
+<div class="io-row"><span class="io-label">State 输出</span><span class="io-val"><code>error</code></span></div>
+<div class="io-row"><span class="io-label">DB 写入</span><span class="io-val"><code>parameters.shape</code> (UPDATE)</span></div>
+<div class="io-row"><span class="io-label">数据来源</span><span class="io-val">从 State 读取（不调 MCP 查询参数），LLM 提取</span></div></div>
+
+<p><strong>触发条件</strong>：param_desc_extract_node 完成后，与 dtype_extract_node、dformat_extract_node、optional_extract_node、param_attr_extract_node、array_length_extract_node、allowed_range_extract_node <strong>同时启动</strong>。</p>
 <p><strong>流程</strong>：</p>
 <div class="flow-chart">shape_extract_node(state)
   │
@@ -390,8 +566,21 @@ flowchart TD
        └─ 专用工具，SQL 只更新 shape 列</div>
 <p><strong>输出状态</strong>：<code>error</code></p>
 
-<h4>节点5b: dtype_extract_node（与 5a、5c 并行执行）</h4>
-<p><strong>触发条件</strong>：param_desc_extract_node 完成后，与 shape_extract_node、optional_extract_node <strong>同时启动</strong>。</p>
+
+</section>
+<section class="content-section" id="sec-node5b">
+<h1>节点5b: dtype_extract_node（与 5a、5c、5d、5f、5g、5h 并行执行）</h1>
+<div class="node-io">
+<h3>数据流 &amp; 依赖关系</h3>
+<div class="io-row"><span class="io-label">上游节点</span><span class="io-val"><span class="io-tag">param_desc_extract (节点4)</span></span></div>
+<div class="io-row"><span class="io-label">同级节点</span><span class="io-val"><span class="io-tag io-tag-sib">shape (5a)</span> <span class="io-tag io-tag-sib">dtype (5b)</span> <span class="io-tag io-tag-sib">dformat (5c)</span> <span class="io-tag io-tag-sib">optional (5d)</span> <span class="io-tag io-tag-sib">param_relation (5e)</span> <span class="io-tag io-tag-sib">param_attr (5f)</span> <span class="io-tag io-tag-sib">array_length (5g)</span> <span class="io-tag io-tag-sib">allowed_range (5h)</span> — 8个节点并行（当前为 5b dtype）</span></div>
+<div class="io-row"><span class="io-label">下游节点</span><span class="io-val"><span class="io-tag io-tag-end">END</span>（返回 UploadResponse）</span></div>
+<div class="io-row"><span class="io-label">State 输入</span><span class="io-val"><code>doc_id</code>, <code>parameters</code>（来自节点4，含 description）</span></div>
+<div class="io-row"><span class="io-label">State 输出</span><span class="io-val"><code>error</code></span></div>
+<div class="io-row"><span class="io-label">DB 写入</span><span class="io-val"><code>parameters.dtype_desc</code> (UPDATE)</span></div>
+<div class="io-row"><span class="io-label">数据来源</span><span class="io-val">从 State 读取（不调 MCP 查询参数），LLM 提取</span></div></div>
+
+<p><strong>触发条件</strong>：param_desc_extract_node 完成后，与 shape_extract_node、dformat_extract_node、optional_extract_node、param_attr_extract_node、array_length_extract_node、allowed_range_extract_node <strong>同时启动</strong>。</p>
 <p><strong>流程</strong>：</p>
 <div class="flow-chart">dtype_extract_node(state)
   │
@@ -407,10 +596,54 @@ flowchart TD
   └─ MCP: update_param_dtype(doc_id, dtype_updates)
        └─ 专用工具，SQL 只更新 dtype_desc 列</div>
 <p><strong>输出状态</strong>：<code>error</code></p>
-<p><strong>与 5a 的关系</strong>：三个节点代码结构完全相同，仅 prompt、提取目标列、MCP 工具不同。都从 <code>state.parameters</code> 读取，各自写入独立列（<code>shape</code> / <code>dtype_desc</code> / <code>is_optional</code>），互不冲突。</p>
+<p><strong>与 5a/5c/5d/5f/5g/5h 的关系</strong>：5a-5d 代码结构完全相同，仅 prompt、提取目标列、MCP 工具不同。都从 <code>state.parameters</code> 读取，各自写入独立列（<code>shape</code> / <code>dtype_desc</code> / <code>dformat_desc</code> / <code>is_optional</code>），互不冲突。5f 无 LLM 调用，使用纯正则提取 <code>is_support_discontinuous</code> 和 <code>param_desc</code>。5g 使用 LLM 提取 <code>array_length</code>。5h 使用 LLM 提取 <code>allowed_range_value</code>。</p>
 
-<h4>节点5c: optional_extract_node（与 5a、5b 并行执行）</h4>
-<p><strong>触发条件</strong>：param_desc_extract_node 完成后，与 shape/dtype <strong>同时启动</strong>。</p>
+
+</section>
+<section class="content-section" id="sec-node5c">
+<h1>节点5c: dformat_extract_node（与 5a、5b、5d、5f、5g、5h 并行执行）</h1>
+<div class="node-io">
+<h3>数据流 &amp; 依赖关系</h3>
+<div class="io-row"><span class="io-label">上游节点</span><span class="io-val"><span class="io-tag">param_desc_extract (节点4)</span></span></div>
+<div class="io-row"><span class="io-label">同级节点</span><span class="io-val"><span class="io-tag io-tag-sib">shape (5a)</span> <span class="io-tag io-tag-sib">dtype (5b)</span> <span class="io-tag io-tag-sib">dformat (5c)</span> <span class="io-tag io-tag-sib">optional (5d)</span> <span class="io-tag io-tag-sib">param_relation (5e)</span> <span class="io-tag io-tag-sib">param_attr (5f)</span> <span class="io-tag io-tag-sib">array_length (5g)</span> <span class="io-tag io-tag-sib">allowed_range (5h)</span> — 8个节点并行（当前为 5c dformat）</span></div>
+<div class="io-row"><span class="io-label">下游节点</span><span class="io-val"><span class="io-tag io-tag-end">END</span>（返回 UploadResponse）</span></div>
+<div class="io-row"><span class="io-label">State 输入</span><span class="io-val"><code>doc_id</code>, <code>parameters</code>（来自节点4，含 description）</span></div>
+<div class="io-row"><span class="io-label">State 输出</span><span class="io-val"><code>error</code></span></div>
+<div class="io-row"><span class="io-label">DB 写入</span><span class="io-val"><code>parameters.dformat_desc</code> (UPDATE)</span></div>
+<div class="io-row"><span class="io-label">数据来源</span><span class="io-val">从 State 读取（不调 MCP 查询参数），LLM 提取</span></div></div>
+
+<p><strong>触发条件</strong>：param_desc_extract_node 完成后，与 shape_extract_node、dtype_extract_node、optional_extract_node、param_attr_extract_node、array_length_extract_node、allowed_range_extract_node <strong>同时启动</strong>。</p>
+<p><strong>流程</strong>：</p>
+<div class="flow-chart">dformat_extract_node(state)
+  │
+  ├─ state.get("parameters", [])  ← 从 state 读，不调 MCP 查询
+  ├─ 过滤 description 非空的参数
+  │
+  ├─ 逐参数并发 LLM（asyncio.Semaphore(5)）:
+  │    └─ DFORMAT_EXTRACT_PROMPT.format(param_name=..., params_text=description)
+  │       └─ 从 Markdown 表格 "数据格式" 行提取
+  │       └─ 返回 JSON: {"param_name": "...", "dformat": "..."}
+  │       └─ 代码层 .upper() 统一为大写
+  │
+  └─ MCP: update_param_dformat(doc_id, dformat_updates)
+       └─ 专用工具，SQL 只更新 dformat_desc 列</div>
+<p><strong>输出状态</strong>：<code>error</code></p>
+
+
+</section>
+<section class="content-section" id="sec-node5d">
+<h1>节点5d: optional_extract_node（与 5a、5b、5c、5f、5g、5h 并行执行）</h1>
+<div class="node-io">
+<h3>数据流 &amp; 依赖关系</h3>
+<div class="io-row"><span class="io-label">上游节点</span><span class="io-val"><span class="io-tag">param_desc_extract (节点4)</span></span></div>
+<div class="io-row"><span class="io-label">同级节点</span><span class="io-val"><span class="io-tag io-tag-sib">shape (5a)</span> <span class="io-tag io-tag-sib">dtype (5b)</span> <span class="io-tag io-tag-sib">dformat (5c)</span> <span class="io-tag io-tag-sib">optional (5d)</span> <span class="io-tag io-tag-sib">param_relation (5e)</span> <span class="io-tag io-tag-sib">param_attr (5f)</span> <span class="io-tag io-tag-sib">array_length (5g)</span> <span class="io-tag io-tag-sib">allowed_range (5h)</span> — 8个节点并行（当前为 5d optional）</span></div>
+<div class="io-row"><span class="io-label">下游节点</span><span class="io-val"><span class="io-tag io-tag-end">END</span>（返回 UploadResponse）</span></div>
+<div class="io-row"><span class="io-label">State 输入</span><span class="io-val"><code>doc_id</code>, <code>parameters</code>（来自节点4，含 description）</span></div>
+<div class="io-row"><span class="io-label">State 输出</span><span class="io-val"><code>error</code></span></div>
+<div class="io-row"><span class="io-label">DB 写入</span><span class="io-val"><code>parameters.is_optional</code> (UPDATE)</span></div>
+<div class="io-row"><span class="io-label">数据来源</span><span class="io-val">从 State 读取（不调 MCP 查询参数），LLM 提取</span></div></div>
+
+<p><strong>触发条件</strong>：param_desc_extract_node 完成后，与 shape/dtype/dformat/param_attr/array_length/allowed_range <strong>同时启动</strong>。</p>
 <p><strong>流程</strong>：</p>
 <div class="flow-chart">optional_extract_node(state)
   │
@@ -428,7 +661,360 @@ flowchart TD
        └─ 专用工具，SQL 只更新 is_optional 列</div>
 <p><strong>输出状态</strong>：<code>error</code></p>
 
-<h3>5.3 执行时序总结</h3>
+
+</section>
+<section class="content-section" id="sec-node5e">
+<h1>节点5e: param_relation_extract（与 5a、5b、5c、5d、5f、5g、5h 并行执行）</h1>
+<div class="node-io">
+<h3>数据流 &amp; 依赖关系</h3>
+<div class="io-row"><span class="io-label">上游节点</span><span class="io-val"><span class="io-tag">param_desc_extract (节点4)</span></span></div>
+<div class="io-row"><span class="io-label">同级节点</span><span class="io-val"><span class="io-tag io-tag-sib">shape (5a)</span> <span class="io-tag io-tag-sib">dtype (5b)</span> <span class="io-tag io-tag-sib">dformat (5c)</span> <span class="io-tag io-tag-sib">optional (5d)</span> <span class="io-tag io-tag-sib">param_attr (5f)</span> <span class="io-tag io-tag-sib">array_length (5g)</span> <span class="io-tag io-tag-sib">allowed_range (5h)</span> — 8个节点并行（当前为 5e param_relation）</span></div>
+<div class="io-row"><span class="io-label">下游节点</span><span class="io-val"><span class="io-tag io-tag-end">END</span>（返回 UploadResponse）</span></div>
+<div class="io-row"><span class="io-label">State 输入</span><span class="io-val"><code>doc_id</code>, <code>parameters</code>（来自节点4）</span></div>
+<div class="io-row"><span class="io-label">MCP 读取</span><span class="io-val"><code>get_section("params_get_workspace")</code>, <code>get_section("params_execute")</code>, <code>get_section("constraints")</code></span></div>
+<div class="io-row"><span class="io-label">State 输出</span><span class="io-val"><code>error</code></span></div>
+<div class="io-row"><span class="io-label">DB 写入</span><span class="io-val"><code>param_relations</code> (DELETE + INSERT: relation_type, precondition, description, params, param_optional, source_citation)</span></div>
+<div class="io-row"><span class="io-label">特殊说明</span><span class="io-val">本节点为 LangGraph 子图（5个子节点），内部通过 MCP 获取章节后由 LLM 提取关系，不依赖 state.parameters 中的 description</span></div>
+</div>
+
+<p><strong>触发条件</strong>：param_desc_extract_node 完成后，与 shape/dtype/dformat/optional/param_attr/array_length/allowed_range <strong>同时启动</strong>。</p>
+<p><strong>架构</strong>：这是一个 <strong>LangGraph 子图</strong>（<code>create_param_relation_subgraph()</code>），拥有独立的 <code>RelationExtractState</code>，内部包含 5 个子节点。</p>
+<p><strong>流程</strong>：</p>
+<div class="flow-chart">param_relation_extract 子图（5 个子节点）
+  │
+  ├─ 子节点1: fetch_sections_node
+  │    ├─ MCP: get_section(doc_id, "params_get_workspace")
+  │    ├─ MCP: get_section(doc_id, "params_execute")
+  │    ├─ MCP: get_section(doc_id, "constraints")  ← 追加到 ws_content 末尾
+  │    └─ 返回 ws_section_content, exe_section_content
+  │
+  ├─ 子节点2a: extract_ws_node（与 2b 并行）
+  │    └─ LLM: RELATION_EXTRACT_PROMPT.format(section_content=ws_content)
+  │       └─ 提取 10 种关系类型（dtype/shape/dformat/value/组合类型/presence/shape&amp;value）
+  │       └─ 返回 JSON 数组: [{relation_type, precondition, description, params, ...}]
+  │
+  ├─ 子节点2b: extract_exe_node（与 2a 并行）
+  │    └─ LLM: RELATION_EXTRACT_PROMPT.format(section_content=exe_content)
+  │       └─ 同上格式
+  │
+  ├─ 子节点3: merge_relations_node
+  │    └─ 合并 ws_relations + exe_relations
+  │    └─ _dedup_relations(): 按 (relation_type, frozenset(params), precondition) 去重
+  │       └─ 重复时保留 source_citation 更长的记录
+  │
+  └─ 子节点4: save_relations_node
+       └─ MCP: save_relations(doc_id, merged_relations)
+            └─ DELETE + INSERT param_relations 表</div>
+<p><strong>输出状态</strong>：<code>error</code></p>
+<p><strong>关系类型</strong>：<code>dtype</code>, <code>shape</code>, <code>dformat</code>, <code>value</code>, <code>dtype&amp;shape</code>, <code>dtype&amp;dformat</code>, <code>dformat&amp;shape</code>, <code>dtype&amp;dformat&amp;shape</code>, <code>presence</code>, <code>shape&amp;value</code></p>
+
+
+</section>
+<section class="content-section" id="sec-node5f">
+<h1>节点5f: param_attr_extract_node（与 5a、5b、5c、5d、5g、5h 并行执行）</h1>
+<div class="node-io">
+<h3>数据流 &amp; 依赖关系</h3>
+<div class="io-row"><span class="io-label">上游节点</span><span class="io-val"><span class="io-tag">param_desc_extract (节点4)</span></span></div>
+<div class="io-row"><span class="io-label">同级节点</span><span class="io-val"><span class="io-tag io-tag-sib">shape (5a)</span> <span class="io-tag io-tag-sib">dtype (5b)</span> <span class="io-tag io-tag-sib">dformat (5c)</span> <span class="io-tag io-tag-sib">optional (5d)</span> <span class="io-tag io-tag-sib">param_relation (5e)</span> <span class="io-tag io-tag-sib">param_attr (5f)</span> <span class="io-tag io-tag-sib">array_length (5g)</span> <span class="io-tag io-tag-sib">allowed_range (5h)</span> — 8个节点并行（当前为 5f param_attr）</span></div>
+<div class="io-row"><span class="io-label">下游节点</span><span class="io-val"><span class="io-tag io-tag-end">END</span>（返回 UploadResponse）</span></div>
+<div class="io-row"><span class="io-label">State 输入</span><span class="io-val"><code>doc_id</code>, <code>parameters</code>（来自节点4，含 description）</span></div>
+<div class="io-row"><span class="io-label">State 输出</span><span class="io-val"><code>error</code></span></div>
+<div class="io-row"><span class="io-label">DB 写入</span><span class="io-val"><code>parameters.is_support_discontinuous</code>, <code>parameters.param_desc</code> (UPDATE)</span></div>
+<div class="io-row"><span class="io-label">数据来源</span><span class="io-val">从 State 读取（不调 MCP 查询参数），<strong>无 LLM 调用</strong>，纯正则提取</span></div></div>
+
+<p><strong>触发条件</strong>：param_desc_extract_node 完成后，与 shape/dtype/dformat/optional/array_length/allowed_range/param_relation <strong>同时启动</strong>。</p>
+<p><strong>特点</strong>：<strong>无 LLM 调用</strong>，纯正则提取，从格式化的 Markdown description 表格中同时提取两个属性。</p>
+<p><strong>提取字段</strong>：</p>
+<ul>
+  <li><code>is_support_discontinuous</code> — 从"| 非连续Tensor |"行正则提取</li>
+  <li><code>param_desc</code> — 从"| 描述 |"行正则提取参数描述摘要</li>
+</ul>
+<p><strong>流程</strong>：</p>
+<div class="flow-chart">param_attr_extract_node(state)
+  │
+  ├─ state.get("parameters", [])  ← 从 state 读，不调 MCP 查询
+  ├─ 过滤 description 非空的参数
+  │
+  ├─ 逐参数处理（纯正则，无 LLM）:
+  │    │
+  │    ├─ _extract_discontinuous(param):
+  │    │    ├─ 检查 param_type 是否包含 "Tensor"（大小写不敏感）
+  │    │    │    ├─ 不含 "Tensor" → {"value": "N/A", "src_text": ""}
+  │    │    │    └─ 含 "Tensor" → 继续提取
+  │    │    │
+  │    │    ├─ 正则匹配: r"^\|\s*非连续\s*Tensor\s*\|\s*(.+?)\s*\|"
+  │    │    │    ├─ 匹配到且值含 √/✓/✔/支持 → {"value": true, "src_text": "| 非连续Tensor | √ |"}
+  │    │    │    └─ 匹配到但值非支持符号 → {"value": false, "src_text": ""}
+  │    │    │
+  │    │    └─ 未匹配到行 → {"value": false, "src_text": ""}
+  │    │
+  │    └─ _extract_param_desc(param):
+  │         ├─ 正则匹配: r"^\|\s*描述\s*\|\s*(.+?)\s*\|"
+  │         ├─ 匹配到且值非"（无）"/"无"/空 → 提取值文本
+  │         └─ 未匹配或值为空 → ""
+  │
+  └─ MCP: update_param_attrs(doc_id, updates)
+       └─ 批量 UPDATE is_support_discontinuous + param_desc 两列</div>
+<p><strong>输出状态</strong>：<code>error</code></p>
+<p><strong>存储格式</strong>：<code>is_support_discontinuous TEXT</code>，JSON 字符串 <code>{"value": true/false/"N/A", "src_text": "..."}</code>；<code>param_desc TEXT</code>，纯文本描述摘要。</p>
+
+
+</section>
+<section class="content-section" id="sec-node5g">
+<h1>节点5g: array_length_extract_node（与 5a、5b、5c、5d、5f、5h 并行执行）</h1>
+<div class="node-io">
+<h3>数据流 &amp; 依赖关系</h3>
+<div class="io-row"><span class="io-label">上游节点</span><span class="io-val"><span class="io-tag">param_desc_extract (节点4)</span></span></div>
+<div class="io-row"><span class="io-label">同级节点</span><span class="io-val"><span class="io-tag io-tag-sib">shape (5a)</span> <span class="io-tag io-tag-sib">dtype (5b)</span> <span class="io-tag io-tag-sib">dformat (5c)</span> <span class="io-tag io-tag-sib">optional (5d)</span> <span class="io-tag io-tag-sib">param_relation (5e)</span> <span class="io-tag io-tag-sib">param_attr (5f)</span> <span class="io-tag io-tag-sib">array_length (5g)</span> <span class="io-tag io-tag-sib">allowed_range (5h)</span> — 8个节点并行（当前为 5g array_length）</span></div>
+<div class="io-row"><span class="io-label">下游节点</span><span class="io-val"><span class="io-tag io-tag-end">END</span>（返回 UploadResponse）</span></div>
+<div class="io-row"><span class="io-label">State 输入</span><span class="io-val"><code>doc_id</code>, <code>parameters</code>（来自节点4，含 description）</span></div>
+<div class="io-row"><span class="io-label">State 输出</span><span class="io-val"><code>error</code></span></div>
+<div class="io-row"><span class="io-label">DB 写入</span><span class="io-val"><code>parameters.array_length</code> (UPDATE)</span></div>
+<div class="io-row"><span class="io-label">数据来源</span><span class="io-val">从 State 读取（不调 MCP 查询参数），LLM 提取（仅数组类型参数）</span></div></div>
+
+<p><strong>触发条件</strong>：param_desc_extract_node 完成后，与 shape/dtype/dformat/optional/param_attr/allowed_range/param_relation <strong>同时启动</strong>。</p>
+<p><strong>特点</strong>：先按 <code>param_type</code> 分类，仅对数组类型参数调用 LLM 提取，非数组类型直接标记 <code>"N/A"</code>。</p>
+<p><strong>数组类型判定</strong>：<code>param_type</code> 包含以下任一子串即视为数组类型：<code>aclIntArray</code>、<code>aclFloatArray</code>、<code>aclBoolArray</code>、<code>aclTensorList</code>、<code>aclScalarList</code>。</p>
+<p><strong>流程</strong>：</p>
+<div class="flow-chart">array_length_extract_node(state)
+  │
+  ├─ state.get("parameters", [])  ← 从 state 读，不调 MCP 查询
+  ├─ 过滤 description 非空的参数
+  │
+  ├─ 按 param_type 分类:
+  │    ├─ 非数组类型 → 直接标记 {"array_length": "N/A"}
+  │    └─ 数组类型 → 进入 LLM 提取流程
+  │
+  ├─ 逐参数并发 LLM（asyncio.Semaphore(5)）:
+  │    └─ ARRAY_LENGTH_EXTRACT_PROMPT.format(params_text=description)
+  │       └─ 从 description 表格中提取数组长度约束
+  │       └─ 返回 JSON: {"array_length": "..."}
+  │       └─ 支持 ```json``` 代码块和裸 JSON 两种格式解析
+  │
+  └─ MCP: update_param_array_length(doc_id, updates)
+       └─ 批量 UPDATE array_length 列</div>
+<p><strong>输出状态</strong>：<code>error</code></p>
+<p><strong>存储格式</strong>：<code>array_length TEXT NOT NULL DEFAULT 'N/A'</code>，存储数组长度值（如 <code>"8"</code>、<code>"dimNum"</code>）或 <code>"N/A"</code>。</p>
+
+
+</section>
+<section class="content-section" id="sec-node5h">
+<h1>节点5h: allowed_range_extract_node（与 5a、5b、5c、5d、5f、5g 并行执行）</h1>
+<div class="node-io">
+<h3>数据流 &amp; 依赖关系</h3>
+<div class="io-row"><span class="io-label">上游节点</span><span class="io-val"><span class="io-tag">param_desc_extract (节点4)</span></span></div>
+<div class="io-row"><span class="io-label">同级节点</span><span class="io-val"><span class="io-tag io-tag-sib">shape (5a)</span> <span class="io-tag io-tag-sib">dtype (5b)</span> <span class="io-tag io-tag-sib">dformat (5c)</span> <span class="io-tag io-tag-sib">optional (5d)</span> <span class="io-tag io-tag-sib">param_relation (5e)</span> <span class="io-tag io-tag-sib">param_attr (5f)</span> <span class="io-tag io-tag-sib">array_length (5g)</span> — 8个节点并行（当前为 5h allowed_range）</span></div>
+<div class="io-row"><span class="io-label">下游节点</span><span class="io-val"><span class="io-tag io-tag-end">END</span>（返回 UploadResponse）</span></div>
+<div class="io-row"><span class="io-label">State 输入</span><span class="io-val"><code>doc_id</code>, <code>parameters</code>（来自节点4，含 description）</span></div>
+<div class="io-row"><span class="io-label">MCP 读取</span><span class="io-val"><code>get_section("params_get_workspace")</code>, <code>get_section("return_codes_get_workspace")</code>, <code>get_section("params_execute")</code>, <code>get_section("return_codes_execute")</code>, <code>get_section("constraints")</code></span></div>
+<div class="io-row"><span class="io-label">State 输出</span><span class="io-val"><code>error</code></span></div>
+<div class="io-row"><span class="io-label">DB 写入</span><span class="io-val"><code>parameters.allowed_range_value</code> (UPDATE: JSON 数组)</span></div>
+<div class="io-row"><span class="io-label">数据来源</span><span class="io-val">从 State 读取参数列表，按 function_name 分组后通过 MCP 获取对应章节，再由 LLM 提取</span></div>
+</div>
+
+<p><strong>触发条件</strong>：param_desc_extract_node 完成后，与 shape/dtype/dformat/optional/param_attr/array_length/param_relation <strong>同时启动</strong>。</p>
+<p><strong>特点</strong>：按 <code>function_name</code> 分组参数，GetWorkspaceSize 函数和 Execute 函数分别获取不同的文档章节内容，然后逐参数调用 LLM 提取取值范围约束。</p>
+<p><strong>流程</strong>：</p>
+<div class="flow-chart">allowed_range_extract_node(state)
+  │
+  ├─ state.get("parameters", [])  ← 从 state 读，不调 MCP 查询
+  │
+  ├─ 按 function_name 分组:
+  │    ├─ GetWorkspaceSize 函数参数:
+  │    │    └─ MCP: get_section(doc_id, "params_get_workspace")
+  │    │         + get_section(doc_id, "return_codes_get_workspace")
+  │    │         + get_section(doc_id, "constraints")
+  │    └─ Execute 函数参数:
+  │         └─ MCP: get_section(doc_id, "params_execute")
+  │              + get_section(doc_id, "return_codes_execute")
+  │              + get_section(doc_id, "constraints")
+  │
+  ├─ 逐参数并发 LLM（asyncio.Semaphore(5)）:
+  │    └─ ALLOWED_RANGE_EXTRACT_PROMPT.format(param_name, param_type, sections_text)
+  │       └─ 提取参数取值范围约束（含平台区分）
+  │       └─ 返回 JSON 数组: [{"platform": "...", "allowed_range_value": "..."}]
+  │       └─ 无约束时返回 []
+  │
+  └─ MCP: update_param_allowed_range(doc_id, updates)
+       └─ 批量 UPDATE allowed_range_value 列</div>
+<p><strong>输出状态</strong>：<code>error</code></p>
+<p><strong>存储格式</strong>：<code>allowed_range_value TEXT NOT NULL DEFAULT '[]'</code>，存储 JSON 数组 <code>[{"platform": "平台名或空", "allowed_range_value": "取值范围描述"}]</code>。</p>
+
+
+</section>
+<section class="content-section" id="sec-node5i">
+<h1>节点5i: return_code_extract_node（与 5a、5b、5c、5d、5f、5g、5h、5j 并行执行）</h1>
+<div class="node-io">
+<h3>数据流 &amp; 依赖关系</h3>
+<div class="io-row"><span class="io-label">上游节点</span><span class="io-val"><span class="io-tag">param_desc_extract (节点4)</span></span></div>
+<div class="io-row"><span class="io-label">同级节点</span><span class="io-val"><span class="io-tag io-tag-sib">shape (5a)</span> <span class="io-tag io-tag-sib">dtype (5b)</span> <span class="io-tag io-tag-sib">dformat (5c)</span> <span class="io-tag io-tag-sib">optional (5d)</span> <span class="io-tag io-tag-sib">param_relation (5e)</span> <span class="io-tag io-tag-sib">param_attr (5f)</span> <span class="io-tag io-tag-sib">array_length (5g)</span> <span class="io-tag io-tag-sib">allowed_range (5h)</span> <span class="io-tag io-tag-sib">determinism (5j)</span> — 10个节点并行（当前为 5i return_codes）</span></div>
+<div class="io-row"><span class="io-label">下游节点</span><span class="io-val"><span class="io-tag io-tag-end">END</span>（返回 UploadResponse）</span></div>
+<div class="io-row"><span class="io-label">State 输入</span><span class="io-val"><code>doc_id</code>, <code>parameters</code>（来自节点4，含 description）</span></div>
+<div class="io-row"><span class="io-label">MCP 读取</span><span class="io-val"><code>get_section("params_get_workspace")</code>, <code>get_section("return_codes_get_workspace")</code>, <code>get_section("params_execute")</code>, <code>get_section("return_codes_execute")</code>, <code>get_section("constraints")</code></span></div>
+<div class="io-row"><span class="io-label">State 输出</span><span class="io-val"><code>error</code></span></div>
+<div class="io-row"><span class="io-label">DB 写入</span><span class="io-val"><code>return_codes</code> (DELETE + INSERT: function_name, return_value, error_code, descriptions)</span></div>
+<div class="io-row"><span class="io-label">数据来源</span><span class="io-val">从 State 读取参数列表，按 function_name 分组后通过 MCP 获取对应章节，再由 LLM 提取错误码信息</span></div>
+</div>
+
+<p><strong>触发条件</strong>：param_desc_extract_node 完成后，与 shape/dtype/dformat/optional/param_attr/array_length/allowed_range/determinism/param_relation <strong>同时启动</strong>。</p>
+<p><strong>特点</strong>：按 <code>function_name</code> 分组参数，GetWorkspaceSize 函数和 Execute 函数分别获取不同的文档章节内容，然后逐参数调用 LLM 提取返回码和错误码。</p>
+<p><strong>流程</strong>：</p>
+<div class="flow-chart">return_code_extract_node(state)
+  │
+  ├─ state.get("parameters", [])  ← 从 state 读，不调 MCP 查询
+  │
+  ├─ 按 function_name 分组:
+  │    ├─ GetWorkspaceSize 函数参数:
+  │    │    └─ MCP: get_section(doc_id, "params_get_workspace")
+  │    │         + get_section(doc_id, "return_codes_get_workspace")
+  │    │         + get_section(doc_id, "constraints")
+  │    └─ Execute 函数参数:
+  │         └─ MCP: get_section(doc_id, "params_execute")
+  │              + get_section(doc_id, "return_codes_execute")
+  │              + get_section(doc_id, "constraints")
+  │
+  ├─ 逐参数并发 LLM（asyncio.Semaphore(5)）:
+  │    └─ RETURN_CODE_EXTRACT_PROMPT.format(param_name, param_type, sections_text)
+  │       └─ 提取返回码（return_value）和错误码（error_code）
+  │       └─ 返回 JSON 数组: [{"return_value": "...", "error_code": 123456, "description": "..."}]
+  │       └─ 无错误码时返回 []
+  │
+  └─ MCP: save_return_codes(doc_id, records)
+       └─ DELETE + INSERT return_codes 表</div>
+<p><strong>输出状态</strong>：<code>error</code></p>
+<p><strong>存储格式</strong>：<code>return_codes</code> 表，每行包含 <code>function_name</code>、<code>return_value</code>（如 "ACLNN_SUCCESS"）、<code>error_code</code>（如 0）、<code>descriptions</code>（JSON 数组）。</p>
+
+
+</section>
+<section class="content-section" id="sec-node5j">
+<h1>节点5j: determinism_extract_node（与 5a、5b、5c、5d、5f、5g、5h、5i 并行执行）</h1>
+<div class="node-io">
+<h3>数据流 &amp; 依赖关系</h3>
+<div class="io-row"><span class="io-label">上游节点</span><span class="io-val"><span class="io-tag">param_desc_extract (节点4)</span></span></div>
+<div class="io-row"><span class="io-label">同级节点</span><span class="io-val"><span class="io-tag io-tag-sib">shape (5a)</span> <span class="io-tag io-tag-sib">dtype (5b)</span> <span class="io-tag io-tag-sib">dformat (5c)</span> <span class="io-tag io-tag-sib">optional (5d)</span> <span class="io-tag io-tag-sib">param_relation (5e)</span> <span class="io-tag io-tag-sib">param_attr (5f)</span> <span class="io-tag io-tag-sib">array_length (5g)</span> <span class="io-tag io-tag-sib">allowed_range (5h)</span> <span class="io-tag io-tag-sib">return_codes (5i)</span> — 10个节点并行（当前为 5j determinism）</span></div>
+<div class="io-row"><span class="io-label">下游节点</span><span class="io-val"><span class="io-tag io-tag-end">END</span>（返回 UploadResponse）</span></div>
+<div class="io-row"><span class="io-label">State 输入</span><span class="io-val"><code>doc_id</code>, <code>operator_name</code>（来自节点1）</span></div>
+<div class="io-row"><span class="io-label">MCP 读取</span><span class="io-val"><code>get_section("constraints")</code>, <code>query_platform_support_by_operator(operator_name)</code></span></div>
+<div class="io-row"><span class="io-label">State 输出</span><span class="io-val"><code>error</code></span></div>
+<div class="io-row"><span class="io-label">DB 写入</span><span class="io-val"><code>platform_support.deterministic_computing</code> (UPSERT: JSON <code>{"value":"确定性/非确定性","src_text":"..."}</code>)</span></div>
+<div class="io-row"><span class="io-label">特殊说明</span><span class="io-val">如果 LLM 返回空 product，则查询 platform_support 表，为每个已支持平台生成一条记录（平台展开逻辑）。写入采用 UPSERT 策略，只更新 deterministic_computing 列，不影响 is_supported</span></div>
+</div>
+
+<p><strong>触发条件</strong>：param_desc_extract_node 完成后，与 shape/dtype/dformat/optional/param_attr/array_length/allowed_range/return_codes/param_relation <strong>同时启动</strong>。</p>
+<p><strong>特点</strong>：从约束说明章节中提取确定性计算信息，支持 5 种文档格式（简单确定性、简单非确定性、平台特定确定性、平台特定非确定性、带条件的非确定性）。确定性数据作为平台属性存储在 <code>platform_support.deterministic_computing</code> JSON 字段中。</p>
+<p><strong>流程</strong>：</p>
+<div class="flow-chart">determinism_extract_node(state)
+  │
+  ├─ MCP: get_section(doc_id, "constraints")
+  │    └─ 获取约束说明章节内容
+  │
+  ├─ 判断是否有"确定性"相关内容:
+  │    ├─ 无 → 跳过，return {"error": None}
+  │    └─ 有 → 进入 LLM 提取流程
+  │
+  ├─ MCP: query_platform_support_by_operator(operator_name)
+  │    └─ 获取该算子支持的所有平台列表（用于平台展开）
+  │
+  ├─ LLM: DETERMINISM_EXTRACT_PROMPT.format(
+  │         section_content=..., platform_list=...)
+  │    └─ 解析确定性描述，返回 JSON 数组:
+  │       [{"product":"...", "value":true/false, "src_text":"..."}]
+  │
+  ├─ 平台展开逻辑:
+  │    └─ 如果 product 为空字符串 → 为每个已支持平台生成一条记录
+  │
+  └─ MCP: save_determinism(doc_id, records)
+       └─ UPSERT platform_support 表的 deterministic_computing JSON 列
+          格式: {"value": "确定性"/"非确定性", "src_text": "原文引用"}
+          只更新 deterministic_computing，不动 is_supported</div>
+<p><strong>输出状态</strong>：<code>error</code></p>
+<p><strong>存储格式</strong>：写入 <code>platform_support.deterministic_computing</code> 字段（TEXT JSON），格式为 <code>{"value": "确定性"/"非确定性"/"", "src_text": "原文引用"}</code>。原独立的 <code>determinism</code> 表已删除。</p>
+
+
+</section>
+<section class="content-section" id="sec-node5k">
+<h1>节点5k: dtype_combo_extract_node（与 5a~5j 并行执行）</h1>
+<div class="node-io">
+<h3>数据流 &amp; 依赖关系</h3>
+<div class="io-row"><span class="io-label">上游节点</span><span class="io-val"><span class="io-tag">param_desc_extract (节点4)</span></span></div>
+<div class="io-row"><span class="io-label">同级节点</span><span class="io-val"><span class="io-tag io-tag-sib">5a~5j + param_relation</span> — 12个节点并行（当前为 5k dtype_combo）</span></div>
+<div class="io-row"><span class="io-label">下游节点</span><span class="io-val"><span class="io-tag io-tag-down">assemble_result (节点6)</span></span></div>
+<div class="io-row"><span class="io-label">State 输入</span><span class="io-val"><code>doc_id</code>, <code>parameters</code>（来自节点4，含 description）</span></div>
+<div class="io-row"><span class="io-label">MCP 读取</span><span class="io-val"><code>get_section("constraints")</code></span></div>
+<div class="io-row"><span class="io-label">State 输出</span><span class="io-val"><code>error</code></span></div>
+<div class="io-row"><span class="io-label">DB 写入</span><span class="io-val"><code>dtype_combinations</code> (DELETE + INSERT: function_name, platform, combo JSON)</span></div>
+<div class="io-row"><span class="io-label">数据来源</span><span class="io-val">从 constraints 章节中提取数据类型组合表格，LLM 解析 + 笛卡尔积展开</span></div>
+</div>
+
+<p><strong>触发条件</strong>：param_desc_extract_node 完成后，与 5a~5j + param_relation <strong>同时启动</strong>。</p>
+<p><strong>特点</strong>：支持两种输入格式——Markdown dtype 表格（LLM 解析）和纯文本约束（正则 + LLM），输出按 platform 分组的数据类型组合。</p>
+<p><strong>流程</strong>：</p>
+<div class="flow-chart">dtype_combo_extract_node(state)
+  │
+  ├─ MCP: get_section(doc_id, "constraints")
+  │    └─ 获取约束说明章节内容
+  │
+  ├─ 判断格式类型:
+  │    ├─ 含 Markdown dtype 表格 → LLM 解析表格提取组合
+  │    └─ 纯文本约束 → 正则 + LLM 提取参数可选 dtype
+  │         └─ 笛卡尔积展开生成 combo 列表
+  │
+  ├─ LLM: DTYPE_COMBO_TABLE_PROMPT / DTYPE_CONSTRAINT_TEXT_PROMPT
+  │
+  └─ MCP: save_dtype_combinations(doc_id, combos)
+       └─ DELETE + INSERT dtype_combinations 表</div>
+<p><strong>输出状态</strong>：<code>error</code></p>
+<p><strong>存储格式</strong>：<code>dtype_combinations</code> 表，每行包含 <code>function_name</code>、<code>platform</code>（如"通用"、"Atlas A2"）、<code>combo</code>（JSON，如 <code>{"x1": "FLOAT16", "x2": "FLOAT16"}</code>）。</p>
+
+
+</section>
+<section class="content-section" id="sec-node6">
+<h1>节点6: assemble_result_node（顺序执行，等待所有并行节点完成）</h1>
+<div class="node-io">
+<h3>数据流 &amp; 依赖关系</h3>
+<div class="io-row"><span class="io-label">上游节点</span><span class="io-val"><span class="io-tag">5a~5k + param_relation</span> — 全部 12 个并行节点（LangGraph 扇入汇合）</span></div>
+<div class="io-row"><span class="io-label">同级节点</span><span class="io-val">无（独占顺序执行）</span></div>
+<div class="io-row"><span class="io-label">下游节点</span><span class="io-val"><span class="io-tag io-tag-end">END</span>（返回 UploadResponse）</span></div>
+<div class="io-row"><span class="io-label">State 输入</span><span class="io-val"><code>doc_id</code>, <code>operator_name</code></span></div>
+<div class="io-row"><span class="io-label">MCP 读取</span><span class="io-val"><code>get_parsed_by_doc_id</code>, <code>query_params_by_doc_id</code>, <code>query_param_relations</code>, <code>query_function_signatures_by_doc_id</code>, <code>query_platform_support_by_doc_id</code>, <code>query_return_codes_by_doc_id</code>, <code>query_dtype_combos_by_doc_id</code></span></div>
+<div class="io-row"><span class="io-label">State 输出</span><span class="io-val"><code>error</code></span></div>
+<div class="io-row"><span class="io-label">DB 写入</span><span class="io-val"><code>constraints_result</code> (INSERT OR REPLACE: operator_name, product_support JSON, function_explanation JSON)</span></div>
+<div class="io-row"><span class="io-label">特殊说明</span><span class="io-val"><strong>无 LLM 调用</strong>，纯 DB 查询 + JSON 拼接。利用 LangGraph 扇入机制自动等待所有前驱节点完成</span></div>
+</div>
+
+<p><strong>触发条件</strong>：所有并行节点（5a~5k + param_relation）全部完成后执行。</p>
+<p><strong>特点</strong>：汇编节点，从 8 张表中查询当前文档的所有提取结果，按 <code>function_name</code> 分组拼接为结构化 JSON，写入 <code>constraints_result</code> 表。</p>
+<p><strong>流程</strong>：</p>
+<div class="flow-chart">assemble_result_node(state)
+  │
+  ├─ State 输入: doc_id, operator_name
+  │
+  ├─ Step 1: MCP: get_parsed_by_doc_id(doc_id)
+  │    → operator_name, version, product_support
+  │
+  ├─ Step 2: MCP: query_params_by_doc_id(doc_id) → 参数列表
+  ├─ Step 3: MCP: query_param_relations(doc_id) → 约束关系
+  ├─ Step 4: MCP: query_function_signatures_by_doc_id(doc_id) → 函数签名
+  ├─ Step 5: MCP: query_platform_support_by_doc_id(doc_id) → 平台支持
+  ├─ Step 6: MCP: query_return_codes_by_doc_id(doc_id) → 返回码
+  ├─ Step 7: MCP: query_dtype_combos_by_doc_id(doc_id) → 数据类型组合
+  │
+  ├─ Step 8: _build_function_explanation(params, relations, signatures,
+  │                                       return_codes, dtype_combos)
+  │    └─ 按 function_name 分组，每组包含:
+  │       signature, params, relations, return_codes, dtype_combinations
+  │
+  └─ Step 9: MCP: save_constraints_result(doc_id, operator_name,
+                                           product_support, function_explanation)
+       └─ INSERT OR REPLACE constraints_result 表</div>
+<p><strong>输出状态</strong>：<code>error</code></p>
+<p><strong>存储格式</strong>：<code>constraints_result</code> 表，每行对应一个文档版本。核心字段 <code>function_explanation</code> 是 JSON 对象，以 function_name 为 key，值为包含 signature/params/relations/return_codes/dtype_combinations 的完整约束数据。</p>
+
+
+</section>
+<section class="content-section" id="sec-pipeline-timing">
+<h1>执行时序总结</h1>
+
 <pre class="mermaid">
 gantt
     title Pipeline 执行时序
@@ -438,25 +1024,39 @@ gantt
     section 顺序
     init_doc (版本检查+保存+解析) :0, 1
 
-    section 并行 2a/2b
+    section 并行 2a/2b/2c
     product_support (LLM 提取产品表) :1, 3
     parse_params (LLM 提取参数列表) :1, 3
+    function_signature_extract (LLM 提取函数签名) :1, 3
 
     section 顺序
     src_content_extract (LLM 并发提取原文) :3, 4
     param_desc_extract (生成描述表格) :4, 5
 
-    section 并行 5a/5b/5c
+    section 并行 5a~5k
     shape_extract (逐参数提取 shape) :5, 7
     dtype_extract (逐参数提取 dtype) :5, 7
+    dformat_extract (逐参数提取数据格式) :5, 7
     optional_extract (逐参数判断可选) :5, 7
+    param_attr_extract (正则提取非连续Tensor+param_desc) :5, 7
+    array_length_extract (LLM提取数组长度) :5, 7
+    allowed_range_extract (LLM提取取值范围约束) :5, 7
+    return_code_extract (LLM提取返回码/错误码) :5, 7
+    determinism_extract (LLM提取确定性计算信息) :5, 7
+    dtype_combo_extract (LLM提取数据类型组合) :5, 7
+    param_relation_extract (子图: 提取参数耦合关系) :5, 7
+
+    section 顺序
+    assemble_result (汇编所有结果→constraints_result) :7, 8
 </pre>
 
-<p><strong>MCP 通信模式</strong>：每个节点每次调用 MCP 工具时，<code>MCPClient._call_tool()</code> 会<strong>启动一个新的 MCP Server 子进程</strong>（<code>async with stdio_client</code>），调用完成后进程退出。整个 Pipeline 执行一次约产生 ~16 次子进程启动。参数查询在 <code>src_content_extract</code> 中进行一次，下游节点通过 state 传递数据，避免重复 MCP 查询。</p>
+<p><strong>MCP 通信模式</strong>：每个节点每次调用 MCP 工具时，<code>MCPClient._call_tool()</code> 会<strong>启动一个新的 MCP Server 子进程</strong>（<code>async with stdio_client</code>），调用完成后进程退出。整个 Pipeline 执行一次约产生 ~45 次子进程启动（param_relation_extract 子图额外增加 3~5 次，allowed_range_extract 额外增加 3~6 次，return_code_extract 额外增加 3~6 次，determinism_extract 额外增加 2~3 次，dtype_combo_extract 额外增加 2~3 次，assemble_result 额外增加 8 次）。参数查询在 <code>src_content_extract</code> 中进行一次，下游节点通过 state 传递数据，避免重复 MCP 查询。</p>
 
-<hr>
 
-<h2>6. 数据库 Schema</h2>
+</section>
+<section class="content-section" id="sec-db">
+<h1>数据库 Schema</h1>
+
 <pre><code>-- 算子注册表
 operators (
     id INTEGER PK,
@@ -488,36 +1088,129 @@ parameters (
     direction TEXT DEFAULT 'input',  -- 'input' | 'output' (param_desc_extract填充)
     src_content TEXT,                -- 原始参数描述 Markdown (src_content_extract填充) (ALTER TABLE 迁移v3添加)
     description TEXT,                -- Markdown 格式 (param_desc_extract填充)
-    usage_notes TEXT,                -- 暂无提取
     dtype_desc TEXT,                 -- 数据类型 (dtype_extract填充)
-    dformat_desc TEXT,               -- 暂无提取
+    dformat_desc TEXT,               -- 数据格式 (dformat_extract填充)
     shape TEXT,                      -- shape (shape_extract填充)
-    is_optional     INTEGER NOT NULL DEFAULT 0,  -- 0/1 (optional_extract填充) (ALTER TABLE 迁移添加)
-    memory_desc TEXT,                -- 暂无提取
+    is_optional     INTEGER NOT NULL DEFAULT 0,  -- 0/1 (optional_extract填充) (ALTER TABLE 迁移v2添加)
+    is_support_discontinuous TEXT NOT NULL DEFAULT '{"value":"N/A","src_text":""}',  -- JSON (param_attr_extract填充) (ALTER TABLE 迁移v7添加)
+    array_length    TEXT NOT NULL DEFAULT 'N/A',  -- 数组长度 (array_length_extract填充) (ALTER TABLE 迁移v8添加)
+    param_desc      TEXT NOT NULL DEFAULT '',  -- 参数描述摘要 (param_attr_extract正则提取) (ALTER TABLE 迁移v9添加)
+    allowed_range_value TEXT NOT NULL DEFAULT '[]',  -- JSON: 参数取值范围 (allowed_range_extract填充) (ALTER TABLE 迁移v10添加)
     created_at TEXT,
     UNIQUE(doc_id, function_name, param_name)
 )
 
+-- 参数耦合关系表
+param_relations (
+    id INTEGER PK,
+    doc_id INTEGER FK -> document_versions(id),
+    function_name TEXT NOT NULL DEFAULT '',
+    relation_type TEXT NOT NULL,       -- 10种: dtype/shape/dformat/value/组合类型/presence/shape&value
+    precondition TEXT NOT NULL DEFAULT '无',  -- 平台前置条件（如"Atlas A2/A3 下"）
+    description TEXT NOT NULL,         -- 关系的自然语言描述
+    params TEXT NOT NULL,              -- JSON: 涉及的参数名列表
+    param_optional TEXT NOT NULL DEFAULT '{}',  -- JSON: 各参数是否可选
+    source_citation TEXT NOT NULL,     -- 原文引用
+    created_at TEXT,
+)
+
+-- 函数签名表
+function_signatures (
+    id               INTEGER PK,
+    doc_id           INTEGER FK -> document_versions(id),
+    function_name    TEXT NOT NULL,
+    return_type      TEXT NOT NULL DEFAULT '',
+    parameters       TEXT NOT NULL DEFAULT '[]',   -- JSON: [{name, type}]
+    full_signature   TEXT NOT NULL DEFAULT '',
+    raw_code         TEXT NOT NULL DEFAULT '',
+    created_at       TEXT,
+    UNIQUE(doc_id, function_name)
+)
+
+-- 平台支持表（含确定性计算 JSON 字段）
+platform_support (
+    id                       INTEGER PK,
+    doc_id                   INTEGER FK -> document_versions(id),
+    platform_name            TEXT NOT NULL,
+    is_supported             INTEGER NOT NULL DEFAULT 0,
+    deterministic_computing  TEXT NOT NULL DEFAULT '{"value":"","src_text":""}',  -- JSON: 确定性计算信息 (v14迁移添加)
+    created_at               TEXT,
+    UNIQUE(doc_id, platform_name)
+)
+
 -- 索引
-idx_parameters_doc_id ON parameters(doc_id)</code></pre>
+idx_parameters_doc_id ON parameters(doc_id)
+idx_param_relations_doc_id ON param_relations(doc_id)
+idx_function_signatures_doc_id ON function_signatures(doc_id)
+idx_platform_support_doc_id ON platform_support(doc_id)
+idx_return_codes_doc_id ON return_codes(doc_id)
+idx_dtype_combos_doc_id ON dtype_combinations(doc_id)
+idx_dtype_combos_doc_fn ON dtype_combinations(doc_id, function_name)
+idx_constraints_result_doc_id ON constraints_result(doc_id)
 
-<hr>
+-- 返回码表
+return_codes (
+    id               INTEGER PK,
+    doc_id           INTEGER FK -> document_versions(id),
+    function_name    TEXT NOT NULL DEFAULT '',
+    return_value     TEXT NOT NULL,          -- 如 "ACLNN_SUCCESS"
+    error_code       INTEGER NOT NULL,       -- 如 0
+    descriptions     TEXT NOT NULL DEFAULT '[]',  -- JSON: 错误描述数组
+    source_citation  TEXT NOT NULL DEFAULT '',
+    created_at       TEXT,
+    UNIQUE(doc_id, function_name, return_value, error_code)
+)
 
-<h2>7. API 接口</h2>
+-- 数据类型组合表
+dtype_combinations (
+    id               INTEGER PK,
+    doc_id           INTEGER FK -> document_versions(id),
+    function_name    TEXT NOT NULL DEFAULT '',
+    platform         TEXT NOT NULL DEFAULT '通用',
+    combo            TEXT NOT NULL DEFAULT '{}',  -- JSON: {"param_name": "dtype", ...}
+    created_at       TEXT
+)
+
+-- 约束结果汇编表（最终输出）
+constraints_result (
+    id                   INTEGER PK,
+    doc_id               INTEGER FK -> document_versions(id) UNIQUE,  -- 一对一
+    operator_name        TEXT NOT NULL,
+    product_support      TEXT NOT NULL DEFAULT '[]',       -- JSON: [{product, support}]
+    function_explanation TEXT NOT NULL DEFAULT '{}',       -- JSON: 按 function_name 分组的完整约束数据
+    created_at           TEXT
+)
+
+-- 确定性计算已迁移到 platform_support.deterministic_computing JSON 字段，原 determinism 表已删除</code></pre>
+
+
+</section>
+<section class="content-section" id="sec-api">
+<h1>API 接口</h1>
+
 <table>
 <thead><tr><th>方法</th><th>路径</th><th>作用</th><th>流程</th></tr></thead>
 <tbody>
 <tr><td>GET</td><td><code>/</code></td><td>返回 static/index.html 测试页面</td><td>静态文件</td></tr>
 <tr><td>GET</td><td><code>/health</code></td><td>健康检查</td><td>直接返回 <code>{"status": "ok"}</code></td></tr>
-<tr><td>POST</td><td><code>/api/v1/upload</code></td><td>上传算子文档，触发完整 Pipeline</td><td>init_doc -> [product_support || parse_params] -> src_content_extract -> param_desc_extract -> [shape_extract || dtype_extract || optional_extract]</td></tr>
+<tr><td>POST</td><td><code>/api/v1/upload</code></td><td>上传算子文档，触发完整 Pipeline</td><td>init_doc -> [product_support || parse_params || function_signature_extract] -> src_content_extract -> param_desc_extract -> [shape_extract || dtype_extract || dformat_extract || optional_extract || param_attr_extract || array_length_extract || allowed_range_extract || return_code_extract || determinism_extract || dtype_combo_extract || param_relation_extract] -> assemble_result</td></tr>
 <tr><td>GET</td><td><code>/api/v1/operators</code></td><td>列出所有已注册算子及最新版本</td><td>MCP: query_operators</td></tr>
 <tr><td>GET</td><td><code>/api/v1/operators/{name}</code></td><td>获取算子的完整解析数据</td><td>MCP: get_parsed(name, ?version)</td></tr>
 <tr><td>GET</td><td><code>/api/v1/parameters</code></td><td>查询参数列表（可选 ?operator_name 过滤）</td><td>MCP: query_params(operator_name?)</td></tr>
+<tr><td>GET</td><td><code>/api/v1/relations</code></td><td>查询参数间约束关系（可选 ?operator_name 过滤）</td><td>MCP: query_relations_by_operator(operator_name?)</td></tr>
+<tr><td>GET</td><td><code>/api/v1/signatures</code></td><td>查询函数签名（可选 ?operator_name 过滤）</td><td>MCP: query_function_signatures_by_operator(operator_name?)</td></tr>
+<tr><td>GET</td><td><code>/api/v1/platforms</code></td><td>查询平台支持信息（含 deterministic_computing JSON，可选 ?operator_name 过滤）</td><td>MCP: query_platform_support_by_operator(operator_name?)</td></tr>
+<tr><td>GET</td><td><code>/api/v1/return-codes</code></td><td>查询返回码/错误码（可选 ?operator_name 过滤）</td><td>MCP: query_return_codes_by_operator(operator_name?)</td></tr>
+<tr><td>GET</td><td><code>/api/v1/determinism</code></td><td>查询确定性计算信息（从 platform_support.deterministic_computing 读取，可选 ?operator_name 过滤）</td><td>MCP: query_determinism_by_operator(operator_name?)</td></tr>
+<tr><td>GET</td><td><code>/api/v1/dtype-combos</code></td><td>查询数据类型组合（按 platform 分组，必需 ?operator_name）</td><td>MCP: query_dtype_combos(operator_name)</td></tr>
+<tr><td>GET</td><td><code>/api/v1/constraints-result</code></td><td>查询汇编后的完整约束结果（可选 ?operator_name 过滤）</td><td>MCP: query_constraints_result(operator_name?)</td></tr>
 </tbody>
 </table>
-<hr>
 
-<h2>8. 配置项 (.env)</h2>
+</section>
+<section class="content-section" id="sec-config">
+<h1>配置项 (.env)</h1>
+
 <table>
 <thead><tr><th>变量</th><th>默认值</th><th>说明</th></tr></thead>
 <tbody>
@@ -538,51 +1231,75 @@ idx_parameters_doc_id ON parameters(doc_id)</code></pre>
 <tr><td><code>DEBUG</code></td><td><code>false</code></td><td>调试模式</td></tr>
 </tbody>
 </table>
-<hr>
 
-<h2>9. 已知问题与待改进项</h2>
+</section>
+<section class="content-section" id="sec-issue-perf">
+<h1>已知问题：性能</h1>
 
-<h3>性能</h3>
 <ol>
 <li><strong>每次工具调用启动新进程</strong>：<code>MCPClient._call_tool()</code> 每次创建新的 MCP Server 子进程，无连接复用，频繁启动开销大</li>
 <li><strong>同步 SQLite</strong>：MCP Server 全部使用同步 SQLite（<code>aiosqlite</code> 在依赖中声明但未使用）</li>
 </ol>
 
-<h3>代码质量</h3>
+
+</section>
+<section class="content-section" id="sec-issue-code">
+<h1>已知问题：代码质量</h1>
+
 <ol start="3">
 <li><strong><code>_parse_json_response</code> 重复</strong>：<code>parse_params.py</code> 和 <code>product_support.py</code> 中相同函数各一份</li>
-<li><strong><code>param_desc_extract_node</code> 字段填充不全</strong>：<code>_extract_one()</code> 中 <code>usage_notes</code>、<code>data_format</code>、<code>memory_desc</code> 仍硬编码为空字符串；<code>parse_params.py</code> 使用内联 prompt 而非从 <code>prompts/__init__.py</code> 导入</li>
-<li><strong>三个并行节点 Semaphore 独立</strong>：shape_extract、dtype_extract、optional_extract 各自 Semaphore(5)，并行时实际 LLM 调用峰值可达 15，可能触发 API 限流</li>
-<li><strong><code>_should_continue</code> 路由缺陷</strong>：<code>_should_continue</code> 仅检查 <code>status=="error"</code> 终止 Pipeline，<code>status=="unchanged"</code> 时仍扇出到 product_support + parse_params，导致不必要的 MCP 调用。应改为 <code>status in ("error", "unchanged")</code> 或 <code>unchanged</code> 时直接 END</li>
+<li><strong><code>param_desc_extract_node</code> 字段填充不全</strong>：<code>_extract_one()</code> 中 <code>data_type</code>、<code>data_format</code>、<code>shape</code> 仍硬编码为空字符串（已由下游并行节点填充）；<code>parse_params.py</code> 使用内联 prompt 而非从 <code>prompts/__init__.py</code> 导入</li>
+<li><strong>并行节点 Semaphore 独立</strong>：shape_extract、dtype_extract、dformat_extract、optional_extract、array_length_extract、allowed_range_extract、return_code_extract、determinism_extract、dtype_combo_extract、param_relation_extract 各自 Semaphore(5)，并行时实际 LLM 调用峰值可达 50，可能触发 API 限流。param_attr_extract、assemble_result 无 LLM 调用，不占 Semaphore</li>
+<li><strong><code>_should_continue</code> 路由缺陷</strong>：<code>_should_continue</code> 仅检查 <code>status=="error"</code> 终止 Pipeline，<code>status=="unchanged"</code> 时仍扇出到 product_support + parse_params + function_signature_extract，导致不必要的 MCP 调用。应改为 <code>status in ("error", "unchanged")</code> 或 <code>unchanged</code> 时直接 END</li>
 </ol>
 
-<h3>安全</h3>
+
+</section>
+<section class="content-section" id="sec-issue-sec">
+<h1>已知问题：安全</h1>
+
 <ol start="6">
 <li><strong><code>.env</code> 含真实 API Key</strong>：DeepSeek 密钥被写入 <code>.env</code> 文件（建议轮换并使用 Secret Manager）</li>
 <li><strong>未集成 bandit 扫描</strong>：CLAUDE.md 要求 <code>bandit -r src/</code>，但未配置</li>
 </ol>
 
-<h3>测试</h3>
+
+</section>
+<section class="content-section" id="sec-issue-test">
+<h1>已知问题：测试</h1>
+
 <ol start="8">
-<li><strong>测试覆盖严重不足</strong>：仅 <code>mcp_server/parsers/</code> 有 34 个测试（25->34 已增加），agent 包全部无测试</li>
+<li><strong>测试覆盖严重不足</strong>：<code>mcp_server/parsers/</code> 有 ~34 个测试，agent 包有 ~62 个测试（function_signature_extract + param_attr_extract + allowed_range_extract + return_code_extract + determinism_extract + dtype_combo_extract + assemble_result），其余节点仍无测试</li>
 <li><strong>无 CI/CD</strong>：没有 GitHub Actions、Dockerfile 或部署配置</li>
 </ol>
 
-<h3>文档/结构</h3>
+
+</section>
+<section class="content-section" id="sec-issue-doc">
+<h1>已知问题：文档/结构</h1>
+
 <ol start="10">
 <li><strong>CLAUDE.md 架构图过时</strong>：描述 <code>src/agent/</code>、<code>src/api/</code> 扁平结构，实际为 <code>packages/*/src/</code> monorepo</li>
 <li><strong>LangGraph Tools 存根</strong>：<code>agent/tools/</code> 下的 <code>@tool</code> 定义未被节点使用（节点直接调 MCPClient）</li>
 </ol>
 
-<h3>前端</h3>
+
+</section>
+<section class="content-section" id="sec-issue-fe">
+<h1>已知问题：前端</h1>
+
 <ol start="12">
 <li><del>字段名不匹配</del> &check; 已修复 — MCP 层 dict key 从 <code>dtype_desc</code>/<code>dformat_desc</code> 重命名为 <code>data_type</code>/<code>data_format</code></li>
-<li><strong><code>nodes/__init__.py</code> 未同步</strong>：只导出 4 个旧节点（init_doc, parse_params, product_support, src_content_extract），未包含后续新增的 4 个节点（param_desc_extract, shape_extract, dtype_extract, optional_extract）。</li>
+<li><del><code>is_optional</code> 前端不显示</del> &check; 已修复 — <code>ParameterItem</code> schema 补充 <code>is_optional</code> 字段；前端 <code>optBadge</code> 改为 0 显示"必选"、1 显示"可选"</li>
+<li><strong>参数属性提取</strong>：<code>param_attr_extract</code> 节点（5f）从 description 表格中正则提取两个属性：<code>is_support_discontinuous</code>（非连续Tensor支持，匹配 √/✓/✔/支持）和 <code>param_desc</code>（描述摘要，从"描述"行提取）。结果分别存入 <code>is_support_discontinuous</code> 列（JSON TEXT）和 <code>param_desc</code> 列（TEXT）。前端参数表新增"描述摘要"列显示 <code>param_desc</code>。</li>
+<li><strong><code>nodes/__init__.py</code> 未同步</strong>：只导出 4 个旧节点（init_doc, parse_params, product_support, src_content_extract），未包含后续新增的 12 个节点（param_desc_extract, function_signature_extract, shape_extract, dtype_extract, dformat_extract, optional_extract, param_attr_extract, array_length_extract, allowed_range_extract, return_code_extract, determinism_extract, dtype_combo_extract, assemble_result）和 param_relation_extract 子图。</li>
 <li><strong>Markdown 渲染与双过滤器</strong>：已集成 marked.js CDN，"描述"列渲染 Markdown 格式。新增函数名下拉过滤器，与算子过滤器联动，客户端过滤。</li>
+<li><strong>确定性计算合并到平台支持</strong>：原独立的"确定性计算"导航面板已移除，确定性信息现在作为"平台支持"面板中的两列展示（确定性计算 + 原文引用），数据从 <code>platform_support.deterministic_computing</code> JSON 字段读取。</li>
 </ol>
-<hr>
+</section>
+<section class="content-section" id="sec-refs">
+<h1>架构设计文档引用</h1>
 
-<h2>10. 架构设计文档引用</h2>
 <table>
 <thead><tr><th>文档</th><th>路径</th><th>作用</th></tr></thead>
 <tbody>
@@ -590,40 +1307,91 @@ idx_parameters_doc_id ON parameters(doc_id)</code></pre>
 <tr><td>自提取提示</td><td><code>docs/self-prompts/extract.md</code></td><td>自动提取过程提示模板</td></tr>
 <tr><td>项目总览 (HTML)</td><td><code>docs/project_summary.html</code></td><td>本文件 — 项目全貌</td></tr>
 <tr><td>提取结果示例</td><td><code>docs/aclnnAdaLayerNorm/</code></td><td>aclnnAdaLayerNorm 算子提取结果（JSON + 错误日志，含版本迭代）</td></tr>
-<tr><td>约束提取 Demo</td><td><code>docs/constraints-demo/</code></td><td>30 个算子约束提取 JSON 示例</td></tr>
+<tr><td>约束提取 Demo</td><td><code>docs/constraints-demo/</code></td><td>34 个算子约束提取 JSON 示例</td></tr>
+<tr><td>非连续Tensor提取方案</td><td><code>docs/tensor-schema.html</code></td><td>param_attr_extract 节点实现方案文档（原 discontinuous_extract）</td></tr>
+<tr><td>取值范围提取方案</td><td><code>docs/allowed_value.html</code></td><td>allowed_range_extract 节点实现方案文档</td></tr>
+<tr><td>返回码提取方案</td><td><code>docs/return_info.html</code></td><td>return_code_extract 节点实现方案文档</td></tr>
+<tr><td>确定性计算提取方案</td><td><code>docs/determinism_extract.html</code></td><td>determinism_extract 节点实现方案文档</td></tr>
+<tr><td>约束结果汇编方案</td><td><code>docs/result.html</code></td><td>assemble_result 节点 + constraints_result 表实现方案文档</td></tr>
+<tr><td>确定性计算重构方案</td><td><code>re-struct.html</code></td><td>determinism 从独立表迁移到 platform_support.deterministic_computing JSON 字段的重构方案</td></tr>
 </tbody>
 </table>
-
+</section>
+</div>
+</div>
 <script>
+(function() {
+  var sections = document.querySelectorAll('.content-section');
+  var navItems = document.querySelectorAll('.nav-item[data-target]');
+  var mainEl = document.getElementById('mainContent');
+
+  function renderMermaid(sectionEl) {
+    var diagrams = sectionEl.querySelectorAll('.mermaid:not([data-processed])');
+    diagrams.forEach(function(el, i) {
+      var id = 'mm-' + sectionEl.id + '-' + i;
+      var code = el.textContent;
+      mermaid.render(id, code).then(function(r) {
+        el.innerHTML = r.svg;
+        el.setAttribute('data-processed', 'true');
+      }).catch(function(e) { console.warn('Mermaid error:', e); });
+    });
+  }
+
+  function showSection(id) {
+    sections.forEach(function(s) { s.classList.remove('active'); });
+    navItems.forEach(function(n) { n.classList.remove('active'); });
+    var target = document.getElementById(id);
+    if (target) { target.classList.add('active'); mainEl.scrollTop = 0; renderMermaid(target); }
+    var navLink = document.querySelector('.nav-item[data-target="' + id + '"]');
+    if (navLink) {
+      navLink.classList.add('active');
+      var p = navLink.closest('.nav-children');
+      while (p) {
+        p.classList.add('open');
+        var t = p.previousElementSibling;
+        if (t) { var a = t.querySelector('.arrow'); if (a) a.classList.add('open'); }
+        p = p.parentElement.closest('.nav-children');
+      }
+    }
+    document.querySelector('.sidebar').classList.remove('open');
+    history.replaceState(null, '', '#' + id);
+  }
+
+  navItems.forEach(function(item) {
+    item.addEventListener('click', function(e) {
+      e.preventDefault();
+      showSection(this.dataset.target);
+    });
+  });
+
+  document.querySelectorAll('.nav-item.has-children').forEach(function(item) {
+    item.addEventListener('click', function(e) {
+      e.preventDefault();
+      var cl = document.getElementById(this.dataset.toggle);
+      var ar = this.querySelector('.arrow');
+      if (cl) cl.classList.toggle('open');
+      if (ar) ar.classList.toggle('open');
+    });
+  });
+
   mermaid.initialize({
-    startOnLoad: true,
+    startOnLoad: false,
     theme: 'base',
     themeVariables: {
-      primaryColor: '#edf2f7',
-      primaryTextColor: '#1a1a2e',
-      primaryBorderColor: '#4a5568',
-      lineColor: '#4a5568',
-      secondaryColor: '#ebf8ff',
-      tertiaryColor: '#faf5ff',
-      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif',
+      primaryColor: '#edf2f7', primaryTextColor: '#1a1a2e',
+      primaryBorderColor: '#4a5568', lineColor: '#4a5568',
+      secondaryColor: '#ebf8ff', tertiaryColor: '#faf5ff',
+      fontFamily: '-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif',
       fontSize: '13px'
     },
-    flowchart: {
-      useMaxWidth: true,
-      htmlLabels: true,
-      curve: 'basis',
-      padding: 15
-    },
-    gantt: {
-      useMaxWidth: true,
-      fontSize: 12,
-      barHeight: 24,
-      barGap: 6,
-      topPadding: 40,
-      sectionFontSize: 13
-    }
+    flowchart: { useMaxWidth: true, htmlLabels: true, curve: 'basis', padding: 15 },
+    gantt: { useMaxWidth: true, fontSize: 12, barHeight: 24, barGap: 6, topPadding: 40, sectionFontSize: 13 }
   });
-</script>
 
+  var hash = location.hash.replace('#', '');
+  var def = (hash && document.getElementById(hash)) ? hash : 'sec-overview';
+  showSection(def);
+})();
+</script>
 </body>
 </html>

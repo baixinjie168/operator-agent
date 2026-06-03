@@ -56,7 +56,18 @@ async def product_support_node(state: PipelineState) -> dict[str, Any]:
         )
 
         await _mcp_client.save_product_support(doc_id, products)
-        logger.info("ProductSupport: saved %d products for doc_id=%s", len(products), doc_id)
+        logger.info("ProductSupport: saved %d products to document_versions for doc_id=%s", len(products), doc_id)
+
+        # 同时保存到 platform_support 表
+        platforms = [
+            {
+                "platform_name": p.get("product", ""),
+                "is_supported": 1 if p.get("support", False) else 0,
+            }
+            for p in products
+        ]
+        await _mcp_client.save_platform_support(doc_id, platforms)
+        logger.info("ProductSupport: saved %d platforms to platform_support for doc_id=%s", len(platforms), doc_id)
 
         return {"product_support": products, "error": None}
 

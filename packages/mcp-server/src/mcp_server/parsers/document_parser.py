@@ -10,6 +10,7 @@ import logging
 import re
 from pathlib import Path
 
+from mcp_server.parsers.section_splitter import split_sections
 from shared.models.enums import SectionType
 from shared.models.operator import (
     FunctionSignature,
@@ -17,8 +18,6 @@ from shared.models.operator import (
     ParsedSection,
     ProductSupport,
 )
-
-from mcp_server.parsers.section_splitter import RawSection, split_sections
 
 logger = logging.getLogger(__name__)
 
@@ -201,14 +200,10 @@ def parse_operator_document(
     header, raw_sections = split_sections(markdown_content)
 
     parsed_sections: list[ParsedSection] = []
-    product_support: list[ProductSupport] = []
-    function_signatures: list[FunctionSignature] = []
 
     for raw in raw_sections:
-        section_type = raw.section_type
-
         parsed_section = ParsedSection(
-            section_type=section_type,
+            section_type=raw.section_type,
             heading=raw.heading,
             content=raw.body_text,
             line_start=raw.line_start,
@@ -216,27 +211,18 @@ def parse_operator_document(
         )
         parsed_sections.append(parsed_section)
 
-        if section_type == SectionType.PRODUCT_SUPPORT:
-            product_support = parse_product_support_table(raw.body_text)
-        elif section_type == SectionType.FUNCTION_PROTOTYPE:
-            function_signatures = parse_function_signatures(raw.body_text)
-
     doc = ParsedOperatorDocument(
         operator_name=header.operator_name,
         cann_version=header.cann_version,
         source_url=header.source_url,
         saved_date=header.saved_date,
         sections=parsed_sections,
-        product_support=product_support,
-        function_signatures=function_signatures,
     )
 
     logger.info(
-        "Parsed operator '%s': %d sections, %d products, %d signatures",
+        "Parsed operator '%s': %d sections",
         header.operator_name,
         len(parsed_sections),
-        len(product_support),
-        len(function_signatures),
     )
 
     return doc
