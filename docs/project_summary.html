@@ -211,13 +211,13 @@
 │   │   └── src/mcp_server/
 │   │       ├── __main__.py          # 入口：初始化 DB，调用 mcp.run()
 │   │       ├── db.py                # Database 类 + get_db() 单例，同步 SQLite + WAL
-│   │       ├── schema.sql           # 9 张表：operators, document_versions, parameters（含 param_constraint JSON）, param_relations, function_signatures, platform_support（含 deterministic_computing JSON）, return_codes, dtype_combinations, constraints_result（含 function_signature）
+│   │       ├── schema.sql           # 9 张表：operators, document_versions（含 json_constraints）, parameters（含 param_constraint JSON）, param_relations（含 relation_object JSON）, function_signatures, platform_support（含 deterministic_computing JSON）, return_codes, dtype_combinations, constraints_result（含 deterministic_computing/inputs/outputs/constraints_in_param/dtype_support_description）
 │   │       ├── server.py            # FastMCP 实例，注册 40 个 tool + 2 个 resource
 │   │       ├── parsers/
 │   │       │   ├── section_splitter.py  # 基于 markdown-it-py token 的章节分割
 │   │       │   └── document_parser.py   # 章节分类 + 产品支持表解析 + 函数签名提取
 │   │       └── tools/
-│   │           └── document_tools.py    # 43 个 MCP tool 实现函数（纯同步）
+│   │           └── document_tools.py    # 44 个 MCP tool 实现函数（纯同步）
 │   │
 │   └── agent/                       # 应用层（FastAPI + LangGraph Pipeline）
 │       └── src/agent/
@@ -246,6 +246,7 @@
 │           │   ├── return_code_extract.py # 节点5i（并行）：LLM提取返回码/错误码
 │           │   ├── determinism_extract.py # 节点5j（并行）：LLM提取确定性计算信息
 │           │   ├── dtype_combo_extract.py # 节点5k（并行）：LLM提取数据类型组合
+│           │   ├── build_param_relations.py # 节点5.5r（顺序）：LLM 提取参数关系表达式 + 按平台分组
 │           │   ├── build_param_constraint.py # 节点5.5（顺序）：LLM 构建参数约束JSON（shape→dimensions + allowed_range_value）
 │           │   ├── assemble_result.py # 节点6（顺序）：汇编所有提取结果→constraints_result表
 │           │   └── param_relation_extract/  # 节点5e（并行）：参数耦合关系提取子图
@@ -263,7 +264,7 @@
 │           │   ├── upload.py        # UploadResponse
 │           │   └── query.py         # OperatorSummary, OperatorListResponse, OperatorDetailResponse, ParameterItem, ParameterListResponse 等
 │           ├── prompts/
-│           │   ├── __init__.py      # 17个Prompt: PRODUCT_SUPPORT, SRC_CONTENT, PARAM_DESC, SHAPE, DTYPE, DFORMAT, OPTIONAL, FUNCTION_SIGNATURE_EXTRACT, FUNCTION_EXPLANATION_EXTRACT, ARRAY_LENGTH_EXTRACT, ALLOWED_RANGE_EXTRACT, RETURN_CODE_EXTRACT, DETERMINISM_EXTRACT, DTYPE_COMBO_TABLE, DTYPE_CONSTRAINT_TEXT, SHAPE_TO_DIMENSIONS, ALLOWED_RANGE_VALUE_BUILD
+│           │   ├── __init__.py      # 18个Prompt: PRODUCT_SUPPORT, SRC_CONTENT, PARAM_DESC, SHAPE, DTYPE, DFORMAT, OPTIONAL, FUNCTION_SIGNATURE_EXTRACT, FUNCTION_EXPLANATION_EXTRACT, ARRAY_LENGTH_EXTRACT, ALLOWED_RANGE_EXTRACT, RETURN_CODE_EXTRACT, DETERMINISM_EXTRACT, DTYPE_COMBO_TABLE, DTYPE_CONSTRAINT_TEXT, SHAPE_TO_DIMENSIONS, ALLOWED_RANGE_VALUE_BUILD, RELATION_OBJECT_BUILD
 │           │   └── system.py        # SYSTEM_PROMPT（未使用）
 │           │   # 另有 param_relation_extract/prompts.py: RELATION_EXTRACT_PROMPT（子图专用）
 │           ├── tools/
@@ -291,6 +292,10 @@
 │   ├── tensor-schema.html           # 非连续Tensor提取方案文档
 │   ├── fe.html                      # function_explanation 补充 description 方案
 │   ├── fs.html                      # constraints_result 新增 function_signature 方案
+│   ├── param-relation-schema.html    # param_relations relation_object + 平台分组方案
+│   ├── result-schema.html            # constraints_result 覆盖 result.json 方案
+│   ├── cr_ps.html                    # product_support 空数组根因分析与修复方案
+│   ├── doc_cons_result.html          # document_versions.json_constraints 方案
 │   ├── platform_support.html        # constraints_result 新增 platform_support 方案
 │   └── dc.html                      # constraints_result 新增 deterministic_computing 方案
 ├── data/operator_agent.db           # SQLite 数据库（运行时生成）
@@ -342,6 +347,7 @@ flowchart TD
     K --> P6["determinism_extract (5j)\nLLM提取确定性计算信息\n→ platform_support.deterministic_computing"]
     K --> P7["dtype_combo_extract (5k)\nLLM提取数据类型组合"]
     K --> Q["param_relation_extract (5e)\n子图：LLM 提取参数耦合关系"]
+    Q --> BPR["build_param_relations (5.5r)\nLLM 提取参数关系表达式\n按平台分组"]
     L --> BPC["build_param_constraint (5.5)\nLLM: shape→dimensions\nLLM: allowed_range_value\n组装 param_constraint JSON"]
     M --> BPC
     N --> BPC
@@ -352,8 +358,8 @@ flowchart TD
     P5 --> BPC
     P6 --> BPC
     P7 --> BPC
-    Q --> BPC
-    BPC --> AR["assemble_result (节点6)\n汇编所有提取结果\n→ constraints_result 表"]
+    BPR --> BPC
+    BPC --> AR["assemble_result (节点6)\n汇编所有提取结果\n→ constraints_result 表\n→ document_versions.json_constraints"]
     AR --> O([END\n返回 UploadResponse])
 
     style A fill:#f0fff4,stroke:#48bb78,color:#22243d
@@ -378,6 +384,7 @@ flowchart TD
     style P6 fill:#ebf8ff,stroke:#3182ce
     style P7 fill:#ebf8ff,stroke:#3182ce
     style Q fill:#ebf8ff,stroke:#3182ce
+    style BPR fill:#fffbeb,stroke:#d69e2e
     style BPC fill:#fffbeb,stroke:#d69e2e
     style AR fill:#faf5ff,stroke:#805ad5
     style O fill:#fff5f5,stroke:#e53e3e,color:#742a2a
@@ -711,7 +718,7 @@ flowchart TD
 <h3>数据流 &amp; 依赖关系</h3>
 <div class="io-row"><span class="io-label">上游节点</span><span class="io-val"><span class="io-tag">param_desc_extract (节点4)</span></span></div>
 <div class="io-row"><span class="io-label">同级节点</span><span class="io-val"><span class="io-tag io-tag-sib">shape (5a)</span> <span class="io-tag io-tag-sib">dtype (5b)</span> <span class="io-tag io-tag-sib">dformat (5c)</span> <span class="io-tag io-tag-sib">optional (5d)</span> <span class="io-tag io-tag-sib">param_attr (5f)</span> <span class="io-tag io-tag-sib">array_length (5g)</span> <span class="io-tag io-tag-sib">allowed_range (5h)</span> — 8个节点并行（当前为 5e param_relation）</span></div>
-<div class="io-row"><span class="io-label">下游节点</span><span class="io-val"><span class="io-tag io-tag-down">build_param_constraint (节点5.5)</span></span></div>
+<div class="io-row"><span class="io-label">下游节点</span><span class="io-val"><span class="io-tag io-tag-down">build_param_relations (节点5.5r)</span></span></div>
 <div class="io-row"><span class="io-label">State 输入</span><span class="io-val"><code>doc_id</code>, <code>parameters</code>（来自节点4）</span></div>
 <div class="io-row"><span class="io-label">MCP 读取</span><span class="io-val"><code>get_section("params_get_workspace")</code>, <code>get_section("params_execute")</code>, <code>get_section("constraints")</code></span></div>
 <div class="io-row"><span class="io-label">State 输出</span><span class="io-val"><code>error</code></span></div>
@@ -749,6 +756,49 @@ flowchart TD
             └─ DELETE + INSERT param_relations 表</div>
 <p><strong>输出状态</strong>：<code>error</code></p>
 <p><strong>关系类型</strong>：<code>dtype</code>, <code>shape</code>, <code>dformat</code>, <code>value</code>, <code>dtype&amp;shape</code>, <code>dtype&amp;dformat</code>, <code>dformat&amp;shape</code>, <code>dtype&amp;dformat&amp;shape</code>, <code>presence</code>, <code>shape&amp;value</code></p>
+
+
+</section>
+<section class="content-section" id="sec-node55r">
+<h1>节点5.5r: build_param_relations_node（顺序执行，等待 param_relation_extract 完成）</h1>
+<div class="node-io">
+<h3>数据流 &amp; 依赖关系</h3>
+<div class="io-row"><span class="io-label">上游节点</span><span class="io-val"><span class="io-tag">param_relation_extract (节点5e)</span></span></div>
+<div class="io-row"><span class="io-label">同级节点</span><span class="io-val">无（独占顺序执行）</span></div>
+<div class="io-row"><span class="io-label">下游节点</span><span class="io-val"><span class="io-tag io-tag-down">build_param_constraint (节点5.5)</span></span></div>
+<div class="io-row"><span class="io-label">State 输入</span><span class="io-val"><code>doc_id</code>, <code>operator_name</code></span></div>
+<div class="io-row"><span class="io-label">MCP 读取</span><span class="io-val"><code>query_param_relations</code>, <code>query_function_signatures_by_doc_id</code>, <code>query_platform_support_by_doc_id</code></span></div>
+<div class="io-row"><span class="io-label">State 输出</span><span class="io-val"><code>error</code></span></div>
+<div class="io-row"><span class="io-label">DB 写入</span><span class="io-val"><code>param_relations.relation_object</code> (UPDATE: JSON <code>{expr_type, expr, relation_params, src_text}</code>)</span></div>
+<div class="io-row"><span class="io-label">特殊说明</span><span class="io-val">包含 <strong>LLM 调用</strong>（RELATION_OBJECT_BUILD_PROMPT），为每条参数关系生成形式化表达式和细粒度类型</span></div>
+</div>
+
+<p><strong>触发条件</strong>：param_relation_extract 子图完成后执行。</p>
+<p><strong>特点</strong>：读取已提取的参数关系，通过 LLM 为每条关系生成 <code>expr_type</code>（10种细粒度类型：shape_broadcast/shape_choice/shape_equality/shape_dependency/shape_value_dependency/value_dependency/presence_dependency/type_dependency/type_equality/format_equality）和 <code>expr</code>（形式化 Python 布尔表达式），组装为 <code>relation_object</code> JSON 并回写数据库。同时按平台分组（precondition="无" 展开到所有支持平台）。</p>
+<p><strong>流程</strong>：</p>
+<div class="flow-chart">build_param_relations_node(state)
+  │
+  ├─ Step 1: MCP 查询数据源
+  │    ├─ query_param_relations(doc_id) → 参数关系列表
+  │    ├─ query_function_signatures_by_doc_id(doc_id) → 函数签名（提供参数类型上下文）
+  │    └─ query_platform_support_by_doc_id(doc_id) → 支持的平台列表
+  │
+  ├─ Step 2: 构建函数签名上下文文本
+  │    └─ "aclnnXxx(x: aclTensor, y: aclTensor, groups: int64_t, ...)"
+  │
+  ├─ Step 3: LLM 批量提取 expr_type + expr
+  │    └─ RELATION_OBJECT_BUILD_PROMPT.format(signatures_text, relation_type, params, description, source_citation)
+  │       └─ 从 description 判断细粒度 expr_type
+  │       └─ 从 description 生成形式化 Python 表达式 expr
+  │       └─ 返回 JSON: {"expr_type": "...", "expr": "..."}
+  │
+  ├─ Step 4: 组装 relation_object 并回写 DB
+  │    └─ {expr_type, expr, relation_params, src_text}
+  │    └─ MCP: update_param_relation_objects(doc_id, updates)
+  │
+  └─ Step 5: 按平台分组（precondition="无" → 所有支持平台）</div>
+<p><strong>输出状态</strong>：<code>error</code></p>
+<p><strong>存储格式</strong>：<code>param_relations.relation_object TEXT NOT NULL DEFAULT '{}'</code>，JSON 对象包含 <code>expr_type</code>（细粒度关系类型）、<code>expr</code>（形式化表达式）、<code>relation_params</code>（涉及参数列表）、<code>src_text</code>（原文引用）。</p>
 
 
 </section>
@@ -1062,7 +1112,7 @@ flowchart TD
 
 </section>
 <section class="content-section" id="sec-node6">
-<h1>节点6: assemble_result_node（顺序执行，等待所有并行节点完成）</h1>
+<h1>节点6: assemble_result_node（顺序执行，等待所有并行节点 + build_param_constraint 完成）</h1>
 <div class="node-io">
 <h3>数据流 &amp; 依赖关系</h3>
 <div class="io-row"><span class="io-label">上游节点</span><span class="io-val"><span class="io-tag">build_param_constraint (节点5.5)</span>（等待其完成）</span></div>
@@ -1071,48 +1121,63 @@ flowchart TD
 <div class="io-row"><span class="io-label">State 输入</span><span class="io-val"><code>doc_id</code>, <code>operator_name</code></span></div>
 <div class="io-row"><span class="io-label">MCP 读取</span><span class="io-val"><code>get_parsed_by_doc_id</code>, <code>query_params_by_doc_id</code>, <code>query_param_relations</code>, <code>query_function_signatures_by_doc_id</code>, <code>query_platform_support_by_doc_id</code>, <code>query_return_codes_by_doc_id</code>, <code>query_dtype_combos_by_doc_id</code>, <code>get_function_explanation_summary</code></span></div>
 <div class="io-row"><span class="io-label">State 输出</span><span class="io-val"><code>error</code></span></div>
-<div class="io-row"><span class="io-label">DB 写入</span><span class="io-val"><code>constraints_result</code> (INSERT OR REPLACE: operator_name, product_support JSON, platform_support JSON, function_explanation JSON)</span></div>
-<div class="io-row"><span class="io-label">特殊说明</span><span class="io-val"><strong>无 LLM 调用</strong>，纯 DB 查询 + JSON 拼接。利用 LangGraph 扇入机制自动等待所有前驱节点完成</span></div>
+<div class="io-row"><span class="io-label">DB 写入</span><span class="io-val"><code>constraints_result</code> (INSERT OR REPLACE: operator_name, product_support JSON, function_explanation JSON, function_signature, return_codes, deterministic_computing, inputs, outputs, constraints_in_param, dtype_support_description)<br><code>document_versions.json_constraints</code> (UPDATE: 完整 result.json 结构)</span></div>
+<div class="io-row"><span class="io-label">特殊说明</span><span class="io-val"><strong>无 LLM 调用</strong>，纯 DB 查询 + JSON 拼接。product_support 取自 platform_support 表（is_supported=1 的平台名列表），不再从 parsed_data 获取</span></div>
 </div>
 
 <p><strong>触发条件</strong>：build_param_constraint 节点完成后执行。</p>
-<p><strong>特点</strong>：汇编节点，从 8 张表 + document_versions.function_explanation_summary 中查询当前文档的所有提取结果，按 <code>function_name</code> 分组拼接为结构化 JSON，写入 <code>constraints_result</code> 表。</p>
+<p><strong>特点</strong>：汇编节点，从 8 张表 + document_versions.function_explanation_summary 中查询当前文档的所有提取结果，完成两项持久化：</p>
+<ol>
+  <li>写入 <code>constraints_result</code> 表（11 个字段，含 5 个新增字段：deterministic_computing、inputs、outputs、constraints_in_param、dtype_support_description）</li>
+  <li>组装完整 result.json 结构并写入 <code>document_versions.json_constraints</code></li>
+</ol>
+<p><strong>product_support 取值变更</strong>：原来从 <code>parsed_data</code> 获取（常为空），现改为从 <code>platform_support</code> 表查询 <code>is_supported=1</code> 的平台名列表，数据质量更可靠。</p>
 <p><strong>流程</strong>：</p>
 <div class="flow-chart">assemble_result_node(state)
   │
   ├─ State 输入: doc_id, operator_name
   │
   ├─ Step 1: MCP: get_parsed_by_doc_id(doc_id)
-  │    → operator_name, version, product_support
+  │    → operator_name fallback
   │
-  ├─ Step 2: MCP: query_params_by_doc_id(doc_id) → 参数列表
-  ├─ Step 3: MCP: query_param_relations(doc_id) → 约束关系
-  ├─ Step 4: MCP: query_function_signatures_by_doc_id(doc_id) → 函数签名
-  ├─ Step 5: MCP: query_platform_support_by_doc_id(doc_id) → 平台支持
-  ├─ Step 6: MCP: query_return_codes_by_doc_id(doc_id) → 返回码
-  ├─ Step 7: MCP: query_dtype_combos_by_doc_id(doc_id) → 数据类型组合
-  ├─ Step 7b: MCP: get_function_explanation_summary(doc_id)
-  │     → 从 document_versions 读取 description (function_explanation_summary.description)
+  ├─ Step 2: MCP 查询所有数据表
+  │    ├─ query_params_by_doc_id(doc_id) → 参数列表
+  │    ├─ query_param_relations(doc_id) → 约束关系（含 relation_object）
+  │    ├─ query_function_signatures_by_doc_id(doc_id) → 函数签名
+  │    ├─ query_platform_support_by_doc_id(doc_id) → 平台支持
+  │    ├─ query_return_codes_by_doc_id(doc_id) → 返回码
+  │    └─ query_dtype_combos_by_doc_id(doc_id) → 数据类型组合
   │
-  ├─ Step 8: _build_function_explanation(params, relations, signatures,
+  ├─ Step 2b: MCP: get_function_explanation_summary(doc_id) → description
+  │
+  ├─ Step 3: _build_function_explanation(params, relations, signatures,
   │         return_codes, dtype_combos, description=description)
-  │    └─ 按 function_name 分组，每组包含:
-  │       signature, params, relations, return_codes, dtype_combinations
-  │    └─ 顶层注入 description (来自 function_explanation_summary)
+  │    └─ 按 function_name 分组，顶层注入 description
   │
-  ├─ Step 8b: 构建 platform_support 列表
-  │    └─ 从 Step 5 的 platform_support_data 中筛选 is_supported==1 的平台名称
+  ├─ Step 3.5: 构建 product_support（从 platform_support 表 is_supported=1）
   │
-  ├─ Step 8c: 提取 GetWorkspaceSize 函数签名
-  │    └─ 遍历 signatures，找 function_name.endswith("GetWorkspaceSize")
-  │    └─ 取其 full_signature 作为 function_signature
+  ├─ Step 3e: 组装新字段
+  │    ├─ _build_deterministic_computing(platform_support_data) → {platform: {value, src_text}}
+  │    ├─ _build_inputs_outputs(params) → inputs/outputs 各为 {param_name: param_constraint}
+  │    ├─ _build_constraints_in_param(relations, product_support_list) → {platform: [relation_object]}
+  │    └─ _build_dtype_support(dtype_combos) → {platform: [combo]}
   │
-  └─ Step 9: MCP: save_constraints_result(doc_id, operator_name,
-                 product_support, platform_support, function_explanation,
-                 function_signature)
-       └─ INSERT OR REPLACE constraints_result 表</div>
+  ├─ Step 4: MCP: save_constraints_result(doc_id, operator_name,
+  │         product_support, function_explanation, function_signature,
+  │         return_codes, deterministic_computing, inputs, outputs,
+  │         constraints_in_param, dtype_support_description)
+  │    └─ INSERT OR REPLACE constraints_result 表
+  │
+  ├─ Step 5: 组装 result.json 结构
+  │    └─ {operator_name, function_explanation: description, product_support,
+  │        function_signature, deterministic_computing, inputs, outputs,
+  │        constraints_in_param, return_info, dtype_support_description}
+  │
+  └─ Step 6: MCP: save_json_constraints(doc_id, json_constraints)
+       └─ UPDATE document_versions.json_constraints</div>
 <p><strong>输出状态</strong>：<code>error</code></p>
-<p><strong>存储格式</strong>：<code>constraints_result</code> 表，每行对应一个文档版本。核心字段 <code>function_explanation</code> 是 JSON 对象，顶层含 <code>description</code>（来自 <code>document_versions.function_explanation_summary</code>），以 function_name 为 key，值为包含 signature/params/relations/return_codes/dtype_combinations 的完整约束数据。<code>platform_support</code> 为支持的平台名称列表（JSON 数组）。<code>function_signature</code> 为 GetWorkspaceSize 函数的 <code>full_signature</code>。</p>
+<p><strong>constraints_result 存储格式</strong>：每行对应一个文档版本。<code>function_explanation</code> 是 JSON 对象（顶层含 description，以 function_name 为 key）。<code>product_support</code> 为支持的平台名称列表。<code>deterministic_computing</code> 为 {platform: {value, src_text}}。<code>inputs</code>/<code>outputs</code> 为 {param_name: param_constraint}。<code>constraints_in_param</code> 为 {platform: [relation_object]}。<code>dtype_support_description</code> 为 {platform: [combo]}。</p>
+<p><strong>json_constraints 存储格式</strong>：完整的 result.json 结构（10 个一级字段），存储在 <code>document_versions.json_constraints</code> 列中。</p>
 
 
 </section>
@@ -1152,11 +1217,12 @@ gantt
     param_relation_extract (子图: 提取参数耦合关系) :5, 7
 
     section 顺序
-    build_param_constraint (LLM构建param_constraint JSON) :7, 8
-    assemble_result (汇编所有结果→constraints_result) :8, 9
+    build_param_relations (LLM提取参数关系表达式) :7, 8
+    build_param_constraint (LLM构建param_constraint JSON) :8, 9
+    assemble_result (汇编结果→constraints_result+json_constraints) :9, 10
 </pre>
 
-<p><strong>MCP 通信模式</strong>：每个节点每次调用 MCP 工具时，<code>MCPClient._call_tool()</code> 会<strong>启动一个新的 MCP Server 子进程</strong>（<code>async with stdio_client</code>），调用完成后进程退出。整个 Pipeline 执行一次约产生 ~50 次子进程启动（param_relation_extract 子图额外增加 3~5 次，allowed_range_extract 额外增加 3~6 次，return_code_extract 额外增加 3~6 次，determinism_extract 额外增加 2~3 次，dtype_combo_extract 额外增加 2~3 次，build_param_constraint 额外增加 5~8 次，assemble_result 额外增加 8 次）。参数查询在 <code>src_content_extract</code> 中进行一次，下游节点通过 state 传递数据，避免重复 MCP 查询。</p>
+<p><strong>MCP 通信模式</strong>：每个节点每次调用 MCP 工具时，<code>MCPClient._call_tool()</code> 会<strong>启动一个新的 MCP Server 子进程</strong>（<code>async with stdio_client</code>），调用完成后进程退出。整个 Pipeline 执行一次约产生 ~55 次子进程启动（param_relation_extract 子图额外增加 3~5 次，allowed_range_extract 额外增加 3~6 次，return_code_extract 额外增加 3~6 次，determinism_extract 额外增加 2~3 次，dtype_combo_extract 额外增加 2~3 次，build_param_relations 额外增加 3~5 次，build_param_constraint 额外增加 5~8 次，assemble_result 额外增加 10 次）。参数查询在 <code>src_content_extract</code> 中进行一次，下游节点通过 state 传递数据，避免重复 MCP 查询。</p>
 
 
 </section>
@@ -1181,6 +1247,7 @@ document_versions (
     parsed_data TEXT,             -- JSON: ParsedOperatorDocument
     product_support TEXT,         -- JSON: [{product, supported}]
     function_explanation_summary TEXT NOT NULL DEFAULT '{}', -- JSON: {description, formula, key_points, source_text} (v16迁移添加)
+    json_constraints TEXT NOT NULL DEFAULT '{}',  -- JSON: 完整 result.json 结构 (v27迁移添加)
     created_at TEXT,
     UNIQUE(operator_id, version)
 )
@@ -1219,6 +1286,7 @@ param_relations (
     params TEXT NOT NULL,              -- JSON: 涉及的参数名列表
     param_optional TEXT NOT NULL DEFAULT '{}',  -- JSON: 各参数是否可选
     source_citation TEXT NOT NULL,     -- 原文引用
+    relation_object TEXT NOT NULL DEFAULT '{}',  -- JSON: {expr_type, expr, relation_params, src_text} (v20迁移添加)
     created_at TEXT,
 )
 
@@ -1281,15 +1349,21 @@ dtype_combinations (
 
 -- 约束结果汇编表（最终输出）
 constraints_result (
-    id                   INTEGER PK,
-    doc_id               INTEGER FK -> document_versions(id) UNIQUE,  -- 一对一
-    operator_name        TEXT NOT NULL,
-    product_support      TEXT NOT NULL DEFAULT '[]',       -- JSON: [{product, support}]
-    platform_support     TEXT NOT NULL DEFAULT '[]',       -- JSON: 支持的平台名称列表
-    function_explanation TEXT NOT NULL DEFAULT '{}',       -- JSON: 按 function_name 分组的完整约束数据
-    function_signature   TEXT NOT NULL DEFAULT '',         -- GetWorkspaceSize 函数的 full_signature (v18迁移添加)
-    created_at           TEXT
+    id                         INTEGER PK,
+    doc_id                     INTEGER FK -> document_versions(id) UNIQUE,  -- 一对一
+    operator_name              TEXT NOT NULL,
+    product_support            TEXT NOT NULL DEFAULT '[]',       -- JSON: 支持的平台名称列表（来自 platform_support 表 is_supported=1）
+    function_explanation       TEXT NOT NULL DEFAULT '{}',       -- JSON: 按 function_name 分组的完整约束数据（顶层含 description）
+    function_signature         TEXT NOT NULL DEFAULT '',         -- GetWorkspaceSize 函数的 full_signature (v18迁移添加)
+    return_codes               TEXT NOT NULL DEFAULT '[]',       -- JSON: [{return_value, error_code, description}] (v21迁移添加)
+    deterministic_computing    TEXT NOT NULL DEFAULT '{}',       -- JSON: {platform: {value, src_text}} (v22迁移添加)
+    inputs                     TEXT NOT NULL DEFAULT '{}',       -- JSON: {param_name: {platform: constraint}} (v23迁移添加)
+    outputs                    TEXT NOT NULL DEFAULT '{}',       -- JSON: {param_name: {platform: constraint}} (v24迁移添加)
+    constraints_in_param       TEXT NOT NULL DEFAULT '{}',       -- JSON: {platform: [relation_object]} (v25迁移添加)
+    dtype_support_description  TEXT NOT NULL DEFAULT '{}',       -- JSON: {platform: [combo]} (v26迁移添加)
+    created_at                 TEXT
 )
+-- 注: platform_support 列已删除(v28)，product_support 改用 platform_support 表的逻辑取值
 
 -- 确定性计算已迁移到 platform_support.deterministic_computing JSON 字段，原 determinism 表已删除</code></pre>
 
@@ -1303,7 +1377,7 @@ constraints_result (
 <tbody>
 <tr><td>GET</td><td><code>/</code></td><td>返回 static/index.html 测试页面</td><td>静态文件</td></tr>
 <tr><td>GET</td><td><code>/health</code></td><td>健康检查</td><td>直接返回 <code>{"status": "ok"}</code></td></tr>
-<tr><td>POST</td><td><code>/api/v1/upload</code></td><td>上传算子文档，触发完整 Pipeline</td><td>init_doc -> [product_support || parse_params || function_signature_extract || function_explanation_extract] -> src_content_extract -> param_desc_extract -> [shape_extract || dtype_extract || dformat_extract || optional_extract || param_attr_extract || array_length_extract || allowed_range_extract || return_code_extract || determinism_extract || dtype_combo_extract || param_relation_extract] -> build_param_constraint -> assemble_result</td></tr>
+<tr><td>POST</td><td><code>/api/v1/upload</code></td><td>上传算子文档，触发完整 Pipeline</td><td>init_doc -> [product_support || parse_params || function_signature_extract || function_explanation_extract] -> src_content_extract -> param_desc_extract -> [shape_extract || dtype_extract || dformat_extract || optional_extract || param_attr_extract || array_length_extract || allowed_range_extract || return_code_extract || determinism_extract || dtype_combo_extract || param_relation_extract] -> build_param_relations -> build_param_constraint -> assemble_result</td></tr>
 <tr><td>GET</td><td><code>/api/v1/operators</code></td><td>列出所有已注册算子及最新版本</td><td>MCP: query_operators</td></tr>
 <tr><td>GET</td><td><code>/api/v1/operators/{name}</code></td><td>获取算子的完整解析数据</td><td>MCP: get_parsed(name, ?version)</td></tr>
 <tr><td>GET</td><td><code>/api/v1/parameters</code></td><td>查询参数列表（可选 ?operator_name 过滤）</td><td>MCP: query_params(operator_name?)</td></tr>
@@ -1429,6 +1503,10 @@ constraints_result (
 <tr><td>function_signature 字段方案</td><td><code>docs/fs.html</code></td><td>constraints_result 新增 function_signature 字段方案</td></tr>
 <tr><td>constraints_result platform_support 方案</td><td><code>docs/platform_support.html</code></td><td>constraints_result 新增 platform_support 字段方案</td></tr>
 <tr><td>constraints_result deterministic_computing 方案</td><td><code>docs/dc.html</code></td><td>constraints_result 新增 deterministic_computing 字段方案</td></tr>
+<tr><td>param_relations relation_object 方案</td><td><code>docs/param-relation-schema.html</code></td><td>param_relations 新增 relation_object + 平台分组方案</td></tr>
+<tr><td>result.json 完整覆盖方案</td><td><code>docs/result-schema.html</code></td><td>constraints_result 完整覆盖 result.json 10 个一级字段方案</td></tr>
+<tr><td>product_support 空数组修复</td><td><code>docs/cr_ps.html</code></td><td>constraints_result.product_support 根因分析与修复方案</td></tr>
+<tr><td>document_versions.json_constraints 方案</td><td><code>docs/doc_cons_result.html</code></td><td>新增 json_constraints 列存储完整 result.json 结构方案</td></tr>
 </tbody>
 </table>
 </section>
