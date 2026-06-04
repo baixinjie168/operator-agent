@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import pytest
 
+from mcp_server.parsers.section_splitter import split_sections
 from shared.exceptions import DocumentParsingError
 from shared.models.enums import SectionType
-from mcp_server.parsers.section_splitter import split_sections
 
 
 class TestTitleParsing:

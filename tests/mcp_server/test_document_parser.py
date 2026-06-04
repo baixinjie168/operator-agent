@@ -2,17 +2,14 @@
 
 from __future__ import annotations
 
-import pytest
-
-from shared.models.enums import SectionType
 from mcp_server.parsers.document_parser import (
     classify_section,
-    parse_operator_document,
+    parse_function_signatures,
     parse_operator_file,
     parse_product_support_table,
-    parse_function_signatures,
     parse_table_rows,
 )
+from shared.models.enums import SectionType
 
 
 class TestClassifySection:
@@ -145,14 +142,6 @@ class TestFullDocumentParsing:
         assert SectionType.CONSTRAINTS in section_types
         assert SectionType.USAGE_EXAMPLE in section_types
 
-        assert len(result.product_support) == 6
-        supported = [p for p in result.product_support if p.supported]
-        assert len(supported) == 3
-
-        assert len(result.function_signatures) == 2
-        assert result.function_signatures[0].function_name == "aclnnBatchNormElemtGetWorkspaceSize"
-        assert result.function_signatures[1].function_name == "aclnnBatchNormElemt"
-
     def test_minimal_operator_document(self, minimal_operator_path):
         result = parse_operator_file(minimal_operator_path)
 
@@ -160,8 +149,6 @@ class TestFullDocumentParsing:
         assert result.cann_version == "8.0.0"
 
         assert len(result.sections) == 11
-        assert len(result.product_support) == 2
-        assert len(result.function_signatures) == 2
 
     def test_serialization_roundtrip(self, sample_operator_path):
         import json
@@ -172,7 +159,6 @@ class TestFullDocumentParsing:
 
         assert data["operator_name"] == "aclnnBatchNormElemt"
         assert len(data["sections"]) == 12
-        assert len(data["product_support"]) == 6
 
         from shared.models.operator import ParsedOperatorDocument
 

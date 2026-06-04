@@ -26,4 +26,5 @@ class PipelineState(TypedDict, total=False):
     parameters: list[dict[str, Any]]
     product_support: list[dict[str, Any]]
     cann_version: str | None
+    function_explanation_summary: dict[str, Any]
     error: Annotated[str | None, merge_errors]

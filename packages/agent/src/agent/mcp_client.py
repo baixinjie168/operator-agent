@@ -140,6 +140,13 @@ class MCPClient:
             "updates": json.dumps(updates, ensure_ascii=False),
         })
 
+    async def update_param_dformat(self, doc_id: int, updates: list[dict]) -> dict:
+        """Batch update only the dformat_desc field of parameters."""
+        return await self._call_tool("update_param_dformat", {
+            "doc_id": doc_id,
+            "updates": json.dumps(updates, ensure_ascii=False),
+        })
+
     async def update_param_optional(self, doc_id: int, updates: list[dict]) -> dict:
         """Batch update only the is_optional field of parameters."""
         return await self._call_tool("update_param_optional", {
@@ -153,3 +160,179 @@ class MCPClient:
             "doc_id": doc_id,
             "updates": json.dumps(updates, ensure_ascii=False),
         })
+
+    async def update_param_attrs(self, doc_id: int, updates: list[dict]) -> dict:
+        """Batch update is_support_discontinuous and param_desc fields of parameters."""
+        return await self._call_tool("update_param_attrs", {
+            "doc_id": doc_id,
+            "updates": json.dumps(updates, ensure_ascii=False),
+        })
+
+    async def update_param_allowed_range(self, doc_id: int, updates: list[dict]) -> dict:
+        """Batch update only the allowed_range_value field of parameters."""
+        return await self._call_tool("update_param_allowed_range", {
+            "doc_id": doc_id,
+            "updates": json.dumps(updates, ensure_ascii=False),
+        })
+
+    async def update_param_array_length(self, doc_id: int, updates: list[dict]) -> dict:
+        """Batch update only the array_length field of parameters."""
+        return await self._call_tool("update_param_array_length", {
+            "doc_id": doc_id,
+            "updates": json.dumps(updates, ensure_ascii=False),
+        })
+
+    async def update_param_constraint(self, doc_id: int, updates: list[dict]) -> dict:
+        """Batch update only the param_constraint field of parameters."""
+        return await self._call_tool("update_param_constraint", {
+            "doc_id": doc_id,
+            "updates": json.dumps(updates, ensure_ascii=False),
+        })
+
+    async def save_param_relations(self, doc_id: int, relations: list[dict]) -> dict:
+        """Batch save parameter relations for a document version."""
+        return await self._call_tool("save_relations", {
+            "doc_id": doc_id,
+            "relations": json.dumps(relations, ensure_ascii=False),
+        })
+
+    async def query_param_relations(self, doc_id: int) -> list[dict]:
+        """Query parameter relations for a document version."""
+        return await self._call_tool("query_relations", {"doc_id": doc_id})
+
+    async def query_param_relations_by_operator(self, operator_name: str | None = None) -> list[dict]:
+        """Query parameter relations, optionally filtered by operator name."""
+        args: dict[str, Any] = {}
+        if operator_name is not None:
+            args["operator_name"] = operator_name
+        return await self._call_tool("query_relations_by_operator", args)
+
+    async def save_function_signatures(self, doc_id: int, signatures: list[dict]) -> dict:
+        """Batch save function signatures for a document version."""
+        return await self._call_tool("save_function_signatures", {
+            "doc_id": doc_id,
+            "signatures": json.dumps(signatures, ensure_ascii=False),
+        })
+
+    async def query_function_signatures_by_operator(self, operator_name: str | None = None) -> list[dict]:
+        """Query function signatures, optionally filtered by operator name."""
+        args: dict[str, Any] = {}
+        if operator_name is not None:
+            args["operator_name"] = operator_name
+        return await self._call_tool("query_function_signatures_by_operator", args)
+
+    async def save_platform_support(self, doc_id: int, platforms: list[dict]) -> dict:
+        """Batch save platform support info for a document version."""
+        return await self._call_tool("save_platform_support", {
+            "doc_id": doc_id,
+            "platforms": json.dumps(platforms, ensure_ascii=False),
+        })
+
+    async def save_function_explanation_summary(
+        self, doc_id: int, summary: dict
+    ) -> str:
+        """Save function explanation summary for a document version."""
+        return await self._call_tool(
+            "save_function_explanation_summary", {
+                "doc_id": doc_id,
+                "summary": json.dumps(summary, ensure_ascii=False),
+            }
+        )
+
+    async def get_function_explanation_summary(self, doc_id: int) -> dict:
+        """Retrieve function explanation summary for a document version."""
+        result = await self._call_tool("get_function_explanation_summary", {
+            "doc_id": doc_id,
+        })
+        return result if isinstance(result, dict) else {}
+
+    async def query_platform_support_by_operator(self, operator_name: str | None = None) -> list[dict]:
+        """Query platform support info, optionally filtered by operator name."""
+        args: dict[str, Any] = {}
+        if operator_name is not None:
+            args["operator_name"] = operator_name
+        return await self._call_tool("query_platform_support_by_operator", args)
+
+    async def save_return_codes(self, doc_id: int, return_codes: list[dict]) -> dict:
+        """Batch save return codes for a document version."""
+        return await self._call_tool("save_return_codes", {
+            "doc_id": doc_id,
+            "return_codes": json.dumps(return_codes, ensure_ascii=False),
+        })
+
+    async def query_return_codes_by_operator(self, operator_name: str | None = None) -> list[dict]:
+        """Query return codes, optionally filtered by operator name."""
+        args: dict[str, Any] = {}
+        if operator_name is not None:
+            args["operator_name"] = operator_name
+        return await self._call_tool("query_return_codes_by_operator", args)
+
+    async def save_determinism(self, doc_id: int, determinism_records: list[dict]) -> dict:
+        """Batch save determinism records for a document version."""
+        return await self._call_tool("save_determinism", {
+            "doc_id": doc_id,
+            "determinism_records": json.dumps(determinism_records, ensure_ascii=False),
+        })
+
+    async def query_determinism_by_operator(self, operator_name: str | None = None) -> list[dict]:
+        """Query determinism records, optionally filtered by operator name."""
+        args: dict[str, Any] = {}
+        if operator_name is not None:
+            args["operator_name"] = operator_name
+        return await self._call_tool("query_determinism_by_operator", args)
+
+    async def save_dtype_combinations(self, doc_id: int, combos: list[dict]) -> dict:
+        """Batch save dtype combination records for a document version."""
+        return await self._call_tool("save_dtype_combinations", {
+            "doc_id": doc_id,
+            "combos": json.dumps(combos, ensure_ascii=False),
+        })
+
+    async def query_dtype_combos_by_operator(self, operator_name: str | None = None) -> list[dict]:
+        """Query dtype combination records, optionally filtered by operator name."""
+        args: dict[str, Any] = {}
+        if operator_name is not None:
+            args["operator_name"] = operator_name
+        return await self._call_tool("query_dtype_combos", args)
+
+    async def query_function_signatures_by_doc_id(self, doc_id: int) -> list[dict]:
+        """Query function signatures for a specific document version by doc_id."""
+        return await self._call_tool("query_function_signatures_by_doc_id", {"doc_id": doc_id})
+
+    async def query_platform_support_by_doc_id(self, doc_id: int) -> list[dict]:
+        """Query platform support for a specific document version by doc_id."""
+        return await self._call_tool("query_platform_support_by_doc_id", {"doc_id": doc_id})
+
+    async def query_return_codes_by_doc_id(self, doc_id: int) -> list[dict]:
+        """Query return codes for a specific document version by doc_id."""
+        return await self._call_tool("query_return_codes_by_doc_id", {"doc_id": doc_id})
+
+    async def query_dtype_combos_by_doc_id(self, doc_id: int) -> list[dict]:
+        """Query dtype combinations for a specific document version by doc_id."""
+        return await self._call_tool("query_dtype_combos_by_doc_id", {"doc_id": doc_id})
+
+    async def save_constraints_result(
+        self,
+        doc_id: int,
+        operator_name: str,
+        product_support: str,
+        platform_support: str,
+        function_explanation: str,
+        function_signature: str = "",
+    ) -> dict:
+        """Save assembled constraints result for a document version."""
+        return await self._call_tool("save_constraints_result", {
+            "doc_id": doc_id,
+            "operator_name": operator_name,
+            "product_support": product_support,
+            "platform_support": platform_support,
+            "function_explanation": function_explanation,
+            "function_signature": function_signature,
+        })
+
+    async def query_constraints_result(self, operator_name: str | None = None) -> list[dict]:
+        """Query constraints results, optionally filtered by operator name."""
+        args: dict[str, Any] = {}
+        if operator_name is not None:
+            args["operator_name"] = operator_name
+        return await self._call_tool("query_constraints_result", args)

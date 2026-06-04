@@ -36,8 +36,6 @@ class ParsedOperatorDocument(BaseModel):
     source_url: str | None = None
     saved_date: str | None = None
     sections: list[ParsedSection]
-    product_support: list[ProductSupport] = []
-    function_signatures: list[FunctionSignature] = []
 
 
 class ParsedParameter(BaseModel):
@@ -49,8 +47,19 @@ class ParsedParameter(BaseModel):
     direction: ParamDirection = ParamDirection.INPUT
     src_content: str = ""
     description: str = ""
-    usage_notes: str = ""
     data_type: str = ""
     data_format: str = ""
     shape: str = ""
     attributes: dict[str, Any] = {}
+
+
+class ParamRelation(BaseModel):
+    """A coupling relation between two or more parameters."""
+
+    relation_type: str
+    precondition: str = "无"
+    description: str
+    params: list[str]
+    param_optional: dict[str, bool] = {}
+    source_citation: str
+    function_name: str = ""

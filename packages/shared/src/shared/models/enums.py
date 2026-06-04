@@ -71,3 +71,16 @@ class PipelineStatus(StrEnum):
     PAUSED = "paused"
     COMPLETED = "completed"
     FAILED = "failed"
+
+
+class RelationType(StrEnum):
+    DTYPE = "dtype"
+    SHAPE = "shape"
+    DFORMAT = "dformat"
+    VALUE = "value"
+    DTYPE_SHAPE = "dtype&shape"
+    DTYPE_DFORMAT = "dtype&dformat"
+    DFORMAT_SHAPE = "dformat&shape"
+    DTYPE_DFORMAT_SHAPE = "dtype&dformat&shape"
+    PRESENCE = "presence"
+    SHAPE_VALUE = "shape&value"

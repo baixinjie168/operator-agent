@@ -103,6 +103,7 @@ async def src_content_extract_node(state: PipelineState) -> dict[str, Any]:
                 return {
                     "function_name": function_name,
                     "param_name": param_name,
+                    "param_type": param.get("param_type", ""),
                     "src_content": src_content,
                 }
             except Exception as exc:
