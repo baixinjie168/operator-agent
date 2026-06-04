@@ -81,6 +81,12 @@ async def assemble_result_node(state: PipelineState) -> dict[str, Any]:
         transformed_rc = _transform_return_codes(return_codes)
         return_codes_raw = json.dumps(transformed_rc, ensure_ascii=False)
 
+        # Step 3e: Build new fields
+        det_computing = _build_deterministic_computing(platform_support_data)
+        inputs_dict, outputs_dict = _build_inputs_outputs(params)
+        constraints_ip = _build_constraints_in_param(relations, platform_support_list)
+        dtype_support = _build_dtype_support(dtype_combos)
+
         # Step 4: Save to constraints_result table
         await _mcp_client.save_constraints_result(
             doc_id=doc_id,
@@ -90,6 +96,11 @@ async def assemble_result_node(state: PipelineState) -> dict[str, Any]:
             function_explanation=function_explanation_raw,
             function_signature=workspace_sig,
             return_codes=return_codes_raw,
+            deterministic_computing=json.dumps(det_computing, ensure_ascii=False),
+            inputs=json.dumps(inputs_dict, ensure_ascii=False),
+            outputs=json.dumps(outputs_dict, ensure_ascii=False),
+            constraints_in_param=json.dumps(constraints_ip, ensure_ascii=False),
+            dtype_support_description=json.dumps(dtype_support, ensure_ascii=False),
         )
 
         fn_count = len(function_explanation)
@@ -170,4 +181,64 @@ def _transform_return_codes(raw_codes: list[dict]) -> list[dict]:
         }
         for (rv, ec), descs in merged.items()
     ]
+
+
+def _build_deterministic_computing(platforms: list[dict]) -> dict[str, Any]:
+    """Build deterministic_computing: {platform_name: {value, src_text}}."""
+    result: dict[str, Any] = {}
+    for p in platforms:
+        if p.get("is_supported") == 1:
+            name = p.get("platform_name", "")
+            det = p.get("deterministic_computing", {})
+            if name:
+                result[name] = det
+    return result
+
+
+def _build_inputs_outputs(
+    params: list[dict],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Build inputs/outputs: {param_name: param_constraint} split by direction."""
+    inputs: dict[str, Any] = {}
+    outputs: dict[str, Any] = {}
+    for p in params:
+        name = p.get("param_name", "")
+        constraint_raw = p.get("param_constraint", "{}") or "{}"
+        try:
+            constraint = json.loads(constraint_raw) if isinstance(constraint_raw, str) else constraint_raw
+        except (json.JSONDecodeError, TypeError):
+            constraint = {}
+        if p.get("direction") == "output":
+            outputs[name] = constraint
+        else:
+            inputs[name] = constraint
+    return inputs, outputs
+
+
+def _build_constraints_in_param(
+    relations: list[dict],
+    supported_platforms: list[str],
+) -> dict[str, list[dict]]:
+    """Build constraints_in_param: {platform: [relation_object]}."""
+    grouped: dict[str, list[dict]] = {}
+    for r in relations:
+        obj = r.get("relation_object", {})
+        if not obj or obj == {}:
+            continue
+        precondition = r.get("precondition", "无")
+        targets = supported_platforms if precondition == "无" else [precondition]
+        for plat in targets:
+            grouped.setdefault(plat, []).append(obj)
+    return grouped
+
+
+def _build_dtype_support(dtype_combos: list[dict]) -> dict[str, list[dict]]:
+    """Build dtype_support_description: {platform: [combo]}."""
+    grouped: dict[str, list[dict]] = {}
+    for dc in dtype_combos:
+        plat = dc.get("platform", "通用")
+        combo = dc.get("combo", {})
+        if combo:
+            grouped.setdefault(plat, []).append(combo)
+    return grouped
 

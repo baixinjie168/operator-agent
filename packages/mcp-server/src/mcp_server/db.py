@@ -275,6 +275,46 @@ class Database:
             )
         except sqlite3.OperationalError:
             pass
+        # 迁移：v22 — constraints_result 新增 deterministic_computing 列
+        try:
+            self._conn.execute(
+                "ALTER TABLE constraints_result ADD COLUMN deterministic_computing "
+                "TEXT NOT NULL DEFAULT '{}'"
+            )
+        except sqlite3.OperationalError:
+            pass
+        # 迁移：v23 — constraints_result 新增 inputs 列
+        try:
+            self._conn.execute(
+                "ALTER TABLE constraints_result ADD COLUMN inputs "
+                "TEXT NOT NULL DEFAULT '{}'"
+            )
+        except sqlite3.OperationalError:
+            pass
+        # 迁移：v24 — constraints_result 新增 outputs 列
+        try:
+            self._conn.execute(
+                "ALTER TABLE constraints_result ADD COLUMN outputs "
+                "TEXT NOT NULL DEFAULT '{}'"
+            )
+        except sqlite3.OperationalError:
+            pass
+        # 迁移：v25 — constraints_result 新增 constraints_in_param 列
+        try:
+            self._conn.execute(
+                "ALTER TABLE constraints_result ADD COLUMN constraints_in_param "
+                "TEXT NOT NULL DEFAULT '{}'"
+            )
+        except sqlite3.OperationalError:
+            pass
+        # 迁移：v26 — constraints_result 新增 dtype_support_description 列
+        try:
+            self._conn.execute(
+                "ALTER TABLE constraints_result ADD COLUMN dtype_support_description "
+                "TEXT NOT NULL DEFAULT '{}'"
+            )
+        except sqlite3.OperationalError:
+            pass
         self._conn.commit()
 
     @property

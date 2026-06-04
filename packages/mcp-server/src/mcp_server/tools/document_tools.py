@@ -1304,6 +1304,11 @@ def save_constraints_result(
     function_explanation: str,
     function_signature: str = "",
     return_codes: str = "[]",
+    deterministic_computing: str = "{}",
+    inputs: str = "{}",
+    outputs: str = "{}",
+    constraints_in_param: str = "{}",
+    dtype_support_description: str = "{}",
 ) -> dict:
     """Save assembled constraints result for a document version.
 
@@ -1317,6 +1322,11 @@ def save_constraints_result(
         function_explanation: JSON string of function-grouped constraint data.
         function_signature: full_signature of the GetWorkspaceSize function.
         return_codes: JSON string of transformed return codes array.
+        deterministic_computing: JSON string of {platform: {value, src_text}}.
+        inputs: JSON string of {param_name: {platform: constraint}}.
+        outputs: JSON string of {param_name: {platform: constraint}}.
+        constraints_in_param: JSON string of {platform: [relation_object]}.
+        dtype_support_description: JSON string of {platform: [combo]}.
 
     Returns:
         dict with saved flag.
@@ -1326,10 +1336,14 @@ def save_constraints_result(
     conn.execute(
         "INSERT OR REPLACE INTO constraints_result "
         "(doc_id, operator_name, product_support, platform_support, "
-        "function_explanation, function_signature, return_codes) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "function_explanation, function_signature, return_codes, "
+        "deterministic_computing, inputs, outputs, constraints_in_param, "
+        "dtype_support_description) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (doc_id, operator_name, product_support, platform_support,
-         function_explanation, function_signature, return_codes),
+         function_explanation, function_signature, return_codes,
+         deterministic_computing, inputs, outputs, constraints_in_param,
+         dtype_support_description),
     )
     conn.commit()
     return {"saved": True}
@@ -1340,24 +1354,23 @@ def query_constraints_result(operator_name: str | None = None) -> list[dict]:
     db = get_db()
     conn = db.conn
 
+    _cols = (
+        "cr.id, cr.doc_id, cr.operator_name, dv.version, "
+        "cr.product_support, cr.platform_support, cr.function_explanation, "
+        "cr.function_signature, cr.return_codes, "
+        "cr.deterministic_computing, cr.inputs, cr.outputs, "
+        "cr.constraints_in_param, cr.dtype_support_description"
+    )
+    _base = "FROM constraints_result cr JOIN document_versions dv ON cr.doc_id = dv.id"
+
     if operator_name:
         rows = conn.execute(
-            "SELECT cr.id, cr.doc_id, cr.operator_name, dv.version, "
-            "cr.product_support, cr.platform_support, cr.function_explanation, "
-            "cr.function_signature, cr.return_codes "
-            "FROM constraints_result cr "
-            "JOIN document_versions dv ON cr.doc_id = dv.id "
-            "WHERE cr.operator_name = ? ORDER BY dv.version DESC",
+            f"SELECT {_cols} {_base} WHERE cr.operator_name = ? ORDER BY dv.version DESC",
             (operator_name,),
         ).fetchall()
     else:
         rows = conn.execute(
-            "SELECT cr.id, cr.doc_id, cr.operator_name, dv.version, "
-            "cr.product_support, cr.platform_support, cr.function_explanation, "
-            "cr.function_signature, cr.return_codes "
-            "FROM constraints_result cr "
-            "JOIN document_versions dv ON cr.doc_id = dv.id "
-            "ORDER BY cr.operator_name, dv.version DESC",
+            f"SELECT {_cols} {_base} ORDER BY cr.operator_name, dv.version DESC",
         ).fetchall()
 
     return [
@@ -1368,9 +1381,15 @@ def query_constraints_result(operator_name: str | None = None) -> list[dict]:
             "version": r[3],
             "product_support": json.loads(r[4]) if r[4] else [],
             "platform_support": json.loads(r[5]) if r[5] else [],
-            "function_explanation": json.loads(r[6]) if r[6] else {},
+            "function_explanation": (json.loads(r[6]) if r[6] else {}).get("description", ""),
+            "function_detail": json.loads(r[6]) if r[6] else {},
             "function_signature": r[7] or "",
-            "return_codes": json.loads(r[8]) if r[8] else [],
+            "return_info": json.loads(r[8]) if r[8] else [],
+            "deterministic_computing": json.loads(r[9]) if r[9] else {},
+            "inputs": json.loads(r[10]) if r[10] else {},
+            "outputs": json.loads(r[11]) if r[11] else {},
+            "constraints_in_param": json.loads(r[12]) if r[12] else {},
+            "dtype_support_description": json.loads(r[13]) if r[13] else {},
         }
         for r in rows
     ]

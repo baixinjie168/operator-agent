@@ -327,6 +327,11 @@ class MCPClient:
         function_explanation: str,
         function_signature: str = "",
         return_codes: str = "[]",
+        deterministic_computing: str = "{}",
+        inputs: str = "{}",
+        outputs: str = "{}",
+        constraints_in_param: str = "{}",
+        dtype_support_description: str = "{}",
     ) -> dict:
         """Save assembled constraints result for a document version."""
         return await self._call_tool("save_constraints_result", {
@@ -337,6 +342,11 @@ class MCPClient:
             "function_explanation": function_explanation,
             "function_signature": function_signature,
             "return_codes": return_codes,
+            "deterministic_computing": deterministic_computing,
+            "inputs": inputs,
+            "outputs": outputs,
+            "constraints_in_param": constraints_in_param,
+            "dtype_support_description": dtype_support_description,
         })
 
     async def query_constraints_result(self, operator_name: str | None = None) -> list[dict]:

@@ -118,15 +118,20 @@ CREATE INDEX IF NOT EXISTS idx_dtype_combos_doc_fn
     ON dtype_combinations(doc_id, function_name);
 
 CREATE TABLE IF NOT EXISTS constraints_result (
-    id                   INTEGER PRIMARY KEY AUTOINCREMENT,
-    doc_id               INTEGER NOT NULL REFERENCES document_versions(id) UNIQUE,
-    operator_name        TEXT NOT NULL,
-    product_support      TEXT NOT NULL DEFAULT '[]',
-    platform_support     TEXT NOT NULL DEFAULT '[]',
-    function_explanation TEXT NOT NULL DEFAULT '{}',
-    function_signature   TEXT NOT NULL DEFAULT '',
-    return_codes         TEXT NOT NULL DEFAULT '[]',
-    created_at           TEXT DEFAULT (datetime('now'))
+    id                         INTEGER PRIMARY KEY AUTOINCREMENT,
+    doc_id                     INTEGER NOT NULL REFERENCES document_versions(id) UNIQUE,
+    operator_name              TEXT NOT NULL,
+    product_support            TEXT NOT NULL DEFAULT '[]',
+    platform_support           TEXT NOT NULL DEFAULT '[]',
+    function_explanation       TEXT NOT NULL DEFAULT '{}',
+    function_signature         TEXT NOT NULL DEFAULT '',
+    return_codes               TEXT NOT NULL DEFAULT '[]',
+    deterministic_computing    TEXT NOT NULL DEFAULT '{}',
+    inputs                     TEXT NOT NULL DEFAULT '{}',
+    outputs                    TEXT NOT NULL DEFAULT '{}',
+    constraints_in_param       TEXT NOT NULL DEFAULT '{}',
+    dtype_support_description  TEXT NOT NULL DEFAULT '{}',
+    created_at                 TEXT DEFAULT (datetime('now'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_constraints_result_doc_id

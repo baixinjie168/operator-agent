@@ -144,8 +144,15 @@ class ConstraintsResultItem(BaseModel):
     version: int
     product_support: list = []
     platform_support: list[str] = []
-    function_explanation: dict = {}
-    return_codes: list = []
+    function_explanation: str = ""
+    function_detail: dict = {}
+    function_signature: str = ""
+    return_info: list = []
+    deterministic_computing: dict = {}
+    inputs: dict = {}
+    outputs: dict = {}
+    constraints_in_param: dict = {}
+    dtype_support_description: dict = {}
 
 
 class ConstraintsResultResponse(BaseModel):

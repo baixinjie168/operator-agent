@@ -762,6 +762,11 @@ def save_constraints_result(
     function_explanation: str,
     function_signature: str = "",
     return_codes: str = "[]",
+    deterministic_computing: str = "{}",
+    inputs: str = "{}",
+    outputs: str = "{}",
+    constraints_in_param: str = "{}",
+    dtype_support_description: str = "{}",
 ) -> str:
     """Save assembled constraints result for a document version.
 
@@ -773,6 +778,11 @@ def save_constraints_result(
         function_explanation: JSON string of function-grouped constraint data.
         function_signature: full_signature of the GetWorkspaceSize function.
         return_codes: JSON string of transformed return codes array.
+        deterministic_computing: JSON string of {platform: {value, src_text}}.
+        inputs: JSON string of {param_name: {platform: constraint}}.
+        outputs: JSON string of {param_name: {platform: constraint}}.
+        constraints_in_param: JSON string of {platform: [relation_object]}.
+        dtype_support_description: JSON string of {platform: [combo]}.
 
     Returns:
         JSON string with saved flag.
@@ -780,6 +790,8 @@ def save_constraints_result(
     result = _save_constraints_result(
         doc_id, operator_name, product_support, platform_support,
         function_explanation, function_signature, return_codes,
+        deterministic_computing, inputs, outputs, constraints_in_param,
+        dtype_support_description,
     )
     return json.dumps(result, ensure_ascii=False)
 
