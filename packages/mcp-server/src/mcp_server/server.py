@@ -64,6 +64,9 @@ from mcp_server.tools.document_tools import (
     save_constraints_result as _save_constraints_result,
 )
 from mcp_server.tools.document_tools import (
+    save_json_constraints as _save_json_constraints,
+)
+from mcp_server.tools.document_tools import (
     get_function_explanation_summary as _get_fn_expl_summary,
 )
 from mcp_server.tools.document_tools import (
@@ -758,7 +761,6 @@ def save_constraints_result(
     doc_id: int,
     operator_name: str,
     product_support: str,
-    platform_support: str,
     function_explanation: str,
     function_signature: str = "",
     return_codes: str = "[]",
@@ -773,8 +775,7 @@ def save_constraints_result(
     Args:
         doc_id: Primary key of document_versions table.
         operator_name: Operator name.
-        product_support: JSON string of product support list.
-        platform_support: JSON string of supported platform name list.
+        product_support: JSON string of supported platform name list.
         function_explanation: JSON string of function-grouped constraint data.
         function_signature: full_signature of the GetWorkspaceSize function.
         return_codes: JSON string of transformed return codes array.
@@ -788,7 +789,7 @@ def save_constraints_result(
         JSON string with saved flag.
     """
     result = _save_constraints_result(
-        doc_id, operator_name, product_support, platform_support,
+        doc_id, operator_name, product_support,
         function_explanation, function_signature, return_codes,
         deterministic_computing, inputs, outputs, constraints_in_param,
         dtype_support_description,
@@ -807,6 +808,21 @@ def query_constraints_result(operator_name: str | None = None) -> str:
         JSON array of constraints result objects.
     """
     result = _query_constraints_result(operator_name)
+    return json.dumps(result, ensure_ascii=False)
+
+
+@mcp.tool()
+def save_json_constraints(doc_id: int, json_constraints: str) -> str:
+    """Save the final result.json structure to document_versions.json_constraints.
+
+    Args:
+        doc_id: Primary key of document_versions table.
+        json_constraints: JSON string of the complete result.json structure.
+
+    Returns:
+        JSON string with saved flag.
+    """
+    result = _save_json_constraints(doc_id, json_constraints)
     return json.dumps(result, ensure_ascii=False)
 
 

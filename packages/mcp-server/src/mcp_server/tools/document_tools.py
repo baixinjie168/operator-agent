@@ -1300,7 +1300,6 @@ def save_constraints_result(
     doc_id: int,
     operator_name: str,
     product_support: str,
-    platform_support: str,
     function_explanation: str,
     function_signature: str = "",
     return_codes: str = "[]",
@@ -1317,8 +1316,7 @@ def save_constraints_result(
     Args:
         doc_id: Primary key of document_versions table.
         operator_name: Operator name.
-        product_support: JSON string of product support list.
-        platform_support: JSON string of supported platform name list.
+        product_support: JSON string of supported platform name list.
         function_explanation: JSON string of function-grouped constraint data.
         function_signature: full_signature of the GetWorkspaceSize function.
         return_codes: JSON string of transformed return codes array.
@@ -1335,12 +1333,12 @@ def save_constraints_result(
     conn = db.conn
     conn.execute(
         "INSERT OR REPLACE INTO constraints_result "
-        "(doc_id, operator_name, product_support, platform_support, "
+        "(doc_id, operator_name, product_support, "
         "function_explanation, function_signature, return_codes, "
         "deterministic_computing, inputs, outputs, constraints_in_param, "
         "dtype_support_description) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (doc_id, operator_name, product_support, platform_support,
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (doc_id, operator_name, product_support,
          function_explanation, function_signature, return_codes,
          deterministic_computing, inputs, outputs, constraints_in_param,
          dtype_support_description),
@@ -1356,7 +1354,7 @@ def query_constraints_result(operator_name: str | None = None) -> list[dict]:
 
     _cols = (
         "cr.id, cr.doc_id, cr.operator_name, dv.version, "
-        "cr.product_support, cr.platform_support, cr.function_explanation, "
+        "cr.product_support, cr.function_explanation, "
         "cr.function_signature, cr.return_codes, "
         "cr.deterministic_computing, cr.inputs, cr.outputs, "
         "cr.constraints_in_param, cr.dtype_support_description"
@@ -1380,16 +1378,35 @@ def query_constraints_result(operator_name: str | None = None) -> list[dict]:
             "operator_name": r[2],
             "version": r[3],
             "product_support": json.loads(r[4]) if r[4] else [],
-            "platform_support": json.loads(r[5]) if r[5] else [],
-            "function_explanation": (json.loads(r[6]) if r[6] else {}).get("description", ""),
-            "function_detail": json.loads(r[6]) if r[6] else {},
-            "function_signature": r[7] or "",
-            "return_info": json.loads(r[8]) if r[8] else [],
-            "deterministic_computing": json.loads(r[9]) if r[9] else {},
-            "inputs": json.loads(r[10]) if r[10] else {},
-            "outputs": json.loads(r[11]) if r[11] else {},
-            "constraints_in_param": json.loads(r[12]) if r[12] else {},
-            "dtype_support_description": json.loads(r[13]) if r[13] else {},
+            "function_explanation": (json.loads(r[5]) if r[5] else {}).get("description", ""),
+            "function_detail": json.loads(r[5]) if r[5] else {},
+            "function_signature": r[6] or "",
+            "return_info": json.loads(r[7]) if r[7] else [],
+            "deterministic_computing": json.loads(r[8]) if r[8] else {},
+            "inputs": json.loads(r[9]) if r[9] else {},
+            "outputs": json.loads(r[10]) if r[10] else {},
+            "constraints_in_param": json.loads(r[11]) if r[11] else {},
+            "dtype_support_description": json.loads(r[12]) if r[12] else {},
         }
         for r in rows
     ]
+
+
+def save_json_constraints(doc_id: int, json_constraints: str) -> dict:
+    """Save the final result.json structure to document_versions.json_constraints.
+
+    Args:
+        doc_id: Primary key of document_versions table.
+        json_constraints: JSON string of the complete result.json structure.
+
+    Returns:
+        dict with saved flag.
+    """
+    db = get_db()
+    conn = db.conn
+    conn.execute(
+        "UPDATE document_versions SET json_constraints = ? WHERE id = ?",
+        (json_constraints, doc_id),
+    )
+    conn.commit()
+    return {"saved": True}

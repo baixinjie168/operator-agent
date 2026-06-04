@@ -31,16 +31,10 @@ async def assemble_result_node(state: PipelineState) -> dict[str, Any]:
     logger.info("assemble_result: starting assembly for doc_id=%s (%s)", doc_id, operator_name)
 
     try:
-        # Step 1: Get parsed document (contains product_support)
+        # Step 1: Get parsed document (for operator_name fallback)
         parsed = await _mcp_client.get_parsed_by_doc_id(doc_id)
-        product_support_raw = ""
-        if parsed:
-            ps = parsed.get("product_support", [])
-            product_support_raw = json.dumps(ps, ensure_ascii=False) if ps else "[]"
-            if not operator_name:
-                operator_name = parsed.get("operator_name", "")
-        else:
-            product_support_raw = "[]"
+        if parsed and not operator_name:
+            operator_name = parsed.get("operator_name", "")
 
         # Step 2: Query all data by doc_id
         params = await _mcp_client.query_params_by_doc_id(doc_id)
@@ -62,13 +56,13 @@ async def assemble_result_node(state: PipelineState) -> dict[str, Any]:
 
         function_explanation_raw = json.dumps(function_explanation, ensure_ascii=False)
 
-        # Step 3.5: Build platform_support list (supported platform names only)
-        platform_support_list = [
+        # Step 3.5: Build product_support from platform_support (is_supported=1)
+        product_support_list = [
             p["platform_name"]
             for p in platform_support_data
             if p.get("is_supported") == 1
         ]
-        platform_support_raw = json.dumps(platform_support_list, ensure_ascii=False)
+        product_support_raw = json.dumps(product_support_list, ensure_ascii=False)
 
         # Step 2c: Extract GetWorkspaceSize signature
         workspace_sig = ""
@@ -84,7 +78,7 @@ async def assemble_result_node(state: PipelineState) -> dict[str, Any]:
         # Step 3e: Build new fields
         det_computing = _build_deterministic_computing(platform_support_data)
         inputs_dict, outputs_dict = _build_inputs_outputs(params)
-        constraints_ip = _build_constraints_in_param(relations, platform_support_list)
+        constraints_ip = _build_constraints_in_param(relations, product_support_list)
         dtype_support = _build_dtype_support(dtype_combos)
 
         # Step 4: Save to constraints_result table
@@ -92,7 +86,6 @@ async def assemble_result_node(state: PipelineState) -> dict[str, Any]:
             doc_id=doc_id,
             operator_name=operator_name,
             product_support=product_support_raw,
-            platform_support=platform_support_raw,
             function_explanation=function_explanation_raw,
             function_signature=workspace_sig,
             return_codes=return_codes_raw,
@@ -101,6 +94,26 @@ async def assemble_result_node(state: PipelineState) -> dict[str, Any]:
             outputs=json.dumps(outputs_dict, ensure_ascii=False),
             constraints_in_param=json.dumps(constraints_ip, ensure_ascii=False),
             dtype_support_description=json.dumps(dtype_support, ensure_ascii=False),
+        )
+
+        # Step 5: Build result.json structure
+        result_json = {
+            "operator_name": operator_name,
+            "function_explanation": description,
+            "product_support": product_support_list,
+            "function_signature": workspace_sig,
+            "deterministic_computing": det_computing,
+            "inputs": inputs_dict,
+            "outputs": outputs_dict,
+            "constraints_in_param": constraints_ip,
+            "return_info": transformed_rc,
+            "dtype_support_description": dtype_support,
+        }
+
+        # Step 6: Save to document_versions.json_constraints
+        await _mcp_client.save_json_constraints(
+            doc_id=doc_id,
+            json_constraints=json.dumps(result_json, ensure_ascii=False),
         )
 
         fn_count = len(function_explanation)

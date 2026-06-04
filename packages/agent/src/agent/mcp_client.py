@@ -323,7 +323,6 @@ class MCPClient:
         doc_id: int,
         operator_name: str,
         product_support: str,
-        platform_support: str,
         function_explanation: str,
         function_signature: str = "",
         return_codes: str = "[]",
@@ -338,7 +337,6 @@ class MCPClient:
             "doc_id": doc_id,
             "operator_name": operator_name,
             "product_support": product_support,
-            "platform_support": platform_support,
             "function_explanation": function_explanation,
             "function_signature": function_signature,
             "return_codes": return_codes,
@@ -347,6 +345,13 @@ class MCPClient:
             "outputs": outputs,
             "constraints_in_param": constraints_in_param,
             "dtype_support_description": dtype_support_description,
+        })
+
+    async def save_json_constraints(self, doc_id: int, json_constraints: str) -> dict:
+        """Save the final result.json structure to document_versions.json_constraints."""
+        return await self._call_tool("save_json_constraints", {
+            "doc_id": doc_id,
+            "json_constraints": json_constraints,
         })
 
     async def query_constraints_result(self, operator_name: str | None = None) -> list[dict]:

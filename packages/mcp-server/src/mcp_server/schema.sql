@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS document_versions (
     parsed_data     TEXT,
     product_support TEXT,
     function_explanation_summary TEXT NOT NULL DEFAULT '{}',
+    json_constraints TEXT NOT NULL DEFAULT '{}',
     created_at      TEXT DEFAULT (datetime('now')),
     UNIQUE(operator_id, version)
 );
@@ -122,7 +123,6 @@ CREATE TABLE IF NOT EXISTS constraints_result (
     doc_id                     INTEGER NOT NULL REFERENCES document_versions(id) UNIQUE,
     operator_name              TEXT NOT NULL,
     product_support            TEXT NOT NULL DEFAULT '[]',
-    platform_support           TEXT NOT NULL DEFAULT '[]',
     function_explanation       TEXT NOT NULL DEFAULT '{}',
     function_signature         TEXT NOT NULL DEFAULT '',
     return_codes               TEXT NOT NULL DEFAULT '[]',

@@ -143,7 +143,6 @@ class ConstraintsResultItem(BaseModel):
     operator_name: str
     version: int
     product_support: list = []
-    platform_support: list[str] = []
     function_explanation: str = ""
     function_detail: dict = {}
     function_signature: str = ""

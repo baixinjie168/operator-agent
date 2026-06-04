@@ -107,7 +107,7 @@
 <button class="sidebar-toggle" onclick="document.querySelector('.sidebar').classList.toggle('open')">&#9776;</button>
 <div class="layout">
 <nav class="sidebar" id="sidebar">
-  <div class="sidebar-title">Operator Agent<small>项目总览 v2026-06-03</small></div>
+  <div class="sidebar-title">Operator Agent<small>项目总览 v2026-06-04</small></div>
   <ul class="nav-list">
     <li><a class="nav-item" data-target="sec-overview"><span class="arrow empty">&rsaquo;</span>项目定位</a></li>
     <li><a class="nav-item" data-target="sec-techstack"><span class="arrow empty">&rsaquo;</span>技术栈</a></li>
@@ -139,6 +139,7 @@
             <li><a class="nav-item" data-target="sec-node5i"><span class="arrow empty">&rsaquo;</span>节点5i: return_codes</a></li>
             <li><a class="nav-item" data-target="sec-node5j"><span class="arrow empty">&rsaquo;</span>节点5j: determinism</a></li>
             <li><a class="nav-item" data-target="sec-node5k"><span class="arrow empty">&rsaquo;</span>节点5k: dtype_combo</a></li>
+            <li><a class="nav-item" data-target="sec-node55r"><span class="arrow empty">&rsaquo;</span>节点5.5r: build_param_relations</a></li>
             <li><a class="nav-item" data-target="sec-node55"><span class="arrow empty">&rsaquo;</span>节点5.5: build_param_constraint</a></li>
             <li><a class="nav-item" data-target="sec-node6"><span class="arrow empty">&rsaquo;</span>节点6: assemble_result</a></li>
           </ul>
@@ -166,10 +167,10 @@
 <div class="main" id="mainContent">
 <section class="content-section" id="sec-overview">
   <h1>Operator Agent 项目总览</h1>
-  <blockquote>生成日期: 2026-05-28 | 更新日期: 2026-06-03 | 基于代码实际状态</blockquote>
+  <blockquote>生成日期: 2026-05-28 | 更新日期: 2026-06-04 | 基于代码实际状态</blockquote>
   <h2>项目定位</h2>
   <p>基于 <strong>LangGraph + MCP</strong> 的 CANN 算子文档自动化处理系统。将华为昇腾平台的算子 Markdown 文档解析为结构化数据，经 LLM 提取参数、约束、产品支持信息，最终生成 Python 测试用例。</p>
-  <p><strong>当前完成度</strong>：约 80%，文档解析、数据库层、Pipeline 全部 18 个节点（含 src_content 提取、function_signature 提取、function_explanation 提取、shape/dtype/dformat/optional/param_attr 提取、array_length 提取、allowed_range 提取、return_code 提取、determinism 提取、dtype_combo 提取、参数关系提取子图、build_param_constraint 参数约束构建节点、assemble_result 汇编节点）可运行。人工审核、测试用例生成尚未实现。</p>
+  <p><strong>当前完成度</strong>：约 85%，文档解析、数据库层、Pipeline 全部 19 个节点（含 src_content 提取、function_signature 提取、function_explanation 提取、shape/dtype/dformat/optional/param_attr 提取、array_length 提取、allowed_range 提取、return_code 提取、determinism 提取、dtype_combo 提取、参数关系提取子图、build_param_relations 参数关系表达式构建节点、build_param_constraint 参数约束构建节点、assemble_result 汇编节点 + json_constraints 写入）可运行。人工审核、测试用例生成尚未实现。</p>
 </section>
 <section class="content-section" id="sec-techstack">
 <h1>技术栈</h1>

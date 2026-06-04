@@ -315,6 +315,21 @@ class Database:
             )
         except sqlite3.OperationalError:
             pass
+        # 迁移：v27 — document_versions 新增 json_constraints 列
+        try:
+            self._conn.execute(
+                "ALTER TABLE document_versions ADD COLUMN json_constraints "
+                "TEXT NOT NULL DEFAULT '{}'"
+            )
+        except sqlite3.OperationalError:
+            pass
+        # 迁移：v28 — constraints_result 删除 platform_support 列
+        try:
+            self._conn.execute(
+                "ALTER TABLE constraints_result DROP COLUMN platform_support"
+            )
+        except sqlite3.OperationalError:
+            pass
         self._conn.commit()
 
     @property
