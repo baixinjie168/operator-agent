@@ -62,12 +62,14 @@ async def stream_run(run_id: str, request: Request, since_seq: int = Query(defau
         q = manager.subscribe(run_id)
         try:
             # Phase 1: replay DB history for late connections
+            db_max_seq = -1
             if since_seq >= 0:
                 historical = db_query_events(run_id, since_seq)
                 for evt in historical:
                     if await request.is_disconnected():
                         return
                     yield f"event: {evt['event_type']}\ndata: {json.dumps(evt, ensure_ascii=False)}\n\n"
+                    db_max_seq = max(db_max_seq, evt.get("seq", -1))
 
             # Check if run is active
             run = manager.get_run(run_id)
@@ -81,7 +83,15 @@ async def stream_run(run_id: str, request: Request, since_seq: int = Query(defau
                 yield f"event: done\ndata: {json.dumps({'status': db_run.get('status', 'running')})}\n\n"
                 return
 
-            # Phase 2: subscribe to live events
+            # Phase 1.5: replay in-memory events not yet persisted to DB
+            replayed_max_seq = db_max_seq
+            for evt in run.events:
+                if evt.seq > db_max_seq:
+                    sse = evt.to_sse()
+                    yield f"event: {sse.get('event_type', '')}\ndata: {json.dumps(sse, ensure_ascii=False)}\n\n"
+                    replayed_max_seq = max(replayed_max_seq, evt.seq)
+
+            # Phase 2: subscribe to live events (skip any already replayed)
             yield ":ok\n\n"
             while True:
                 if await request.is_disconnected():
@@ -93,6 +103,9 @@ async def stream_run(run_id: str, request: Request, since_seq: int = Query(defau
                     continue
                 except asyncio.CancelledError:
                     return
+
+                if data.get("seq", -1) <= replayed_max_seq:
+                    continue
 
                 yield f"event: {data.get('event_type', '')}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 

@@ -61,8 +61,9 @@ def query_params_by_doc_id(doc_id: int) -> list[dict]:
     """
     db = get_db()
     rows = db.conn.execute(
-        "SELECT id, param_name, param_type, direction, description, "
-        "dtype_desc, dformat_desc, shape, memory_desc, src_content "
+        "SELECT id, function_name, param_name, param_type, direction, description, "
+        "dtype_desc, dformat_desc, shape, src_content, is_optional, "
+        "is_support_discontinuous, array_length, allowed_range_value "
         "FROM parameters WHERE doc_id = ? "
         "ORDER BY id",
         (doc_id,),
@@ -70,15 +71,19 @@ def query_params_by_doc_id(doc_id: int) -> list[dict]:
     return [
         {
             "id": r[0],
-            "param_name": r[1],
-            "param_type": r[2],
-            "direction": r[3],
-            "description": r[4],
-            "dtype_desc": r[5],
-            "dformat_desc": r[6],
-            "shape": r[7],
-            "memory_desc": r[8],
+            "function_name": r[1],
+            "param_name": r[2],
+            "param_type": r[3],
+            "direction": r[4],
+            "description": r[5],
+            "dtype_desc": r[6],
+            "dformat_desc": r[7],
+            "shape": r[8],
             "src_content": r[9],
+            "is_optional": r[10],
+            "is_support_discontinuous": r[11],
+            "array_length": r[12],
+            "allowed_range_value": r[13],
         }
         for r in rows
     ]

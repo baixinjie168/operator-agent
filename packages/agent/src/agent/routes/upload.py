@@ -53,13 +53,6 @@ async def upload_document(file: UploadFile, request: Request) -> UploadResponse:
     run = manager.create_run(operator_name)
     db_create_run(run.run_id, operator_name, content_hash)
 
-    manager.emit(EventType.WORKFLOW_START, run.run_id, run.spans[run.run_id], {
-        "agent_id": "doc",
-        "node_id": "init_doc",
-        "message": "DocAgent 开始处理文档...",
-        "step_index": 0, "progress_pct": 0, "progress_text": "开始",
-    })
-
     asyncio.create_task(_run_pipeline(run.run_id, state_input, manager))
 
     return UploadResponse(success=True, task_id=run.run_id, operator_name=operator_name)
@@ -75,6 +68,15 @@ async def _run_pipeline(run_id: str, state_input: dict, manager: RuntimeManager)
     run = manager.get_run(run_id)
     if not run:
         return
+
+    await asyncio.sleep(0.5)
+
+    manager.emit(EventType.WORKFLOW_START, run_id, run.spans[run_id], {
+        "agent_id": "doc",
+        "node_id": "init_doc",
+        "message": "DocAgent 开始处理文档...",
+        "step_index": 0, "progress_pct": 0, "progress_text": "开始",
+    })
 
     llm_tracer = LLMTracer()
 
