@@ -655,6 +655,7 @@ async function loadDetail(name) {
       <div class="detail-tab active" onclick="showDetailTab(this,'tabSections')">Sections</div>
       <div class="detail-tab" onclick="showDetailTab(this,'tabSignatures')">函数签名</div>
       <div class="detail-tab" onclick="showDetailTab(this,'tabProducts')">产品支持</div>
+      <div class="detail-tab" onclick="showDetailTab(this,'tabJsonConstraint')">JSON Constraint</div>
       <div class="detail-tab" onclick="showDetailTab(this,'tabRaw')">Raw JSON</div>
     `;
 
@@ -734,6 +735,21 @@ async function loadDetail(name) {
         document.getElementById('tabProducts').innerHTML = '<div class="empty-state">加载失败: ' + escapeHtml(err.message) + '</div>';
       });
 
+    // JSON Constraint view - fetch from API
+    let jsonConHtml = '<div class="empty-state">加载中...</div>';
+    fetch('/api/v1/json-constraints?operator_name=' + encodeURIComponent(name))
+      .then(res => res.json())
+      .then(jcData => {
+        if (jcData.success && jcData.json_constraints) {
+          document.getElementById('tabJsonConstraint').innerHTML = '<pre>' + escapeHtml(JSON.stringify(jcData.json_constraints, null, 2)) + '</pre>';
+        } else {
+          document.getElementById('tabJsonConstraint').innerHTML = '<div class="empty-state">无 JSON Constraint 数据</div>';
+        }
+      })
+      .catch(err => {
+        document.getElementById('tabJsonConstraint').innerHTML = '<div class="empty-state">加载失败: ' + escapeHtml(err.message) + '</div>';
+      });
+
     // Raw JSON view
     const rawHtml = '<pre>' + JSON.stringify(doc, null, 2) + '</pre>';
 
@@ -741,6 +757,7 @@ async function loadDetail(name) {
       <div id="tabSections" class="detail-content">${sectionsHtml}</div>
       <div id="tabSignatures" class="detail-content" style="display:none">${sigsHtml}</div>
       <div id="tabProducts" class="detail-content" style="display:none">${prodsHtml}</div>
+      <div id="tabJsonConstraint" class="detail-content" style="display:none">${jsonConHtml}</div>
       <div id="tabRaw" class="detail-content" style="display:none">${rawHtml}</div>
     `;
   } catch (err) {

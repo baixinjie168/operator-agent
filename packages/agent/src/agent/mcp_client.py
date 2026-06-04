@@ -354,6 +354,12 @@ class MCPClient:
             "json_constraints": json_constraints,
         })
 
+    async def get_json_constraints(self, operator_name: str) -> dict | None:
+        """Retrieve json_constraints from the latest document version for an operator."""
+        return await self._call_tool("get_json_constraints", {
+            "operator_name": operator_name,
+        })
+
     async def query_constraints_result(self, operator_name: str | None = None) -> list[dict]:
         """Query constraints results, optionally filtered by operator name."""
         args: dict[str, Any] = {}

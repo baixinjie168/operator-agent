@@ -156,3 +156,10 @@ class ConstraintsResultItem(BaseModel):
 
 class ConstraintsResultResponse(BaseModel):
     results: list[ConstraintsResultItem]
+
+
+class JsonConstraintsResponse(BaseModel):
+    success: bool
+    operator_name: str | None = None
+    json_constraints: dict | None = None
+    error: str | None = None

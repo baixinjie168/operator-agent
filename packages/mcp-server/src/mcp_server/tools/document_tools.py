@@ -1410,3 +1410,28 @@ def save_json_constraints(doc_id: int, json_constraints: str) -> dict:
     )
     conn.commit()
     return {"saved": True}
+
+
+def get_json_constraints(operator_name: str) -> dict | None:
+    """Retrieve json_constraints from the latest document version for an operator.
+
+    Args:
+        operator_name: Operator name.
+
+    Returns:
+        Parsed JSON dict, or None if not found.
+    """
+    db = get_db()
+    conn = db.conn
+    row = conn.execute(
+        "SELECT dv.json_constraints FROM document_versions dv "
+        "JOIN operators o ON dv.operator_id = o.id "
+        "WHERE o.name = ? ORDER BY dv.version DESC LIMIT 1",
+        (operator_name,),
+    ).fetchone()
+    if not row or not row[0] or row[0] == "{}":
+        return None
+    try:
+        return json.loads(row[0])
+    except (json.JSONDecodeError, TypeError):
+        return None

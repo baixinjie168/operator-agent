@@ -67,6 +67,9 @@ from mcp_server.tools.document_tools import (
     save_json_constraints as _save_json_constraints,
 )
 from mcp_server.tools.document_tools import (
+    get_json_constraints as _get_json_constraints,
+)
+from mcp_server.tools.document_tools import (
     get_function_explanation_summary as _get_fn_expl_summary,
 )
 from mcp_server.tools.document_tools import (
@@ -823,6 +826,20 @@ def save_json_constraints(doc_id: int, json_constraints: str) -> str:
         JSON string with saved flag.
     """
     result = _save_json_constraints(doc_id, json_constraints)
+    return json.dumps(result, ensure_ascii=False)
+
+
+@mcp.tool()
+def get_json_constraints(operator_name: str) -> str:
+    """Retrieve json_constraints from the latest document version for an operator.
+
+    Args:
+        operator_name: Operator name.
+
+    Returns:
+        JSON string of the json_constraints field, or null if not found.
+    """
+    result = _get_json_constraints(operator_name)
     return json.dumps(result, ensure_ascii=False)
 
 
