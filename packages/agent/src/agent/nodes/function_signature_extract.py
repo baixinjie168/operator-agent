@@ -51,7 +51,7 @@ async def function_signature_extract_node(state: PipelineState) -> dict[str, Any
         signatures = await _extract_signatures_via_llm(content)
         if not signatures:
             logger.info("FunctionSignatureExtract: LLM returned no results for doc_id=%s", doc_id)
-            return {"error": None}
+            return {"function_signatures": [], "error": None}
 
         logger.info(
             "FunctionSignatureExtract: extracted %d signatures for %s",
@@ -66,7 +66,7 @@ async def function_signature_extract_node(state: PipelineState) -> dict[str, Any
             doc_id,
         )
 
-        return {"error": None}
+        return {"function_signatures": signatures, "error": None}
 
     except Exception as e:
         logger.exception("FunctionSignatureExtract failed for %s", operator_name)

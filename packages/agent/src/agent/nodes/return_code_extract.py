@@ -72,7 +72,7 @@ async def return_code_extract_node(state: PipelineState) -> dict[str, Any]:
                 doc_id,
             )
 
-        return {"error": None}
+        return {"return_codes": all_codes, "error": None}
 
     except Exception as e:
         logger.exception("ReturnCodeExtract failed for %s", operator_name)

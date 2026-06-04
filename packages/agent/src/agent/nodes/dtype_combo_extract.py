@@ -105,7 +105,7 @@ async def dtype_combo_extract_node(state: PipelineState) -> dict[str, Any]:
             operator_name,
             doc_id,
         )
-        return {"error": None}
+        return {"dtype_combinations": combos, "error": None}
 
     except Exception as e:
         logger.exception("dtype_combo_extract failed for %s", operator_name)

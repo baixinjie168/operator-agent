@@ -5,10 +5,15 @@ from typing import Any
 
 from agent.mcp_client import MCPClient
 from agent.nodes.param_relation_extract.state import RelationExtractState
+from agent.runtime.context import get_context
+from agent.runtime.events import EventType, SpanStatus, SpanType
 
 logger = logging.getLogger(__name__)
 
 _mcp_client = MCPClient()
+
+_STEP_NAME = "param_relation_extract"
+_STEP_LABEL = "参数约束关系提取"
 
 
 async def save_relations_node(state: RelationExtractState) -> dict[str, Any]:
@@ -18,13 +23,30 @@ async def save_relations_node(state: RelationExtractState) -> dict[str, Any]:
 
     logger.info("SaveRelations: doc_id=%s for %s, %d relations", doc_id, operator_name, len(merged))
 
+    ctx = get_context()
+
     if not doc_id:
         logger.warning("SaveRelations: no doc_id, skipping")
         return {"error": None}
 
     if not merged:
         logger.info("SaveRelations: no relations to save for doc_id=%s", doc_id)
-        return {"error": None}
+        if ctx and ctx.manager:
+            span = ctx.manager.open_span(
+                run_id=ctx.run_id,
+                parent_span_id=ctx.current_span_id,
+                span_type=SpanType.NODE,
+                name=_STEP_NAME,
+            )
+            ctx.manager.close_span(ctx.run_id, span, SpanStatus.SUCCESS)
+            ctx.manager.emit(EventType.NODE_SUCCESS, ctx.run_id, span, {
+                "agent_id": "doc",
+                "node_id": _STEP_NAME,
+                "message": f"{_STEP_LABEL} 完成",
+                "meta": "0 个关系",
+                "output": {"merged_relations": []},
+            })
+        return {"merged_relations": [], "error": None}
 
     try:
         result = await _mcp_client.save_param_relations(doc_id, merged)
@@ -33,7 +55,24 @@ async def save_relations_node(state: RelationExtractState) -> dict[str, Any]:
             result.get("saved", 0),
             doc_id,
         )
-        return {"error": None}
+
+        if ctx and ctx.manager:
+            span = ctx.manager.open_span(
+                run_id=ctx.run_id,
+                parent_span_id=ctx.current_span_id,
+                span_type=SpanType.NODE,
+                name=_STEP_NAME,
+            )
+            ctx.manager.close_span(ctx.run_id, span, SpanStatus.SUCCESS)
+            ctx.manager.emit(EventType.NODE_SUCCESS, ctx.run_id, span, {
+                "agent_id": "doc",
+                "node_id": _STEP_NAME,
+                "message": f"{_STEP_LABEL} 完成",
+                "meta": f"{len(merged)} 个关系",
+                "output": {"merged_relations": merged},
+            })
+
+        return {"merged_relations": merged, "error": None}
 
     except Exception:
         logger.exception("SaveRelations failed for %s", operator_name)

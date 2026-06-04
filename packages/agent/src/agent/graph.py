@@ -89,7 +89,7 @@ def create_pipeline_graph() -> CompiledStateGraph:
     graph.add_node("assemble_result", traced_node("assemble_result")(_assemble_result))
 
     param_relation_subgraph = create_param_relation_subgraph()
-    graph.add_node("param_relation_extract", traced_node("param_relation_extract")(param_relation_subgraph))
+    graph.add_node("param_relation_extract", param_relation_subgraph)
 
     graph.add_edge(START, "init_doc")
     graph.add_conditional_edges("init_doc", _should_continue)
@@ -160,7 +160,7 @@ def create_pipeline_graph_after_init() -> CompiledStateGraph:
     graph.add_node("assemble_result", traced_node("assemble_result")(_assemble_result))
 
     param_relation_subgraph = create_param_relation_subgraph()
-    graph.add_node("param_relation_extract", traced_node("param_relation_extract")(param_relation_subgraph))
+    graph.add_node("param_relation_extract", param_relation_subgraph)
 
     graph.add_edge(START, "product_support")
     graph.add_edge(START, "parse_params")

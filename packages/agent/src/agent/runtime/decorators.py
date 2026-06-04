@@ -20,11 +20,21 @@ _AGENT_MAP: dict[str, str] = {
     "init_doc": "doc",
     "parse_params": "doc",
     "product_support": "doc",
+    "function_explanation_extract": "doc",
+    "function_signature_extract": "doc",
     "src_content_extract": "doc",
     "param_desc_extract": "doc",
     "shape_extract": "doc",
     "dtype_extract": "doc",
     "optional_extract": "doc",
+    "dformat_extract": "doc",
+    "param_attr_extract": "doc",
+    "array_length_extract": "doc",
+    "allowed_range_extract": "doc",
+    "determinism_extract": "doc",
+    "return_code_extract": "doc",
+    "dtype_combo_extract": "doc",
+    "param_relation_extract": "doc",
 }
 
 
@@ -156,9 +166,22 @@ def _node_label(node_id: str) -> str:
     labels = {
         "init_doc": "文档初始化",
         "parse_params": "参数解析",
-        "product_support": "产品支持提取",
-        "param_desc_extract": "参数描述提取",
-        "shape_extract": "Shape 提取",
+        "product_support": "支持产品",
+        "function_explanation_extract": "算子功能说明",
+        "function_signature_extract": "函数原型",
+        "src_content_extract": "原文片段",
+        "param_desc_extract": "参数描述",
+        "shape_extract": "维度",
+        "dtype_extract": "数据类型",
+        "optional_extract": "可选性",
+        "dformat_extract": "数据格式",
+        "param_attr_extract": "非连续Tensor",
+        "array_length_extract": "数组长度",
+        "allowed_range_extract": "取值范围",
+        "determinism_extract": "确定性计算",
+        "return_code_extract": "返回码",
+        "dtype_combo_extract": "数据类型组合",
+        "param_relation_extract": "参数约束关系",
     }
     return labels.get(node_id, node_id)
 
@@ -173,11 +196,37 @@ def _node_done_msg(node_id: str, result: dict) -> str:
         return f"参数解析完成。{pc} 个参数"
     elif node_id == "product_support":
         ps = len(result.get("product_support", []))
-        return f"产品支持提取完成。{ps} 个产品"
+        return f"支持产品提取完成。{ps} 个产品"
+    elif node_id == "function_explanation_extract":
+        return "算子功能说明提取完成"
+    elif node_id == "function_signature_extract":
+        return "函数原型提取完成"
+    elif node_id == "src_content_extract":
+        return "原文片段提取完成"
     elif node_id == "param_desc_extract":
         return "参数描述提取完成"
     elif node_id == "shape_extract":
-        return "Shape 提取完成"
+        return "维度提取完成"
+    elif node_id == "dtype_extract":
+        return "数据类型提取完成"
+    elif node_id == "optional_extract":
+        return "可选性提取完成"
+    elif node_id == "dformat_extract":
+        return "数据格式提取完成"
+    elif node_id == "param_attr_extract":
+        return "非连续Tensor提取完成"
+    elif node_id == "array_length_extract":
+        return "数组长度提取完成"
+    elif node_id == "allowed_range_extract":
+        return "取值范围提取完成"
+    elif node_id == "determinism_extract":
+        return "确定性计算提取完成"
+    elif node_id == "return_code_extract":
+        return "返回码提取完成"
+    elif node_id == "dtype_combo_extract":
+        return "数据类型组合提取完成"
+    elif node_id == "param_relation_extract":
+        return "参数约束关系提取完成"
     return f"{_node_label(node_id)} 完成"
 
 
@@ -193,10 +242,23 @@ def _node_meta(node_id: str, result: dict) -> str | None:
 
 def _node_progress_pct(node_id: str) -> int:
     pcts = {
-        "init_doc": 20,
-        "parse_params": 40,
-        "product_support": 50,
-        "param_desc_extract": 75,
-        "shape_extract": 100,
+        "init_doc": 10,
+        "parse_params": 20,
+        "product_support": 30,
+        "function_explanation_extract": 40,
+        "function_signature_extract": 45,
+        "src_content_extract": 50,
+        "param_desc_extract": 55,
+        "shape_extract": 60,
+        "dtype_extract": 65,
+        "optional_extract": 70,
+        "dformat_extract": 72,
+        "param_attr_extract": 74,
+        "array_length_extract": 76,
+        "allowed_range_extract": 78,
+        "determinism_extract": 80,
+        "return_code_extract": 85,
+        "dtype_combo_extract": 90,
+        "param_relation_extract": 95,
     }
     return pcts.get(node_id, 50)

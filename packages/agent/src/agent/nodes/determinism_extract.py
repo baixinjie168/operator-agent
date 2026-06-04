@@ -84,7 +84,7 @@ async def determinism_extract_node(state: PipelineState) -> dict[str, Any]:
             operator_name,
             doc_id,
         )
-        return {"error": None}
+        return {"determinism_records": expanded_records, "error": None}
 
     except Exception as e:
         logger.exception("determinism_extract failed for %s", operator_name)
