@@ -143,9 +143,23 @@ class ConstraintsResultItem(BaseModel):
     operator_name: str
     version: int
     product_support: list = []
-    platform_support: list[str] = []
-    function_explanation: dict = {}
+    function_explanation: str = ""
+    function_detail: dict = {}
+    function_signature: str = ""
+    return_info: list = []
+    deterministic_computing: dict = {}
+    inputs: dict = {}
+    outputs: dict = {}
+    constraints_in_param: dict = {}
+    dtype_support_description: dict = {}
 
 
 class ConstraintsResultResponse(BaseModel):
     results: list[ConstraintsResultItem]
+
+
+class JsonConstraintsResponse(BaseModel):
+    success: bool
+    operator_name: str | None = None
+    json_constraints: dict | None = None
+    error: str | None = None

@@ -443,3 +443,48 @@ ALLOWED_RANGE_VALUE_BUILD_PROMPT = """\
 
 文档内容:
 {context_text}"""
+
+
+RELATION_OBJECT_BUILD_PROMPT = """\
+你是一个参数约束表达式生成专家。根据参数关系的自然语言描述，判断约束类型并生成形式化 Python 表达式。
+
+## expr_type 枚举（必须严格选择其一）
+- shape_broadcast：形状需满足广播关系
+- shape_choice：形状可以是多个候选之一
+- shape_equality：形状必须完全相同
+- shape_dependency：shape 元素值之间的依赖
+- shape_value_dependency：特定轴值之间的依赖
+- value_dependency：张量元素值或参数值之间的约束
+- presence_dependency：共存规则（如 A is None == B is None）
+- type_dependency：数据类型依赖
+- type_equality：数据类型必须一致
+- format_equality：数据格式必须一致
+
+## expr 生成规则
+1. 输出合法 Python 布尔表达式，返回值为 bool
+2. 形状引用：param.shape[dim_index]，如 x.shape[0]
+3. 值引用：param.range_value，如 groups.range_value
+4. 类型引用：param.dtype
+5. 格式引用：param.format
+6. 不允许 null；无法写出表达式时用空字符串 ""
+7. 蕴含逻辑用 (B) if (A) else True
+8. 等价逻辑用 (A) == (B)
+9. 不要使用 if/else 自然语言语句
+10. expr 中只能引用 params 列表中的参数
+11. 不要使用 implies 这个词
+12. 不要使用伪代码
+13. 不要在 expr 中使用平台值作为判断条件
+14. 涉及生成器表达式时必须包裹在 all() 或 any() 中，不允许 lambda
+
+## 函数签名上下文
+{signatures_text}
+
+## 输入
+relation_type（粗粒度提示）：{relation_type}
+params：{params}
+description：{description}
+source_citation：{source_citation}
+
+严格按以下 JSON 返回，不要添加任何其他文字：
+{{"expr_type": "...", "expr": "..."}}
+"""

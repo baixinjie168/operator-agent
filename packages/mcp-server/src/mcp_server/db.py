@@ -267,6 +267,122 @@ class Database:
             )
         except sqlite3.OperationalError:
             pass
+        # 迁移：v20 — param_relations 新增 relation_object 列
+        try:
+            self._conn.execute(
+                "ALTER TABLE param_relations ADD COLUMN relation_object "
+                "TEXT NOT NULL DEFAULT '{}'"
+            )
+        except sqlite3.OperationalError:
+            pass
+        # 迁移：v21 — constraints_result 新增 return_codes 列
+        try:
+            self._conn.execute(
+                "ALTER TABLE constraints_result ADD COLUMN return_codes "
+                "TEXT NOT NULL DEFAULT '[]'"
+            )
+        except sqlite3.OperationalError:
+            pass
+        # 迁移：v22 — constraints_result 新增 deterministic_computing 列
+        try:
+            self._conn.execute(
+                "ALTER TABLE constraints_result ADD COLUMN deterministic_computing "
+                "TEXT NOT NULL DEFAULT '{}'"
+            )
+        except sqlite3.OperationalError:
+            pass
+        # 迁移：v23 — constraints_result 新增 inputs 列
+        try:
+            self._conn.execute(
+                "ALTER TABLE constraints_result ADD COLUMN inputs "
+                "TEXT NOT NULL DEFAULT '{}'"
+            )
+        except sqlite3.OperationalError:
+            pass
+        # 迁移：v24 — constraints_result 新增 outputs 列
+        try:
+            self._conn.execute(
+                "ALTER TABLE constraints_result ADD COLUMN outputs "
+                "TEXT NOT NULL DEFAULT '{}'"
+            )
+        except sqlite3.OperationalError:
+            pass
+        # 迁移：v25 — constraints_result 新增 constraints_in_param 列
+        try:
+            self._conn.execute(
+                "ALTER TABLE constraints_result ADD COLUMN constraints_in_param "
+                "TEXT NOT NULL DEFAULT '{}'"
+            )
+        except sqlite3.OperationalError:
+            pass
+        # 迁移：v26 — constraints_result 新增 dtype_support_description 列
+        try:
+            self._conn.execute(
+                "ALTER TABLE constraints_result ADD COLUMN dtype_support_description "
+                "TEXT NOT NULL DEFAULT '{}'"
+            )
+        except sqlite3.OperationalError:
+            pass
+        # 迁移：v27 — document_versions 新增 json_constraints 列
+        try:
+            self._conn.execute(
+                "ALTER TABLE document_versions ADD COLUMN json_constraints "
+                "TEXT NOT NULL DEFAULT '{}'"
+            )
+        except sqlite3.OperationalError:
+            pass
+        # 迁移：v28 — constraints_result 删除 platform_support 列
+        try:
+            self._conn.execute(
+                "ALTER TABLE constraints_result DROP COLUMN platform_support"
+            )
+        except sqlite3.OperationalError:
+            pass
+        # 迁移：v29 — platform_support.deterministic_computing value 从中文改为 true/false
+        try:
+            self._conn.execute(
+                "UPDATE platform_support "
+                "SET deterministic_computing = json_set(deterministic_computing, '$.value', 'true') "
+                "WHERE json_extract(deterministic_computing, '$.value') = '确定性'"
+            )
+            self._conn.execute(
+                "UPDATE platform_support "
+                "SET deterministic_computing = json_set(deterministic_computing, '$.value', 'false') "
+                "WHERE json_extract(deterministic_computing, '$.value') = '非确定性'"
+            )
+        except sqlite3.OperationalError:
+            pass
+        # 迁移：v29b — constraints_result.deterministic_computing 同步转换
+        try:
+            # constraints_result.deterministic_computing is a JSON object keyed by platform_name
+            # e.g. {"Atlas A2": {"value": "确定性", "src_text": "..."}}
+            # Use json_patch-style update: iterate keys is hard in SQL, so do it in Python
+            rows = self._conn.execute(
+                "SELECT id, deterministic_computing FROM constraints_result "
+                "WHERE deterministic_computing != '{}'"
+            ).fetchall()
+            for row_id, dc_raw in rows:
+                try:
+                    dc = json.loads(dc_raw)
+                except (json.JSONDecodeError, TypeError):
+                    continue
+                changed = False
+                for plat, det in dc.items():
+                    if isinstance(det, dict):
+                        v = det.get("value", "")
+                        if v == "确定性":
+                            det["value"] = "true"
+                            changed = True
+                        elif v == "非确定性":
+                            det["value"] = "false"
+                            changed = True
+                if changed:
+                    self._conn.execute(
+                        "UPDATE constraints_result SET deterministic_computing = ? WHERE id = ?",
+                        (json.dumps(dc, ensure_ascii=False), row_id),
+                    )
+        except sqlite3.OperationalError:
+            pass
         self._conn.commit()
         self._migrate()
 

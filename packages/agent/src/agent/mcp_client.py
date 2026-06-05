@@ -189,6 +189,13 @@ class MCPClient:
             "updates": json.dumps(updates, ensure_ascii=False),
         })
 
+    async def update_param_relation_objects(self, doc_id: int, updates: list[dict]) -> dict:
+        """Batch update the relation_object field of param_relations."""
+        return await self._call_tool("update_param_relation_objects", {
+            "doc_id": doc_id,
+            "updates": json.dumps(updates, ensure_ascii=False),
+        })
+
     async def save_param_relations(self, doc_id: int, relations: list[dict]) -> dict:
         """Batch save parameter relations for a document version."""
         return await self._call_tool("save_relations", {
@@ -316,18 +323,41 @@ class MCPClient:
         doc_id: int,
         operator_name: str,
         product_support: str,
-        platform_support: str,
         function_explanation: str,
         function_signature: str = "",
+        return_codes: str = "[]",
+        deterministic_computing: str = "{}",
+        inputs: str = "{}",
+        outputs: str = "{}",
+        constraints_in_param: str = "{}",
+        dtype_support_description: str = "{}",
     ) -> dict:
         """Save assembled constraints result for a document version."""
         return await self._call_tool("save_constraints_result", {
             "doc_id": doc_id,
             "operator_name": operator_name,
             "product_support": product_support,
-            "platform_support": platform_support,
             "function_explanation": function_explanation,
             "function_signature": function_signature,
+            "return_codes": return_codes,
+            "deterministic_computing": deterministic_computing,
+            "inputs": inputs,
+            "outputs": outputs,
+            "constraints_in_param": constraints_in_param,
+            "dtype_support_description": dtype_support_description,
+        })
+
+    async def save_json_constraints(self, doc_id: int, json_constraints: str) -> dict:
+        """Save the final result.json structure to document_versions.json_constraints."""
+        return await self._call_tool("save_json_constraints", {
+            "doc_id": doc_id,
+            "json_constraints": json_constraints,
+        })
+
+    async def get_json_constraints(self, operator_name: str) -> dict | None:
+        """Retrieve json_constraints from the latest document version for an operator."""
+        return await self._call_tool("get_json_constraints", {
+            "operator_name": operator_name,
         })
 
     async def query_constraints_result(self, operator_name: str | None = None) -> list[dict]:

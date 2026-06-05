@@ -35,6 +35,9 @@ _AGENT_MAP: dict[str, str] = {
     "return_code_extract": "doc",
     "dtype_combo_extract": "doc",
     "param_relation_extract": "doc",
+    "build_param_relations": "doc",
+    "build_param_constraint": "doc",
+    "assemble_result": "doc",
 }
 
 

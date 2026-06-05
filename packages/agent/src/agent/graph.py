@@ -6,8 +6,9 @@ InitDoc → [ProductSupport ∥ ParseParams ∥ FunctionSignatureExtract
        → SrcContentExtract → ParamDescExtract
        → [ShapeExtract ∥ DtypeExtract ∥ DFormatExtract ∥ OptionalExtract
           ∥ ParamAttrExtract ∥ ArrayLengthExtract ∥ AllowedRangeExtract
-          ∥ ParamRelationExtract]
-       → BuildParamConstraint → AssembleResult → END
+          ∥ ParamRelationExtract ∥ ReturnCodeExtract ∥ DeterminismExtract
+          ∥ DtypeComboExtract]
+       → BuildParamRelations → BuildParamConstraint → AssembleResult → END
 """
 
 import logging
@@ -19,14 +20,15 @@ from agent.nodes.allowed_range_extract import allowed_range_extract_node as _all
 from agent.nodes.array_length_extract import array_length_extract_node as _array_length_extract
 from agent.nodes.assemble_result import assemble_result_node as _assemble_result
 from agent.nodes.build_param_constraint import build_param_constraint_node as _build_param_constraint
+from agent.nodes.build_param_relations import build_param_relations_node as _build_param_relations
 from agent.nodes.determinism_extract import determinism_extract_node as _determinism_extract
 from agent.nodes.dformat_extract import dformat_extract_node as _dformat_extract
 from agent.nodes.dtype_combo_extract import dtype_combo_extract_node as _dtype_combo_extract
 from agent.nodes.dtype_extract import dtype_extract_node as _dtype_extract
-from agent.nodes.function_signature_extract import function_signature_extract_node as _function_signature_extract
 from agent.nodes.function_explanation_extract import (
     function_explanation_extract_node as _function_explanation_extract,
 )
+from agent.nodes.function_signature_extract import function_signature_extract_node as _function_signature_extract
 from agent.nodes.init_doc import init_doc_node as _init_doc
 from agent.nodes.optional_extract import optional_extract_node as _optional_extract
 from agent.nodes.param_attr_extract import param_attr_extract_node as _param_attr_extract
@@ -64,8 +66,13 @@ def create_pipeline_graph() -> CompiledStateGraph:
                 ParamDescExtract → [ShapeExtract ∥ DtypeExtract ∥ DFormatExtract
                                     ∥ OptionalExtract ∥ ParamAttrExtract
                                     ∥ ArrayLengthExtract ∥ AllowedRangeExtract
-                                    ∥ ParamRelationExtract]
-               → BuildParamConstraint → AssembleResult → END]
+                                    ∥ ParamRelationExtract
+                                    ∥ ReturnCodeExtract ∥ DeterminismExtract
+                                    ∥ DtypeComboExtract]
+               → BuildParamRelations → BuildParamConstraint
+               → AssembleResult → END]
+
+    Returns a LangGraph ``CompiledStateGraph`` using ``PipelineState``.
     """
     graph = StateGraph(PipelineState)
     graph.add_node("init_doc", traced_node("init_doc")(_init_doc))
@@ -85,6 +92,7 @@ def create_pipeline_graph() -> CompiledStateGraph:
     graph.add_node("return_code_extract", traced_node("return_code_extract")(_return_code_extract))
     graph.add_node("determinism_extract", traced_node("determinism_extract")(_determinism_extract))
     graph.add_node("dtype_combo_extract", traced_node("dtype_combo_extract")(_dtype_combo_extract))
+    graph.add_node("build_param_relations", traced_node("build_param_relations")(_build_param_relations))
     graph.add_node("build_param_constraint", traced_node("build_param_constraint")(_build_param_constraint))
     graph.add_node("assemble_result", traced_node("assemble_result")(_assemble_result))
 
@@ -119,7 +127,8 @@ def create_pipeline_graph() -> CompiledStateGraph:
     graph.add_edge("return_code_extract", "build_param_constraint")
     graph.add_edge("determinism_extract", "build_param_constraint")
     graph.add_edge("dtype_combo_extract", "build_param_constraint")
-    graph.add_edge("param_relation_extract", "build_param_constraint")
+    graph.add_edge("param_relation_extract", "build_param_relations")
+    graph.add_edge("build_param_relations", "build_param_constraint")
     graph.add_edge("build_param_constraint", "assemble_result")
     graph.add_edge("assemble_result", END)
     return graph.compile(name="operator-pipeline")
@@ -137,7 +146,7 @@ def create_pipeline_graph_after_init() -> CompiledStateGraph:
                           ∥ array_length_extract ∥ allowed_range_extract
                           ∥ return_code_extract ∥ determinism_extract
                           ∥ dtype_combo_extract ∥ param_relation_extract]
-    → build_param_constraint → assemble_result → END
+    → build_param_relations → build_param_constraint → assemble_result → END
     """
     graph = StateGraph(PipelineState)
     graph.add_node("product_support", traced_node("product_support")(_product_support))
@@ -156,6 +165,7 @@ def create_pipeline_graph_after_init() -> CompiledStateGraph:
     graph.add_node("return_code_extract", traced_node("return_code_extract")(_return_code_extract))
     graph.add_node("determinism_extract", traced_node("determinism_extract")(_determinism_extract))
     graph.add_node("dtype_combo_extract", traced_node("dtype_combo_extract")(_dtype_combo_extract))
+    graph.add_node("build_param_relations", traced_node("build_param_relations")(_build_param_relations))
     graph.add_node("build_param_constraint", traced_node("build_param_constraint")(_build_param_constraint))
     graph.add_node("assemble_result", traced_node("assemble_result")(_assemble_result))
 
@@ -192,7 +202,8 @@ def create_pipeline_graph_after_init() -> CompiledStateGraph:
     graph.add_edge("return_code_extract", "build_param_constraint")
     graph.add_edge("determinism_extract", "build_param_constraint")
     graph.add_edge("dtype_combo_extract", "build_param_constraint")
-    graph.add_edge("param_relation_extract", "build_param_constraint")
+    graph.add_edge("param_relation_extract", "build_param_relations")
+    graph.add_edge("build_param_relations", "build_param_constraint")
     graph.add_edge("build_param_constraint", "assemble_result")
     graph.add_edge("assemble_result", END)
     return graph.compile(name="operator-pipeline")

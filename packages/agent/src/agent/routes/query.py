@@ -11,6 +11,7 @@ from agent.schemas.query import (
     DtypeComboListResponse,
     DtypeComboResponse,
     FunctionSignatureListResponse,
+    JsonConstraintsResponse,
     OperatorDetailResponse,
     OperatorListResponse,
     ParameterListResponse,
@@ -163,3 +164,17 @@ async def list_constraints_result(
         return ConstraintsResultResponse(results=result)
     except Exception:
         return ConstraintsResultResponse(results=[])
+
+
+@router.get("/json-constraints", response_model=JsonConstraintsResponse)
+async def get_json_constraints(
+    operator_name: str = Query(...),
+) -> JsonConstraintsResponse:
+    """Retrieve json_constraints from the latest document version for an operator."""
+    try:
+        result = await _mcp_client.get_json_constraints(operator_name)
+        if result is None:
+            return JsonConstraintsResponse(success=False, error="No json_constraints found")
+        return JsonConstraintsResponse(success=True, operator_name=operator_name, json_constraints=result)
+    except Exception as e:
+        return JsonConstraintsResponse(success=False, error=str(e))

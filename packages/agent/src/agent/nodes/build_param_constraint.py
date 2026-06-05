@@ -106,7 +106,7 @@ async def build_param_constraint_node(state: PipelineState) -> dict[str, Any]:
             for plat in supported_platforms:
                 ptype = sig_type_map.get((fn_name, pname), param.get("param_type", ""))
 
-                # dtype: platform-specific, fallback to "通用"
+                # dtype: platform-specific → "通用" → dtype_desc fallback
                 dtypes = sorted(
                     dtype_by_platform.get(plat, {}).get(pname, set())
                 )
@@ -114,6 +114,14 @@ async def build_param_constraint_node(state: PipelineState) -> dict[str, Any]:
                     dtypes = sorted(
                         dtype_by_platform.get("通用", {}).get(pname, set())
                     )
+                if not dtypes:
+                    # Fallback: parse dtype_desc (e.g. "FLOAT32,FLOAT16,BFLOAT16")
+                    dtype_desc = param.get("dtype_desc", "") or ""
+                    if dtype_desc:
+                        dtypes = sorted({
+                            d.strip() for d in re.split(r"[、，,/]", dtype_desc)
+                            if d.strip()
+                        })
 
                 # format: split by "/"
                 fmt_str = param.get("data_format", "") or ""

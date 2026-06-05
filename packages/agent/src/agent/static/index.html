@@ -147,6 +147,24 @@
 
   /* Src content textarea cell */
   .td-src textarea { width: 100%; border: 1px solid #ddd; border-radius: 4px; padding: 6px; font-family: monospace; font-size: .8rem; background: #fffbeb; resize: vertical; color: #555; line-height: 1.4; }
+
+  /* JSON tree viewer */
+  .json-tree { font-family: 'Consolas', 'Monaco', 'Courier New', monospace; font-size: .85rem; line-height: 1.6; background: #ffffff; color: #1f2937; padding: 16px; border-radius: 6px; overflow: auto; border: 1px solid #e5e7eb; }
+  .json-tree ul { list-style: none; padding-left: 20px; margin: 0; }
+  .json-tree > ul { padding-left: 0; }
+  .json-tree li { position: relative; }
+  .json-tree .jk { color: #1d4ed8; }
+  .json-tree .js { color: #b45309; }
+  .json-tree .jn { color: #047857; }
+  .json-tree .jb { color: #7c3aed; }
+  .json-tree .jl { color: #9ca3af; font-style: italic; }
+  .json-tree .jc { cursor: pointer; user-select: none; display: inline-block; width: 16px; text-align: center; color: #9ca3af; margin-left: -18px; }
+  .json-tree .jc:hover { color: #374151; }
+  .json-tree li.collapsed > ul { display: none; }
+  .json-tree li.collapsed > .jc::before { content: '\25B6'; }
+  .json-tree li:not(.collapsed) > .jc::before { content: '\25BC'; }
+  .json-tree .jb-open, .json-tree .jb-close { color: #6b7280; }
+  .json-tree .jcount { color: #6b7280; font-size: .75rem; margin-left: 6px; font-style: italic; }
 </style>
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 </head>
@@ -655,6 +673,7 @@ async function loadDetail(name) {
       <div class="detail-tab active" onclick="showDetailTab(this,'tabSections')">Sections</div>
       <div class="detail-tab" onclick="showDetailTab(this,'tabSignatures')">函数签名</div>
       <div class="detail-tab" onclick="showDetailTab(this,'tabProducts')">产品支持</div>
+      <div class="detail-tab" onclick="showDetailTab(this,'tabJsonConstraint')">JSON Constraint</div>
       <div class="detail-tab" onclick="showDetailTab(this,'tabRaw')">Raw JSON</div>
     `;
 
@@ -714,12 +733,12 @@ async function loadDetail(name) {
             '<tr style="background:#f3f4f6"><th style="padding:8px;text-align:left;border:1px solid #e5e7eb">平台</th><th style="padding:8px;text-align:center;border:1px solid #e5e7eb">支持</th><th style="padding:8px;text-align:center;border:1px solid #e5e7eb">确定性计算</th></tr>' +
             platforms.map(p => {
               var det = p.deterministic_computing || {"value":"","src_text":""};
-              var detVal = det.value || "";
+              var detVal = String(det.value || "");
               var detCell = '<td style="padding:8px;text-align:center;border:1px solid #e5e7eb;color:#aaa">-</td>';
-              if (detVal === '确定性') {
-                detCell = '<td style="padding:8px;text-align:center;border:1px solid #e5e7eb;color:green">✓ 确定性</td>';
-              } else if (detVal === '非确定性') {
-                detCell = '<td style="padding:8px;text-align:center;border:1px solid #e5e7eb;color:#d97706">⚠ 非确定性</td>';
+              if (detVal === 'true' || detVal === '确定性') {
+                detCell = '<td style="padding:8px;text-align:center;border:1px solid #e5e7eb;color:green">✓ true</td>';
+              } else if (detVal === 'false' || detVal === '非确定性') {
+                detCell = '<td style="padding:8px;text-align:center;border:1px solid #e5e7eb;color:#d97706">⚠ false</td>';
               }
               return '<tr><td style="padding:8px;border:1px solid #e5e7eb">' + escapeHtml(p.platform_name) + '</td>' +
               '<td style="padding:8px;text-align:center;border:1px solid #e5e7eb">' + (p.is_supported ? '<span style="color:green">√</span>' : '<span style="color:red">×</span>') + '</td>' +
@@ -734,6 +753,21 @@ async function loadDetail(name) {
         document.getElementById('tabProducts').innerHTML = '<div class="empty-state">加载失败: ' + escapeHtml(err.message) + '</div>';
       });
 
+    // JSON Constraint view - fetch from API
+    let jsonConHtml = '<div class="empty-state">加载中...</div>';
+    fetch('/api/v1/json-constraints?operator_name=' + encodeURIComponent(name))
+      .then(res => res.json())
+      .then(jcData => {
+        if (jcData.success && jcData.json_constraints) {
+          document.getElementById('tabJsonConstraint').innerHTML = '<div class="json-tree"><ul>' + renderJsonTree(jcData.json_constraints) + '</ul></div>';
+        } else {
+          document.getElementById('tabJsonConstraint').innerHTML = '<div class="empty-state">无 JSON Constraint 数据</div>';
+        }
+      })
+      .catch(err => {
+        document.getElementById('tabJsonConstraint').innerHTML = '<div class="empty-state">加载失败: ' + escapeHtml(err.message) + '</div>';
+      });
+
     // Raw JSON view
     const rawHtml = '<pre>' + JSON.stringify(doc, null, 2) + '</pre>';
 
@@ -741,11 +775,65 @@ async function loadDetail(name) {
       <div id="tabSections" class="detail-content">${sectionsHtml}</div>
       <div id="tabSignatures" class="detail-content" style="display:none">${sigsHtml}</div>
       <div id="tabProducts" class="detail-content" style="display:none">${prodsHtml}</div>
+      <div id="tabJsonConstraint" class="detail-content" style="display:none">${jsonConHtml}</div>
       <div id="tabRaw" class="detail-content" style="display:none">${rawHtml}</div>
     `;
   } catch (err) {
     metaEl.innerHTML = '<span class="badge badge-err">ERROR</span> ' + err.message;
   }
+}
+
+function renderJsonTree(val, key) {
+  if (val === null) {
+    return key !== undefined
+      ? '<li><span class="jk">"' + escapeHtml(String(key)) + '"</span>: <span class="jl">null</span></li>'
+      : '<span class="jl">null</span>';
+  }
+  if (typeof val === 'boolean') {
+    return key !== undefined
+      ? '<li><span class="jk">"' + escapeHtml(String(key)) + '"</span>: <span class="jb">' + val + '</span></li>'
+      : '<span class="jb">' + val + '</span>';
+  }
+  if (typeof val === 'number') {
+    return key !== undefined
+      ? '<li><span class="jk">"' + escapeHtml(String(key)) + '"</span>: <span class="jn">' + val + '</span></li>'
+      : '<span class="jn">' + val + '</span>';
+  }
+  if (typeof val === 'string') {
+    return key !== undefined
+      ? '<li><span class="jk">"' + escapeHtml(String(key)) + '"</span>: <span class="js">"' + escapeHtml(val) + '"</span></li>'
+      : '<span class="js">"' + escapeHtml(val) + '"</span>';
+  }
+  var isArray = Array.isArray(val);
+  var entries = isArray ? val : Object.entries(val);
+  var len = isArray ? val.length : entries.length;
+  var open = isArray ? '[' : '{';
+  var close = isArray ? ']' : '}';
+  var children = '';
+  if (isArray) {
+    for (var i = 0; i < val.length; i++) {
+      children += renderJsonTree(val[i], i);
+    }
+  } else {
+    for (var j = 0; j < entries.length; j++) {
+      children += renderJsonTree(entries[j][1], entries[j][0]);
+    }
+  }
+  var header = '';
+  if (key !== undefined) {
+    header = '<span class="jk">"' + escapeHtml(String(key)) + '"</span>: ';
+  }
+  if (len === 0) {
+    return '<li>' + header + '<span class="jb-open">' + open + '</span><span class="jb-close">' + close + '</span></li>';
+  }
+  return '<li>' +
+    '<span class="jc" onclick="this.closest(\'li\').classList.toggle(\'collapsed\')"></span>' +
+    header +
+    '<span class="jb-open">' + open + '</span>' +
+    '<span class="jcount">' + len + (isArray ? ' items' : ' keys') + '</span>' +
+    '<ul>' + children + '</ul>' +
+    '<span class="jb-close">' + close + '</span>' +
+    '</li>';
 }
 
 function showDetailTab(el, id) {
@@ -1151,7 +1239,7 @@ async function loadPlatforms() {
       const supportedCount = items.filter(p => p.is_supported).length;
       const detCount = items.filter(p => {
         var d = p.deterministic_computing || {};
-        return d.value === '确定性';
+        return d.value === 'true' || d.value === '确定性';
       }).length;
       const detTotal = items.filter(p => {
         var d = p.deterministic_computing || {};
@@ -1161,7 +1249,7 @@ async function loadPlatforms() {
       html += '<div style="font-weight:600;font-size:.9rem;color:#374151;margin-bottom:6px;padding:6px 10px;background:#f3f4f6;border-radius:4px">' +
         escapeHtml(key) + ' <span style="font-weight:400;color:#888;font-size:.8rem">(' + supportedCount + '/' + items.length + ' 支持';
       if (detTotal > 0) {
-        html += '，' + detCount + '/' + detTotal + ' 确定性';
+        html += '，' + detCount + '/' + detTotal + ' deterministic';
       }
       html += ')</span></div>';
       html += '<table class="params-table"><thead><tr>' +
@@ -1173,12 +1261,12 @@ async function loadPlatforms() {
           ? '<span style="display:inline-block;background:#dcfce7;color:#166534;padding:2px 12px;border-radius:10px;font-size:.8rem;font-weight:600">✓ 支持</span>'
           : '<span style="display:inline-block;background:#fee2e2;color:#991b1b;padding:2px 12px;border-radius:10px;font-size:.8rem;font-weight:600">✗ 不支持</span>';
         var det = p.deterministic_computing || {"value":"","src_text":""};
-        var detVal = det.value || "";
+        var detVal = String(det.value || "");
         var detBadge = '<span style="color:#aaa">-</span>';
-        if (detVal === '确定性') {
-          detBadge = '<span style="display:inline-block;background:#dcfce7;color:#166534;padding:2px 12px;border-radius:10px;font-size:.8rem;font-weight:600">✓ 确定性</span>';
-        } else if (detVal === '非确定性') {
-          detBadge = '<span style="display:inline-block;background:#fef3c7;color:#92400e;padding:2px 12px;border-radius:10px;font-size:.8rem;font-weight:600">⚠ 非确定性</span>';
+        if (detVal === 'true' || detVal === '确定性') {
+          detBadge = '<span style="display:inline-block;background:#dcfce7;color:#166534;padding:2px 12px;border-radius:10px;font-size:.8rem;font-weight:600">✓ true</span>';
+        } else if (detVal === 'false' || detVal === '非确定性') {
+          detBadge = '<span style="display:inline-block;background:#fef3c7;color:#92400e;padding:2px 12px;border-radius:10px;font-size:.8rem;font-weight:600">⚠ false</span>';
         }
         html += '<tr>' +
           '<td>' + escapeHtml(p.platform_name) + '</td>' +
