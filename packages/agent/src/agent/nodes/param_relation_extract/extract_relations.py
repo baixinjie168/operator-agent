@@ -84,7 +84,7 @@ async def extract_ws_node(state: RelationExtractState) -> dict[str, Any]:
     )
 
     if not content.strip():
-        return {"ws_relations": [], "coverage_report": {}, "error": None}
+        return {"ws_relations": [], "coverage_report": {"ws": {}}, "error": None}
 
     llm = _create_llm()
     try:
@@ -96,12 +96,12 @@ async def extract_ws_node(state: RelationExtractState) -> dict[str, Any]:
         )
         return {
             "ws_relations": relations,
-            "coverage_report": report,
+            "coverage_report": {"ws": report},
             "error": None,
         }
     except Exception:
         logger.exception("ExtractWS-Agent failed")
-        return {"ws_relations": [], "coverage_report": {}, "error": "extract_ws_agent_failed"}
+        return {"ws_relations": [], "coverage_report": {"ws": {}}, "error": "extract_ws_agent_failed"}
 
 
 async def extract_exe_node(state: RelationExtractState) -> dict[str, Any]:
@@ -116,7 +116,7 @@ async def extract_exe_node(state: RelationExtractState) -> dict[str, Any]:
     )
 
     if not content.strip():
-        return {"exe_relations": [], "error": None}
+        return {"exe_relations": [], "coverage_report": {"exe": {}}, "error": None}
 
     llm = _create_llm()
     try:
@@ -128,9 +128,9 @@ async def extract_exe_node(state: RelationExtractState) -> dict[str, Any]:
         )
         return {
             "exe_relations": relations,
-            "coverage_report": report,
+            "coverage_report": {"exe": report},
             "error": None,
         }
     except Exception:
         logger.exception("ExtractExe-Agent failed")
-        return {"exe_relations": [], "error": "extract_exe_agent_failed"}
+        return {"exe_relations": [], "coverage_report": {"exe": {}}, "error": "extract_exe_agent_failed"}
