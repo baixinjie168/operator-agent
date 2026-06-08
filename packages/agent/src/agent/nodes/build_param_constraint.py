@@ -116,7 +116,7 @@ async def build_param_constraint_node(state: PipelineState) -> dict[str, Any]:
                     )
                 if not dtypes:
                     # Fallback: parse dtype_desc (e.g. "FLOAT32,FLOAT16,BFLOAT16")
-                    dtype_desc = param.get("dtype_desc", "") or ""
+                    dtype_desc = param.get("data_type", "") or ""
                     if dtype_desc:
                         dtypes = sorted({
                             d.strip() for d in re.split(r"[、，,/]", dtype_desc)
@@ -182,6 +182,11 @@ async def build_param_constraint_node(state: PipelineState) -> dict[str, Any]:
         return {"error": str(e)}
 
 
+def _is_bool_type(param_type: str) -> bool:
+    """Check if parameter type is bool."""
+    return param_type.lower() == "bool"
+
+
 async def _batch_parse_dimensions(params: list[dict]) -> dict[tuple[str, str], list]:
     """Collect all shape values and parse via LLM in one batch call.
 
@@ -245,6 +250,8 @@ async def _batch_extract_allowed_range(
     Uses per-platform extraction: each (param, platform) gets its own LLM call,
     but params without platform-specific context share a single call.
 
+    Special case: bool type params always get [true, false] without LLM call.
+
     Returns:
         Map of (function_name, param_name) → [[min,max], ...] array.
     """
@@ -253,6 +260,23 @@ async def _batch_extract_allowed_range(
 
     result: dict[tuple[str, str], list] = {}
     sem = asyncio.Semaphore(_CONCURRENCY_LIMIT)
+
+    # Separate bool params (short-circuit) from LLM-processed params
+    bool_params: list[dict] = []
+    llm_params: list[dict] = []
+    for p in params:
+        if _is_bool_type(p.get("param_type", "")):
+            bool_params.append(p)
+        else:
+            llm_params.append(p)
+
+    # Bool params: directly return [true, false]
+    for p in bool_params:
+        key = (p["function_name"], p["param_name"])
+        result[key] = [True, False]
+
+    if not llm_params:
+        return result
 
     try:
         llm = ChatOpenAI(
@@ -298,14 +322,15 @@ async def _batch_extract_allowed_range(
                 )
                 return key, []
 
-    results = await asyncio.gather(*[_extract_one(p) for p in params])
+    results = await asyncio.gather(*[_extract_one(p) for p in llm_params])
     for key, value in results:
         result[key] = value
 
     extracted = sum(1 for v in result.values() if v)
     logger.info(
-        "BuildParamConstraint: extracted allowed_range for %d/%d non-Tensor params",
-        extracted, len(params),
+        "BuildParamConstraint: extracted allowed_range for %d/%d non-Tensor params "
+        "(%d bool short-circuited)",
+        extracted, len(params), len(bool_params),
     )
     return result
 
