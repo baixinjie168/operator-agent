@@ -533,6 +533,11 @@
         </div>
         <div style="display:flex;gap:12px;align-items:center;margin-bottom:10px">
           <input type="text" id="taskDocSearch" placeholder="搜索算子名..." style="flex:1;padding:8px 12px;border:1px solid #ddd;border-radius:6px;font-size:.85rem" oninput="filterTaskDocs()">
+          <select id="taskDocPageSizeSelect" onchange="setTaskDocPageSize(this.value)" style="padding:8px 12px;border:1px solid #ddd;border-radius:6px;font-size:.85rem">
+            <option value="20">每页 20 条</option>
+            <option value="50" selected>每页 50 条</option>
+            <option value="100">每页 100 条</option>
+          </select>
         </div>
         <div class="task-doc-list" id="taskDocList"></div>
         <div class="task-pager" id="taskDocPager"></div>
@@ -1707,7 +1712,7 @@ async function loadConstraintsResult() {
 /* ---------- Tasks ---------- */
 let _taskDocs = [];
 let _taskDocPage = 1;
-const _taskDocPageSize = 50;
+let _taskDocPageSize = 50;
 let _taskDocSelected = new Set();
 let _taskDocActiveCat = '全部';
 let _taskListPollTimer = null;
@@ -1865,12 +1870,15 @@ function getCategoryFilteredPaths() {
 
 function toggleCategoryAll() {
   const paths = getCategoryFilteredPaths();
-  const allSelected = paths.length > 0 && paths.every(p => _taskDocSelected.has(p));
+  const start = (_taskDocPage - 1) * _taskDocPageSize;
+  const pageItems = paths.slice(start, start + _taskDocPageSize);
+  const allSelected = pageItems.length > 0 && pageItems.every(p => _taskDocSelected.has(p));
   if (allSelected) {
-    paths.forEach(p => _taskDocSelected.delete(p));
+    pageItems.forEach(p => _taskDocSelected.delete(p));
   } else {
-    paths.forEach(p => _taskDocSelected.add(p));
+    pageItems.forEach(p => _taskDocSelected.add(p));
   }
+  renderTaskDocs();
   updateTaskSelectedCount();
 }
 
@@ -1895,6 +1903,15 @@ function updateTaskSelectedCount() {
   const btn = document.getElementById('createTaskBtn');
   btn.disabled = count === 0;
   btn.textContent = '创建任务 (' + count + ')';
+}
+
+function setTaskDocPageSize(size) {
+  const newSize = parseInt(size, 10);
+  if (newSize > 0 && newSize <= 100) {
+    _taskDocPageSize = newSize;
+    _taskDocPage = 1;
+    renderTaskDocs();
+  }
 }
 
 /* -- Create task -- */

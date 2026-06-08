@@ -243,14 +243,27 @@ def _build_constraints_in_parameters(
     relations: list[dict],
     supported_platforms: list[str],
 ) -> dict[str, list[dict]]:
-    """Build constraints_in_parameters: {platform: [relation_object]}."""
+    """Build constraints_in_parameters: {platform: [relation_object]}.
+
+    Args:
+        relations: List of param_relation dicts with 'platform' and 'relation_object' fields.
+        supported_platforms: List of platform names where is_supported=1.
+
+    Returns:
+        Dict mapping platform name to list of relation_object dicts.
+        If a relation's platform is empty, it applies to all supported platforms.
+        If a relation's platform specifies platforms, it only applies to those
+        that are also in supported_platforms.
+    """
+    from agent.utils.platform_utils import resolve_target_platforms
+
     grouped: dict[str, list[dict]] = {}
     for r in relations:
         obj = r.get("relation_object", {})
         if not obj or obj == {}:
             continue
-        precondition = r.get("precondition", "无")
-        targets = supported_platforms if precondition == "无" else [precondition]
+        platform_str = r.get("platform", "")
+        targets = resolve_target_platforms(platform_str, supported_platforms)
         for plat in targets:
             grouped.setdefault(plat, []).append(obj)
     return grouped

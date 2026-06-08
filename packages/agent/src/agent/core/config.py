@@ -35,6 +35,10 @@ class Settings(BaseSettings):
     mcp_server_command: str = f"{sys.executable} -m mcp_server"
     static_dir: Path = Path(__file__).resolve().parent.parent / "static"
 
+    # Retry limits for LLM-based extraction (configurable per deployment)
+    expr_max_retries: int = Field(default=2, ge=0, le=10)
+    dimensions_max_retries: int = Field(default=2, ge=0, le=10)
+
     # Master switch: which LLM provider to use
     llm_provider: LLMProvider = LLMProvider.ZAI
 

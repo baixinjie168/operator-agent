@@ -28,7 +28,6 @@ _mcp_client = MCPClient()
 _JSON_BLOCK_RE = re.compile(r"```(?:json)?\s*([\s\S]*?)```", re.IGNORECASE)
 
 _CONCURRENCY_LIMIT = 5
-_MAX_DIMENSIONS_RETRIES = 2
 
 
 async def build_param_constraint_node(state: PipelineState) -> dict[str, Any]:
@@ -528,7 +527,7 @@ async def _batch_parse_dimensions(params: list[dict]) -> dict[tuple[str, str], l
     shapes_text = "\n".join(indexed_shapes)
 
     parsed: list = []
-    for attempt in range(_MAX_DIMENSIONS_RETRIES + 1):
+    for attempt in range(settings.dimensions_max_retries + 1):
         try:
             prompt = SHAPE_TO_DIMENSIONS_PROMPT.format(shapes=shapes_text)
             response = await llm.ainvoke(prompt)
@@ -538,9 +537,9 @@ async def _batch_parse_dimensions(params: list[dict]) -> dict[tuple[str, str], l
         except Exception:
             logger.warning(
                 "BuildParamConstraint: LLM batch call failed (attempt %d/%d)",
-                attempt + 1, _MAX_DIMENSIONS_RETRIES + 1,
+                attempt + 1, settings.dimensions_max_retries + 1,
             )
-            if attempt == _MAX_DIMENSIONS_RETRIES:
+            if attempt == settings.dimensions_max_retries:
                 parsed = []
 
     # Phase 3: Alignment validation
@@ -687,7 +686,7 @@ async def _batch_extract_allowed_range(
                 return key, []
 
             # Retry loop
-            for attempt in range(_MAX_DIMENSIONS_RETRIES + 1):
+            for attempt in range(settings.dimensions_max_retries + 1):
                 try:
                     prompt = ALLOWED_RANGE_VALUE_BUILD_PROMPT.format(
                         param_name=param["param_name"],
@@ -701,7 +700,7 @@ async def _batch_extract_allowed_range(
                     # Structural validation
                     is_valid, error = _validate_range_structure(parsed, c_type)
                     if not is_valid:
-                        if attempt < _MAX_DIMENSIONS_RETRIES:
+                        if attempt < settings.dimensions_max_retries:
                             logger.warning(
                                 "BuildParamConstraint: range validation failed for %s (attempt %d): %s",
                                 param["param_name"], attempt + 1, error,
@@ -710,7 +709,7 @@ async def _batch_extract_allowed_range(
                         else:
                             logger.warning(
                                 "BuildParamConstraint: range validation failed after %d attempts for %s: %s",
-                                _MAX_DIMENSIONS_RETRIES + 1, param["param_name"], error,
+                                settings.dimensions_max_retries + 1, param["param_name"], error,
                             )
                             return key, []
 
@@ -720,7 +719,7 @@ async def _batch_extract_allowed_range(
                     return key, parsed
 
                 except Exception:
-                    if attempt < _MAX_DIMENSIONS_RETRIES:
+                    if attempt < settings.dimensions_max_retries:
                         logger.warning(
                             "BuildParamConstraint: LLM call failed for %s (attempt %d)",
                             param["param_name"], attempt + 1,
@@ -729,7 +728,7 @@ async def _batch_extract_allowed_range(
                     else:
                         logger.warning(
                             "BuildParamConstraint: LLM call failed after %d attempts for %s",
-                            _MAX_DIMENSIONS_RETRIES + 1, param["param_name"],
+                            settings.dimensions_max_retries + 1, param["param_name"],
                         )
                         return key, []
 

@@ -14,7 +14,7 @@ def _dedup_relations(relations: list[dict[str, Any]]) -> list[dict[str, Any]]:
         key = (
             r.get("relation_type", ""),
             frozenset(r.get("params", [])),
-            r.get("precondition", "无"),
+            r.get("platform", ""),
         )
         existing = seen.get(key)
         if existing is None:

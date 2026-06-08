@@ -675,14 +675,14 @@ def save_param_relations(doc_id: int, relations: list[dict]) -> dict:
     for r in relations:
         conn.execute(
             "INSERT INTO param_relations "
-            "(doc_id, function_name, relation_type, precondition, "
+            "(doc_id, function_name, relation_type, platform, "
             "description, params, param_optional, source_citation, relation_object) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 doc_id,
                 r.get("function_name", ""),
                 r.get("relation_type", ""),
-                r.get("precondition", "无"),
+                r.get("platform", ""),
                 r.get("description", ""),
                 json.dumps(r.get("params", []), ensure_ascii=False),
                 json.dumps(r.get("param_optional", {}), ensure_ascii=False),
@@ -697,7 +697,7 @@ def save_param_relations(doc_id: int, relations: list[dict]) -> dict:
 def query_param_relations(doc_id: int) -> list[dict]:
     db = get_db()
     rows = db.conn.execute(
-        "SELECT id, function_name, relation_type, precondition, "
+        "SELECT id, function_name, relation_type, platform, "
         "description, params, param_optional, source_citation, relation_object "
         "FROM param_relations WHERE doc_id = ? ORDER BY id",
         (doc_id,),
@@ -707,7 +707,7 @@ def query_param_relations(doc_id: int) -> list[dict]:
             "id": r[0],
             "function_name": r[1],
             "relation_type": r[2],
-            "precondition": r[3],
+            "platform": r[3],
             "description": r[4],
             "params": json.loads(r[5]),
             "param_optional": json.loads(r[6]),
@@ -733,7 +733,7 @@ def query_param_relations_by_operator(operator_name: str | None = None) -> list[
     if operator_name:
         rows = conn.execute(
             "SELECT pr.id, o.name, dv.version, pr.function_name, pr.relation_type, "
-            "pr.precondition, pr.description, pr.params, pr.param_optional, pr.source_citation, "
+            "pr.platform, pr.description, pr.params, pr.param_optional, pr.source_citation, "
             "pr.relation_object "
             "FROM param_relations pr "
             "JOIN document_versions dv ON pr.doc_id = dv.id "
@@ -744,7 +744,7 @@ def query_param_relations_by_operator(operator_name: str | None = None) -> list[
     else:
         rows = conn.execute(
             "SELECT pr.id, o.name, dv.version, pr.function_name, pr.relation_type, "
-            "pr.precondition, pr.description, pr.params, pr.param_optional, pr.source_citation, "
+            "pr.platform, pr.description, pr.params, pr.param_optional, pr.source_citation, "
             "pr.relation_object "
             "FROM param_relations pr "
             "JOIN document_versions dv ON pr.doc_id = dv.id "
@@ -759,7 +759,7 @@ def query_param_relations_by_operator(operator_name: str | None = None) -> list[
             "version": r[2],
             "function_name": r[3],
             "relation_type": r[4],
-            "precondition": r[5],
+            "platform": r[5],
             "description": r[6],
             "params": json.loads(r[7]),
             "param_optional": json.loads(r[8]),

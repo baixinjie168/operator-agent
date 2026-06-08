@@ -55,7 +55,7 @@ class Database:
                     doc_id          INTEGER NOT NULL REFERENCES document_versions(id),
                     function_name   TEXT NOT NULL DEFAULT '',
                     relation_type   TEXT NOT NULL,
-                    precondition    TEXT NOT NULL DEFAULT '无',
+                    platform        TEXT NOT NULL DEFAULT '',
                     description     TEXT NOT NULL,
                     params          TEXT NOT NULL,
                     param_optional  TEXT NOT NULL DEFAULT '{}',
@@ -444,6 +444,25 @@ class Database:
                 self._conn.execute(
                     "ALTER TABLE constraints_result "
                     "RENAME COLUMN constraints_in_param TO constraints_in_parameters"
+                )
+        except sqlite3.OperationalError:
+            pass
+        # 迁移：v34 — param_relations 重命名 precondition 为 platform
+        try:
+            columns = [
+                row[1] for row in self._conn.execute(
+                    "PRAGMA table_info(param_relations)"
+                ).fetchall()
+            ]
+            if "precondition" in columns and "platform" not in columns:
+                self._conn.execute(
+                    "ALTER TABLE param_relations "
+                    "RENAME COLUMN precondition TO platform"
+                )
+                # 清空历史数据中的非平台信息
+                self._conn.execute(
+                    "UPDATE param_relations SET platform = '' "
+                    "WHERE platform = '无'"
                 )
         except sqlite3.OperationalError:
             pass

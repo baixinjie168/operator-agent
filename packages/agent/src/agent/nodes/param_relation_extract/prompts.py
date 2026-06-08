@@ -28,8 +28,24 @@ RELATION_EXTRACT_PROMPT = """\
    该行文本归属于该行第一列所标注的参数名，不要因为文本中提及了其他参数名就错误归属。
 4. 在表格外部的段落中（如平台特定说明、约束说明），
    如果描述了多个参数之间的约束，也应提取
-5. 如果关系存在平台前置条件（如"Atlas A2/A3 下"），记录到 precondition 字段
-6. 如果没有平台前置条件，precondition 填 "无"
+5. platform 字段用于填写该关系适用的平台名称：
+   - 如果关系适用于所有平台（文档中未指定特定平台），platform 填空字符串 ""
+   - 如果关系仅适用于特定平台，填写平台名称
+   - 如果关系适用于多个特定平台，用"、"分隔各平台名称
+   - platform 只能填写平台名称，禁止填写非平台信息（如数据格式、参数值等约束条件）
+6. 标准平台名称（必须严格使用以下格式）：
+   - "Atlas 训练系列产品"
+   - "Atlas 推理系列产品"
+   - "Atlas A2 训练系列产品/Atlas A2 推理系列产品"
+   - "Atlas A3 训练系列产品/Atlas A3 推理系列产品"
+   - "Atlas 200I/500 A2 推理产品"
+   - "Atlas 300I 推理产品"
+   - "Atlas 300I Duo 推理产品"
+   - "Atlas 300V 视频解析产品"
+   - "Atlas 500 A2 智能小站"
+   - "Atlas 800 推理服务器 A2"
+   - "Atlas 800 训练服务器"
+   - "Atlas 800I A2 推理服务器"
 7. params 字段列出关系涉及的所有参数名
 8. param_optional 字段标注每个参数是否可选（从文档中的"可选参数"等描述判断）
 9. source_citation 字段填写原文中描述该关系的原始文本
@@ -40,7 +56,7 @@ RELATION_EXTRACT_PROMPT = """\
 [
   {{
     "relation_type": "shape",
-    "precondition": "无",
+    "platform": "",
     "description": "scale 的 shape 依赖 x 的 shape 和 axis：当 scale 为 1 维时，...",
     "params": ["x", "scale", "axis"],
     "param_optional": {{"x": false, "scale": false, "axis": false}},

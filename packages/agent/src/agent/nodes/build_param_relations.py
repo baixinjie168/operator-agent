@@ -29,7 +29,6 @@ _mcp_client = MCPClient()
 _JSON_BLOCK_RE = re.compile(r"```(?:json)?\s*([\s\S]*?)```", re.IGNORECASE)
 
 _CONCURRENCY_LIMIT = 5
-MAX_RETRIES = 2
 
 # Phase 0: Allowed attributes and builtin names for reference validation
 _ALLOWED_ATTRS = {"shape", "dtype", "format", "range_value"}
@@ -296,7 +295,7 @@ async def _extract_with_retry(
     last_error = ""
     last_expr = ""
 
-    for attempt in range(MAX_RETRIES + 1):
+    for attempt in range(settings.expr_max_retries + 1):
         async with sem:
             try:
                 if attempt == 0:
@@ -327,17 +326,17 @@ async def _extract_with_retry(
                 last_error = error
                 last_expr = expr
 
-                if attempt < MAX_RETRIES:
+                if attempt < settings.expr_max_retries:
                     logger.warning(
                         "BuildParamRelations: expr validation failed (attempt %d/%d) "
                         "for relation id=%s: %s — retrying with example",
-                        attempt + 1, MAX_RETRIES + 1, rel.get("id", "?"), error,
+                        attempt + 1, settings.expr_max_retries + 1, rel.get("id", "?"), error,
                     )
                 else:
                     logger.error(
                         "BuildParamRelations: expr failed after %d attempts "
                         "for relation id=%s: %s — storing empty expr",
-                        MAX_RETRIES + 1, rel.get("id", "?"), error,
+                        settings.expr_max_retries + 1, rel.get("id", "?"), error,
                     )
                     return {
                         "expr_type": result.get("expr_type", ""),
@@ -512,7 +511,7 @@ async def build_param_relations_node(state: PipelineState) -> dict[str, Any]:
     1. Query param_relations, function_signatures, platform_support
     2. LLM batch extract expr_type + expr from description
     3. Assemble relation_object per row and persist to DB
-    4. Group by platform (precondition="无" → all supported platforms)
+    4. Group by platform (platform="" → all supported platforms)
     """
     doc_id = state.get("doc_id", 0)
     operator_name = state.get("operator_name", "")
@@ -571,6 +570,8 @@ async def build_param_relations_node(state: PipelineState) -> dict[str, Any]:
         )
 
         # Step 5: Group by platform
+        from agent.utils.platform_utils import resolve_target_platforms
+
         supported_platforms = [
             p["platform_name"] for p in platforms if p.get("is_supported") == 1
         ]
@@ -578,11 +579,8 @@ async def build_param_relations_node(state: PipelineState) -> dict[str, Any]:
         grouped: dict[str, list[dict]] = {}
         for rel, upd in zip(relations, updates):
             obj = json.loads(upd["relation_object"])
-            precondition = rel.get("precondition", "无")
-            if precondition == "无":
-                targets = supported_platforms
-            else:
-                targets = [precondition]
+            platform_str = rel.get("platform", "")
+            targets = resolve_target_platforms(platform_str, supported_platforms)
             for plat in targets:
                 grouped.setdefault(plat, []).append(obj)
 

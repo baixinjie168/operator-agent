@@ -49,7 +49,7 @@ CREATE TABLE IF NOT EXISTS param_relations (
     doc_id          INTEGER NOT NULL REFERENCES document_versions(id),
     function_name   TEXT NOT NULL DEFAULT '',
     relation_type   TEXT NOT NULL,
-    precondition    TEXT NOT NULL DEFAULT '无',
+    platform        TEXT NOT NULL DEFAULT '',
     description     TEXT NOT NULL,
     params          TEXT NOT NULL,
     param_optional  TEXT NOT NULL DEFAULT '{}',

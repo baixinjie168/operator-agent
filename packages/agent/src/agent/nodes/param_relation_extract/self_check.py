@@ -39,7 +39,7 @@ FOCUSED_RELATION_PROMPT = """\
 严格按以下 JSON 数组返回：
 [{{
   "relation_type": "shape",
-  "precondition": "无",
+  "platform": "",
   "description": "...",
   "params": ["{param_name}", "other_param"],
   "param_optional": {{"{param_name}": false, "other_param": false}},
@@ -70,7 +70,7 @@ PARAGRAPH_RELATION_PROMPT = """\
 严格按以下 JSON 数组返回：
 [{{
   "relation_type": "value",
-  "precondition": "无",
+  "platform": "",
   "description": "...",
   "params": ["param_a", "param_b"],
   "param_optional": {{"param_a": false, "param_b": false}},
@@ -107,7 +107,7 @@ SELF_CHECK_PROMPT = """\
 严格按以下 JSON 数组返回：
 [{{
   "relation_type": "...",
-  "precondition": "无",
+  "platform": "",
   "description": "...",
   "params": ["..."],
   "param_optional": {{...}},
