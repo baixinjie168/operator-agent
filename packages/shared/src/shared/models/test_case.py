@@ -101,6 +101,6 @@ class GeneratorContext(BaseModel):
     supported_platforms: list[str]
     inputs: dict[str, dict[str, dict]]  # {param: {platform: constraint}}
     outputs: dict[str, dict[str, dict]]
-    constraints_in_param: dict[str, list[dict]] = Field(default_factory=dict)
+    constraints_in_parameters: dict[str, list[dict]] = Field(default_factory=dict)
     dtype_support: dict[str, list[dict]] = Field(default_factory=dict)
 

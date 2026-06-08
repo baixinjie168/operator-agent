@@ -23,7 +23,7 @@ def build_shape_equal_groups(context: dict[str, Any]) -> list[list[str]]:
     """Return equivalence groups of parameter names that must share the same shape.
 
     Args:
-        context: Mapping containing ``constraints_in_param`` keyed by platform.
+        context: Mapping containing ``constraints_in_parameters`` keyed by platform.
                  Each constraint has ``expr_type`` and ``relation_params``.
 
     Returns:
@@ -31,7 +31,7 @@ def build_shape_equal_groups(context: dict[str, Any]) -> list[list[str]]:
         than 2 params are omitted.  Returns an empty list if no shape
         constraints are present.
     """
-    cip = context.get("constraints_in_param") or {}
+    cip = context.get("constraints_in_parameters") or {}
     if not isinstance(cip, dict):
         return []
 
@@ -61,7 +61,7 @@ def build_fixed_values(context: dict[str, Any]) -> dict[str, float]:
     Parses ``fixed_value`` expressions of the form ``"<name> == <number>"``.
     Non-numeric RHS or expressions without ``==`` are silently skipped.
     """
-    cip = context.get("constraints_in_param") or {}
+    cip = context.get("constraints_in_parameters") or {}
     if not isinstance(cip, dict):
         return {}
 

@@ -43,11 +43,11 @@ def generate(
 
     rng = random.Random(seed)
     shape_groups = build_shape_equal_groups(
-        {"constraints_in_param": context.constraints_in_param}
+        {"constraints_in_parameters": context.constraints_in_parameters}
     )
     # fixed_values is computed for API symmetry; not yet applied to scalar inputs.
     _ = build_fixed_values(
-        {"constraints_in_param": context.constraints_in_param}
+        {"constraints_in_parameters": context.constraints_in_parameters}
     )
 
     platform = _select_platform(context)

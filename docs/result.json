@@ -569,7 +569,7 @@
       }
     }
   },
-  "constraints_in_param": {
+  "constraints_in_parameters": {
     "Atlas 推理系列产品": [
       {
         "expr_type": "type_dependency",

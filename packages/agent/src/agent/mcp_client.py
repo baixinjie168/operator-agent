@@ -329,7 +329,7 @@ class MCPClient:
         deterministic_computing: str = "{}",
         inputs: str = "{}",
         outputs: str = "{}",
-        constraints_in_param: str = "{}",
+        constraints_in_parameters: str = "{}",
         dtype_support_description: str = "{}",
     ) -> dict:
         """Save assembled constraints result for a document version."""
@@ -343,7 +343,7 @@ class MCPClient:
             "deterministic_computing": deterministic_computing,
             "inputs": inputs,
             "outputs": outputs,
-            "constraints_in_param": constraints_in_param,
+            "constraints_in_parameters": constraints_in_parameters,
             "dtype_support_description": dtype_support_description,
         })
 

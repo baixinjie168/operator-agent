@@ -778,7 +778,7 @@ def save_constraints_result(
     deterministic_computing: str = "{}",
     inputs: str = "{}",
     outputs: str = "{}",
-    constraints_in_param: str = "{}",
+    constraints_in_parameters: str = "{}",
     dtype_support_description: str = "{}",
 ) -> str:
     """Save assembled constraints result for a document version.
@@ -793,7 +793,7 @@ def save_constraints_result(
         deterministic_computing: JSON string of {platform: {value, src_text}}.
         inputs: JSON string of {param_name: {platform: constraint}}.
         outputs: JSON string of {param_name: {platform: constraint}}.
-        constraints_in_param: JSON string of {platform: [relation_object]}.
+        constraints_in_parameters: JSON string of {platform: [relation_object]}.
         dtype_support_description: JSON string of {platform: [combo]}.
 
     Returns:
@@ -802,7 +802,7 @@ def save_constraints_result(
     result = _save_constraints_result(
         doc_id, operator_name, product_support,
         function_explanation, function_signature, return_codes,
-        deterministic_computing, inputs, outputs, constraints_in_param,
+        deterministic_computing, inputs, outputs, constraints_in_parameters,
         dtype_support_description,
     )
     return json.dumps(result, ensure_ascii=False)

@@ -327,11 +327,19 @@ class Database:
             )
         except sqlite3.OperationalError:
             pass
-        # 迁移：v25 — constraints_result 新增 constraints_in_param 列
+        # 迁移：v25 — constraints_result 新增 constraints_in_parameters 列
         try:
             self._conn.execute(
-                "ALTER TABLE constraints_result ADD COLUMN constraints_in_param "
+                "ALTER TABLE constraints_result ADD COLUMN constraints_in_parameters "
                 "TEXT NOT NULL DEFAULT '{}'"
+            )
+        except sqlite3.OperationalError:
+            pass
+        # 迁移：v27 — rename constraints_in_param → constraints_in_parameters
+        try:
+            self._conn.execute(
+                "ALTER TABLE constraints_result RENAME COLUMN constraints_in_param "
+                "TO constraints_in_parameters"
             )
         except sqlite3.OperationalError:
             pass

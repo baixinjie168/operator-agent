@@ -94,7 +94,7 @@ class GeneratorParamKind(StrEnum):
 
 
 class ConstraintExprType(StrEnum):
-    """expr_type values in constraints_in_param entries."""
+    """expr_type values in constraints_in_parameters entries."""
 
     SHAPE_EQUALITY = "shape_equality"
     SHAPE_UNIFICATION = "shape_unification"

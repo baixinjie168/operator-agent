@@ -1,6 +1,6 @@
 """Step 4 of GeneratorAgent: solve inter-parameter constraints.
 
-Evaluates ``constraints_in_param`` relations to estimate how many
+Evaluates ``constraints_in_parameters`` relations to estimate how many
 shape/dtype combinations will pass validation.  Pure analysis — no mutation.
 """
 
@@ -28,7 +28,7 @@ async def case_solve_constraints_node(state: PipelineState) -> dict[str, Any]:
     await asyncio.sleep(0.3)
 
     try:
-        constraints_in_param = constraints.get("constraints_in_param", {}) or {}
+        constraints_in_parameters = constraints.get("constraints_in_parameters", {}) or {}
         # Conservative estimate: assume 60% of sampled combos pass validation
         sampled_shapes = int(state.get("sampled_shapes") or 0)
         sampled_dtypes = int(state.get("sampled_dtypes") or 0)
@@ -37,8 +37,8 @@ async def case_solve_constraints_node(state: PipelineState) -> dict[str, Any]:
         rejected_combos = total_combos - valid_combos
 
         relation_count = 0
-        if isinstance(constraints_in_param, dict):
-            for relations in constraints_in_param.values():
+        if isinstance(constraints_in_parameters, dict):
+            for relations in constraints_in_parameters.values():
                 if isinstance(relations, list):
                     relation_count += len(relations)
 

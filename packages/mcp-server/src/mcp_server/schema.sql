@@ -159,7 +159,7 @@ CREATE TABLE IF NOT EXISTS constraints_result (
     deterministic_computing    TEXT NOT NULL DEFAULT '{}',
     inputs                     TEXT NOT NULL DEFAULT '{}',
     outputs                    TEXT NOT NULL DEFAULT '{}',
-    constraints_in_param       TEXT NOT NULL DEFAULT '{}',
+    constraints_in_parameters  TEXT NOT NULL DEFAULT '{}',
     dtype_support_description  TEXT NOT NULL DEFAULT '{}',
     created_at                 TEXT DEFAULT (datetime('now'))
 );

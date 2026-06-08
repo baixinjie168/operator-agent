@@ -78,7 +78,7 @@ async def assemble_result_node(state: PipelineState) -> dict[str, Any]:
         # Step 3e: Build new fields
         det_computing = _build_deterministic_computing(platform_support_data)
         inputs_dict, outputs_dict = _build_inputs_outputs(params)
-        constraints_ip = _build_constraints_in_param(relations, product_support_list)
+        constraints_ip = _build_constraints_in_parameters(relations, product_support_list)
         dtype_support = _build_dtype_support(dtype_combos)
 
         # Step 4: Save to constraints_result table
@@ -92,7 +92,7 @@ async def assemble_result_node(state: PipelineState) -> dict[str, Any]:
             deterministic_computing=json.dumps(det_computing, ensure_ascii=False),
             inputs=json.dumps(inputs_dict, ensure_ascii=False),
             outputs=json.dumps(outputs_dict, ensure_ascii=False),
-            constraints_in_param=json.dumps(constraints_ip, ensure_ascii=False),
+            constraints_in_parameters=json.dumps(constraints_ip, ensure_ascii=False),
             dtype_support_description=json.dumps(dtype_support, ensure_ascii=False),
         )
 
@@ -105,7 +105,7 @@ async def assemble_result_node(state: PipelineState) -> dict[str, Any]:
             "deterministic_computing": det_computing,
             "inputs": inputs_dict,
             "outputs": outputs_dict,
-            "constraints_in_param": constraints_ip,
+            "constraints_in_parameters": constraints_ip,
             "return_info": transformed_rc,
             "dtype_support_description": dtype_support,
         }
@@ -239,11 +239,11 @@ def _build_inputs_outputs(
     return inputs, outputs
 
 
-def _build_constraints_in_param(
+def _build_constraints_in_parameters(
     relations: list[dict],
     supported_platforms: list[str],
 ) -> dict[str, list[dict]]:
-    """Build constraints_in_param: {platform: [relation_object]}."""
+    """Build constraints_in_parameters: {platform: [relation_object]}."""
     grouped: dict[str, list[dict]] = {}
     for r in relations:
         obj = r.get("relation_object", {})

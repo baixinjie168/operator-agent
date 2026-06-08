@@ -1310,7 +1310,7 @@ def save_constraints_result(
     deterministic_computing: str = "{}",
     inputs: str = "{}",
     outputs: str = "{}",
-    constraints_in_param: str = "{}",
+    constraints_in_parameters: str = "{}",
     dtype_support_description: str = "{}",
 ) -> dict:
     """Save assembled constraints result for a document version.
@@ -1327,7 +1327,7 @@ def save_constraints_result(
         deterministic_computing: JSON string of {platform: {value, src_text}}.
         inputs: JSON string of {param_name: {platform: constraint}}.
         outputs: JSON string of {param_name: {platform: constraint}}.
-        constraints_in_param: JSON string of {platform: [relation_object]}.
+        constraints_in_parameters: JSON string of {platform: [relation_object]}.
         dtype_support_description: JSON string of {platform: [combo]}.
 
     Returns:
@@ -1339,12 +1339,12 @@ def save_constraints_result(
         "INSERT OR REPLACE INTO constraints_result "
         "(doc_id, operator_name, product_support, "
         "function_explanation, function_signature, return_codes, "
-        "deterministic_computing, inputs, outputs, constraints_in_param, "
+        "deterministic_computing, inputs, outputs, constraints_in_parameters, "
         "dtype_support_description) "
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (doc_id, operator_name, product_support,
          function_explanation, function_signature, return_codes,
-         deterministic_computing, inputs, outputs, constraints_in_param,
+         deterministic_computing, inputs, outputs, constraints_in_parameters,
          dtype_support_description),
     )
     conn.commit()
@@ -1361,7 +1361,7 @@ def query_constraints_result(operator_name: str | None = None) -> list[dict]:
         "cr.product_support, cr.function_explanation, "
         "cr.function_signature, cr.return_codes, "
         "cr.deterministic_computing, cr.inputs, cr.outputs, "
-        "cr.constraints_in_param, cr.dtype_support_description"
+        "cr.constraints_in_parameters, cr.dtype_support_description"
     )
     _base = "FROM constraints_result cr JOIN document_versions dv ON cr.doc_id = dv.id"
 
@@ -1389,7 +1389,7 @@ def query_constraints_result(operator_name: str | None = None) -> list[dict]:
             "deterministic_computing": json.loads(r[8]) if r[8] else {},
             "inputs": json.loads(r[9]) if r[9] else {},
             "outputs": json.loads(r[10]) if r[10] else {},
-            "constraints_in_param": json.loads(r[11]) if r[11] else {},
+            "constraints_in_parameters": json.loads(r[11]) if r[11] else {},
             "dtype_support_description": json.loads(r[12]) if r[12] else {},
         }
         for r in rows

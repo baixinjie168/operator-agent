@@ -21,7 +21,7 @@ Input shape (new format)::
         }
       },
       "outputs": {...},
-      "constraints_in_param": {"P1": [{...}, ...]},
+      "constraints_in_parameters": {"P1": [{...}, ...]},
       "dtype_support_description": {"P1": [{"x1": "FLOAT32", ...}]}
     }
 """
@@ -60,7 +60,7 @@ def parse_result_json(result: dict[str, Any]) -> GeneratorContext:
     supported_platforms = list(result.get("product_support") or [])
     inputs = dict(result.get("inputs") or {})
     outputs = dict(result.get("outputs") or {})
-    constraints_in_param = dict(result.get("constraints_in_param") or {})
+    constraints_in_parameters = dict(result.get("constraints_in_parameters") or {})
     dtype_support = dict(result.get("dtype_support_description") or {})
 
     return GeneratorContext(
@@ -69,7 +69,7 @@ def parse_result_json(result: dict[str, Any]) -> GeneratorContext:
         supported_platforms=supported_platforms,
         inputs=inputs,
         outputs=outputs,
-        constraints_in_param=constraints_in_param,
+        constraints_in_parameters=constraints_in_parameters,
         dtype_support=dtype_support,
     )
 

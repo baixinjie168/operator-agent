@@ -150,7 +150,7 @@ class ConstraintsResultItem(BaseModel):
     deterministic_computing: dict = {}
     inputs: dict = {}
     outputs: dict = {}
-    constraints_in_param: dict = {}
+    constraints_in_parameters: dict = {}
     dtype_support_description: dict = {}
 
 
