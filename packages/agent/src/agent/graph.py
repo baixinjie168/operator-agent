@@ -9,8 +9,10 @@ InitDoc → [ProductSupport ∥ ParseParams ∥ FunctionSignatureExtract
           ∥ ParamRelationExtract ∥ ReturnCodeExtract ∥ DeterminismExtract
           ∥ DtypeComboExtract]
        → BuildParamRelations → BuildParamConstraint → AssembleResult
-       → CaseSubGraph (5-step: match_model → load_defs → init_static
-                       → solve_constraints → generate) → END
+       → GeneratorAgent (4-step: match_model → init_static
+                       → solve_constraints → generate)
+       → ExecuterAgent (3-step: generate_atk → cpu_derivation → run_atk)
+       → END
 """
 
 import logging
@@ -36,6 +38,11 @@ from agent.nodes.case_subgraph import (
     case_match_model_node as _case_match_model,
     case_solve_constraints_node as _case_solve_constraints,
     create_case_subgraph,
+)
+from agent.nodes.executer_subgraph import (
+    exec_generate_atk_node as _exec_generate_atk,
+    exec_cpu_derivation_node as _exec_cpu_derivation,
+    exec_run_atk_node as _exec_run_atk,
 )
 from agent.nodes.function_signature_extract import function_signature_extract_node as _function_signature_extract
 from agent.nodes.init_doc import init_doc_node as _init_doc
@@ -109,6 +116,10 @@ def create_pipeline_graph() -> CompiledStateGraph:
     graph.add_node("case_init_static", traced_node("case_init_static")(_case_init_static))
     graph.add_node("case_solve_constraints", traced_node("case_solve_constraints")(_case_solve_constraints))
     graph.add_node("case_generate", traced_node("case_generate")(_case_generate))
+    # ── ExecuterAgent: 3-step execution sub-graph (exec_*_node) ──
+    graph.add_node("exec_generate_atk", traced_node("exec_generate_atk")(_exec_generate_atk))
+    graph.add_node("exec_cpu_derivation", traced_node("exec_cpu_derivation")(_exec_cpu_derivation))
+    graph.add_node("exec_run_atk", traced_node("exec_run_atk")(_exec_run_atk))
 
     param_relation_subgraph = create_param_relation_subgraph()
     graph.add_node("param_relation_extract", param_relation_subgraph)
@@ -148,7 +159,10 @@ def create_pipeline_graph() -> CompiledStateGraph:
     graph.add_edge("case_match_model", "case_init_static")
     graph.add_edge("case_init_static", "case_solve_constraints")
     graph.add_edge("case_solve_constraints", "case_generate")
-    graph.add_edge("case_generate", END)
+    graph.add_edge("case_generate", "exec_generate_atk")
+    graph.add_edge("exec_generate_atk", "exec_cpu_derivation")
+    graph.add_edge("exec_cpu_derivation", "exec_run_atk")
+    graph.add_edge("exec_run_atk", END)
     return graph.compile(name="operator-pipeline")
 
 
@@ -193,6 +207,10 @@ def create_pipeline_graph_after_init() -> CompiledStateGraph:
     graph.add_node("case_init_static", traced_node("case_init_static")(_case_init_static))
     graph.add_node("case_solve_constraints", traced_node("case_solve_constraints")(_case_solve_constraints))
     graph.add_node("case_generate", traced_node("case_generate")(_case_generate))
+    # ── ExecuterAgent: 3-step execution sub-graph (exec_*_node) ──
+    graph.add_node("exec_generate_atk", traced_node("exec_generate_atk")(_exec_generate_atk))
+    graph.add_node("exec_cpu_derivation", traced_node("exec_cpu_derivation")(_exec_cpu_derivation))
+    graph.add_node("exec_run_atk", traced_node("exec_run_atk")(_exec_run_atk))
 
     param_relation_subgraph = create_param_relation_subgraph()
     graph.add_node("param_relation_extract", param_relation_subgraph)
@@ -234,5 +252,8 @@ def create_pipeline_graph_after_init() -> CompiledStateGraph:
     graph.add_edge("case_match_model", "case_init_static")
     graph.add_edge("case_init_static", "case_solve_constraints")
     graph.add_edge("case_solve_constraints", "case_generate")
-    graph.add_edge("case_generate", END)
+    graph.add_edge("case_generate", "exec_generate_atk")
+    graph.add_edge("exec_generate_atk", "exec_cpu_derivation")
+    graph.add_edge("exec_cpu_derivation", "exec_run_atk")
+    graph.add_edge("exec_run_atk", END)
     return graph.compile(name="operator-pipeline")

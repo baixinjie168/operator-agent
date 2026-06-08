@@ -8,3 +8,6 @@ __pycache__/
 .opencode
 .vscode
 .claude
+
+cases
+executors

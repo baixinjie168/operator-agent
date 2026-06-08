@@ -255,6 +255,10 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
         测试用例生成
       </button>
+      <button class="nav-item" onclick="switchTab('execute', this)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+        用例执行
+      </button>
     </nav>
   </aside>
 
@@ -531,6 +535,62 @@
     </div>
   </div>
 
+  <!-- Execute Panel -->
+  <div class="panel" id="panelExecute">
+    <div class="card" style="flex:1;display:flex;flex-direction:column;min-height:0;overflow:hidden">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <h2 style="margin:0">用例执行 (ExecuterAgent)</h2>
+      </div>
+
+      <div style="padding:14px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:12px">
+        <div style="font-weight:600;color:#374151;margin-bottom:8px">输入测试用例数据</div>
+        <div style="display:grid;grid-template-columns:1fr 200px;gap:10px;margin-bottom:10px">
+          <div>
+            <label style="display:block;font-size:.8rem;color:#4b5563;margin-bottom:4px">算子名称</label>
+            <input id="execOperatorName" type="text" placeholder="例如: aclnnAdaLayerNorm" style="width:100%;padding:7px 10px;border:1px solid #ddd;border-radius:6px;font-size:.9rem">
+          </div>
+          <div>
+            <label style="display:block;font-size:.8rem;color:#4b5563;margin-bottom:4px">快速加载</label>
+            <select id="execCaseLoader" onchange="loadCasesForExecute()" style="width:100%;padding:7px 10px;border:1px solid #ddd;border-radius:6px;font-size:.9rem">
+              <option value="">— 选择已有用例 —</option>
+            </select>
+          </div>
+        </div>
+        <div>
+          <label style="display:block;font-size:.8rem;color:#4b5563;margin-bottom:4px">cases.json 数据</label>
+          <textarea id="execCasesJson" style="width:100%;height:200px;border:1px solid #ddd;border-radius:6px;padding:12px;font-family:monospace;font-size:.85rem;resize:vertical" placeholder='粘贴 cases.json 内容，例如: [{"id":0,"name":"aclnnAdaLayerNorm","inputs":[...]}]'></textarea>
+        </div>
+        <div style="margin-top:10px;display:flex;gap:10px;align-items:center">
+          <button id="execBtn" onclick="runExecute()">执行用例</button>
+          <button class="secondary" onclick="document.getElementById('execCasesJson').value=''">清空</button>
+        </div>
+        <div class="status" id="execStatus"></div>
+      </div>
+
+      <div style="font-weight:600;color:#374151;margin-bottom:8px">执行进度</div>
+      <div id="execStepsWrap" style="flex:1;min-height:0;overflow-y:auto">
+        <ul class="parse-steps" id="execSteps">
+          <li class="parse-step" data-step="generate_atk">
+            <div class="step-icon">1</div>
+            <div class="step-info"><div class="step-text">生成 ATK 脚本</div><div class="step-detail" id="execStepDetail0"></div></div>
+          </li>
+          <li class="parse-step" data-step="cpu_derivation">
+            <div class="step-icon">2</div>
+            <div class="step-info"><div class="step-text">CPU 参考推导</div><div class="step-detail" id="execStepDetail1"></div></div>
+          </li>
+          <li class="parse-step" data-step="run_atk">
+            <div class="step-icon">3</div>
+            <div class="step-info"><div class="step-text">执行 ATK 测试</div><div class="step-detail" id="execStepDetail2"></div></div>
+          </li>
+        </ul>
+        <div id="execResult" style="display:none;margin-top:12px">
+          <div class="meta" id="execResultMeta"></div>
+          <pre id="execResultBody" style="background:#1e1e1e;color:#d4d4d4;padding:16px;border-radius:6px;overflow-x:auto;font-size:.85rem;line-height:1.5;white-space:pre-wrap;word-break:break-all;max-height:300px"></pre>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Description Modal -->
   <div id="descModalOverlay" class="modal-overlay" onclick="closeDescModalOutside(event)">
     <div class="modal-box">
@@ -561,6 +621,7 @@ function switchTab(name, el) {
   if (name === 'dtypes') { loadDtypeOperators(); loadDtypeCombos(); }
   if (name === 'result') { loadResultOperators(); loadConstraintsResult(); }
   if (name === 'cases') { loadAllCaseOperators(); }
+  if (name === 'execute') { loadExecCaseOperators(); }
 }
 
 /* ---------- Parse step helpers ---------- */
@@ -1903,6 +1964,231 @@ function renderCaseCard(c, idx) {
 function toggleCaseCard(idx) {
   const card = document.getElementById('case-card-' + idx);
   if (card) card.classList.toggle('open');
+}
+
+/* ---------- Execute (ExecuterAgent) ---------- */
+
+const EXEC_STEPS = ['generate_atk', 'cpu_derivation', 'run_atk'];
+
+function resetExecSteps() {
+  document.querySelectorAll('#execSteps .parse-step').forEach(el => {
+    el.className = 'parse-step';
+  });
+  EXEC_STEPS.forEach((_, i) => {
+    document.getElementById('execStepDetail' + i).textContent = '';
+  });
+  document.getElementById('execResult').style.display = 'none';
+}
+
+function setExecStep(index, state, detail) {
+  const stepEls = document.querySelectorAll('#execSteps .parse-step');
+  if (index > 0 && stepEls[index - 1].classList.contains('active')) {
+    stepEls[index - 1].classList.remove('active');
+    stepEls[index - 1].classList.add('done');
+  }
+  stepEls[index].className = 'parse-step ' + state;
+  if (detail) document.getElementById('execStepDetail' + index).textContent = detail;
+}
+
+function setExecStepActive(index, detail) { setExecStep(index, 'active', detail); }
+function setExecStepDone(index, detail) { setExecStep(index, 'done', detail); }
+function setExecStepError(index, detail) { setExecStep(index, 'error', detail); }
+
+async function loadExecCaseOperators() {
+  try {
+    const res = await fetch('/api/v1/cases');
+    const data = await res.json();
+    const select = document.getElementById('execCaseLoader');
+    const current = select.value;
+    select.innerHTML = '<option value="">— 选择已有用例 —</option>';
+    const rows = data.operators || [];
+    rows.forEach(r => {
+      const opt = document.createElement('option');
+      opt.value = r.operator_name;
+      const stamp = r.last_created_at ? ' · ' + r.last_created_at : '';
+      opt.textContent = r.operator_name + ' (' + r.count + ' 条' + stamp + ')';
+      select.appendChild(opt);
+    });
+    select.value = current;
+  } catch (_) {}
+}
+
+async function loadCasesForExecute() {
+  const select = document.getElementById('execCaseLoader');
+  const operatorName = select.value;
+  if (!operatorName) return;
+
+  document.getElementById('execOperatorName').value = operatorName;
+
+  try {
+    const res = await fetch('/api/v1/cases/' + encodeURIComponent(operatorName));
+    const data = await res.json();
+    if (data.found && data.cases) {
+      document.getElementById('execCasesJson').value = JSON.stringify(data.cases, null, 2);
+    }
+  } catch (err) {
+    document.getElementById('execStatus').textContent = '加载用例失败: ' + err.message;
+  }
+}
+
+async function runExecute() {
+  const operatorName = document.getElementById('execOperatorName').value.trim();
+  const casesJson = document.getElementById('execCasesJson').value.trim();
+  const btn = document.getElementById('execBtn');
+  const statusEl = document.getElementById('execStatus');
+
+  if (!operatorName) {
+    statusEl.innerHTML = '<span class="badge badge-err">请输入算子名称</span>';
+    return;
+  }
+  if (!casesJson) {
+    statusEl.innerHTML = '<span class="badge badge-err">请输入 cases.json 数据</span>';
+    return;
+  }
+
+  try {
+    JSON.parse(casesJson);
+  } catch (e) {
+    statusEl.innerHTML = '<span class="badge badge-err">JSON 格式错误: ' + escapeHtml(e.message) + '</span>';
+    return;
+  }
+
+  btn.disabled = true;
+  statusEl.innerHTML = '<span class="spinner"></span>正在执行 ' + escapeHtml(operatorName) + ' 的用例...';
+
+  resetExecSteps();
+  setExecStepActive(0, '正在生成 ATK 脚本...');
+
+  try {
+    const res = await fetch('/api/v1/execute/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ operator_name: operatorName, cases_json: casesJson }),
+    });
+    const data = await res.json();
+
+    if (!data.success) {
+      setExecStepError(0, data.error || '请求失败');
+      statusEl.innerHTML = '<span class="badge badge-err">ERROR</span> ' + escapeHtml(data.error || '执行失败');
+      return;
+    }
+
+    statusEl.innerHTML = '<span class="spinner"></span>任务已提交，run_id: <code>' + escapeHtml(data.task_id) + '</code>，正在执行...';
+
+    pollExecuteStatus(data.task_id, operatorName);
+  } catch (err) {
+    setExecStepError(0, err.message);
+    statusEl.innerHTML = '<span class="badge badge-err">ERROR</span> ' + escapeHtml(err.message);
+    btn.disabled = false;
+  }
+}
+
+async function pollExecuteStatus(taskId, operatorName) {
+  const statusEl = document.getElementById('execStatus');
+  const btn = document.getElementById('execBtn');
+  let currentStep = 0;
+  let attempts = 0;
+  const maxAttempts = 120;
+
+  const nodeToStep = {
+    'exec_generate_atk': 0,
+    'exec_cpu_derivation': 1,
+    'exec_run_atk': 2,
+  };
+
+  try {
+    const streamUrl = '/api/v1/runs/' + taskId + '/stream';
+    const response = await fetch(streamUrl);
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (attempts < maxAttempts) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          try {
+            const event = JSON.parse(line.slice(6));
+            const eventType = event.event_type;
+            const eventData = event.data || {};
+            const nodeId = eventData.node_id;
+
+            if (eventType === 'node.started' && nodeId in nodeToStep) {
+              const stepIdx = nodeToStep[nodeId];
+              if (stepIdx > currentStep) {
+                setExecStepDone(currentStep, '完成');
+                currentStep = stepIdx;
+              }
+              const labels = { 0: '正在生成 ATK 脚本...', 1: '正在推导 CPU 参考实现...', 2: '正在执行 ATK 测试...' };
+              setExecStepActive(stepIdx, labels[stepIdx]);
+            }
+
+            if (eventType === 'node.completed' && nodeId in nodeToStep) {
+              const stepIdx = nodeToStep[nodeId];
+              const msg = eventData.message || '完成';
+              setExecStepDone(stepIdx, msg);
+            }
+
+            if (eventType === 'node.failed' && nodeId in nodeToStep) {
+              const stepIdx = nodeToStep[nodeId];
+              setExecStepError(stepIdx, eventData.error || '执行失败');
+            }
+
+            if (eventType === 'task.completed') {
+              for (let i = currentStep; i < EXEC_STEPS.length; i++) {
+                setExecStepDone(i, '完成');
+              }
+              const result = eventData.result || {};
+              const execResult = result.exec_result || {};
+              showExecResult(result, execResult);
+              statusEl.innerHTML = '<span class="badge badge-ok">SUCCESS</span> 执行完成。' +
+                (execResult.passed || 0) + '/' + (execResult.total || 0) + ' 用例通过';
+              btn.disabled = false;
+              return;
+            }
+
+            if (eventType === 'task.failed') {
+              setExecStepError(currentStep, eventData.error || '执行失败');
+              statusEl.innerHTML = '<span class="badge badge-err">ERROR</span> ' + escapeHtml(eventData.error || '执行失败');
+              btn.disabled = false;
+              return;
+            }
+          } catch (_) {}
+        }
+      }
+      attempts++;
+    }
+
+    statusEl.innerHTML = '<span class="badge badge-err">执行超时或连接断开</span>';
+    btn.disabled = false;
+  } catch (err) {
+    statusEl.innerHTML = '<span class="badge badge-err">连接失败: ' + escapeHtml(err.message) + '</span>';
+    btn.disabled = false;
+  }
+}
+
+function showExecResult(result, execResult) {
+  document.getElementById('execResult').style.display = '';
+  const metaEl = document.getElementById('execResultMeta');
+  const bodyEl = document.getElementById('execResultBody');
+
+  const statusBadge = result.status === 'completed'
+    ? '<span class="badge badge-ok">COMPLETED</span>'
+    : '<span class="badge badge-err">FAILED</span>';
+
+  metaEl.innerHTML = statusBadge +
+    '<span>算子: <strong>' + escapeHtml(result.operator_name || '') + '</strong></span>' +
+    '<span>通过: <strong>' + (execResult.passed || 0) + '</strong></span>' +
+    '<span>失败: <strong>' + (execResult.failed || 0) + '</strong></span>' +
+    '<span>总计: <strong>' + (execResult.total || 0) + '</strong></span>';
+
+  bodyEl.textContent = JSON.stringify(result, null, 2);
 }
 
 </script>

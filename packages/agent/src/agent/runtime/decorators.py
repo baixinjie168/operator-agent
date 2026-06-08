@@ -43,6 +43,9 @@ _AGENT_MAP: dict[str, str] = {
     "case_init_static": "case",
     "case_solve_constraints": "case",
     "case_generate": "case",
+    "exec_generate_atk": "execute",
+    "exec_cpu_derivation": "execute",
+    "exec_run_atk": "execute",
 }
 
 
@@ -198,6 +201,9 @@ def _node_label(node_id: str) -> str:
         "case_init_static": "初始静态数据",
         "case_solve_constraints": "约束求解",
         "case_generate": "生成用例数据",
+        "exec_generate_atk": "生成ATK脚本",
+        "exec_cpu_derivation": "CPU参考推导",
+        "exec_run_atk": "执行ATK测试",
     }
     return labels.get(node_id, node_id)
 
@@ -265,6 +271,15 @@ def _node_done_msg(node_id: str, result: dict) -> str:
     elif node_id == "case_generate":
         cc = result.get("cases_count", 0)
         return f"用例数据生成完成。{cc} 个用例"
+    elif node_id == "exec_generate_atk":
+        return "ATK执行脚本生成完成"
+    elif node_id == "exec_cpu_derivation":
+        return "CPU参考实现推导完成"
+    elif node_id == "exec_run_atk":
+        er = result.get("exec_result", {})
+        passed = er.get("passed", 0)
+        total = er.get("total", 0)
+        return f"ATK测试执行完成。{passed}/{total} 通过"
     return f"{_node_label(node_id)} 完成"
 
 
@@ -306,5 +321,8 @@ def _node_progress_pct(node_id: str) -> int:
         "case_init_static": 55,
         "case_solve_constraints": 80,
         "case_generate": 100,
+        "exec_generate_atk": 33,
+        "exec_cpu_derivation": 66,
+        "exec_run_atk": 100,
     }
     return pcts.get(node_id, 50)

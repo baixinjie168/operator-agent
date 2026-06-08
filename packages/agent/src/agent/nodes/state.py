@@ -42,3 +42,7 @@ class PipelineState(TypedDict, total=False):
     cases_path: str | None
     cases_count: int | None
     cases_seed: int | None
+    # ── ExecuterAgent output (set by executer_subgraph nodes) ──
+    atk_executor_path: str | None
+    atk_executor_code: str
+    exec_result: dict[str, Any]

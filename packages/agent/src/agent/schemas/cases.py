@@ -52,3 +52,23 @@ class GeneratorRunResponse(BaseModel):
     operator_name: str
     count: int
     error: str | None = None
+
+
+class ExecuteRunRequest(BaseModel):
+    """Request body for ``POST /api/v1/execute/run`` (async, 3-step pipeline)."""
+
+    operator_name: str = Field(..., min_length=1, description="Operator name (e.g. 'aclnnAdaLayerNorm').")
+    cases_json: str = Field(..., min_length=2, description="Test cases JSON array string.")
+
+
+class ExecuteRunResponse(BaseModel):
+    """Response body for ``POST /api/v1/execute/run``.
+
+    The pipeline runs asynchronously; subscribe to
+    ``GET /api/v1/runs/{task_id}/stream`` for real-time SSE progress.
+    """
+
+    success: bool
+    task_id: str
+    operator_name: str
+    error: str | None = None
