@@ -79,6 +79,9 @@ from mcp_server.tools.document_tools import (
     get_json_constraints as _get_json_constraints,
 )
 from mcp_server.tools.document_tools import (
+    update_json_constraints_by_name as _update_json_constraints_by_name,
+)
+from mcp_server.tools.document_tools import (
     get_function_explanation_summary as _get_fn_expl_summary,
 )
 from mcp_server.tools.document_tools import (
@@ -848,6 +851,21 @@ def get_json_constraints(operator_name: str) -> str:
         JSON string of the json_constraints field, or null if not found.
     """
     result = _get_json_constraints(operator_name)
+    return json.dumps(result, ensure_ascii=False)
+
+
+@mcp.tool()
+def update_json_constraints_by_name(operator_name: str, json_constraints: str) -> str:
+    """Update json_constraints for the latest document version of an operator.
+
+    Args:
+        operator_name: Operator name.
+        json_constraints: JSON string of the updated constraints.
+
+    Returns:
+        JSON string with saved flag and doc_id.
+    """
+    result = _update_json_constraints_by_name(operator_name, json_constraints)
     return json.dumps(result, ensure_ascii=False)
 
 

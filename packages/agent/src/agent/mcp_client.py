@@ -360,6 +360,13 @@ class MCPClient:
             "operator_name": operator_name,
         })
 
+    async def update_json_constraints_by_name(self, operator_name: str, json_constraints: str) -> dict:
+        """Update json_constraints for the latest document version of an operator."""
+        return await self._call_tool("update_json_constraints_by_name", {
+            "operator_name": operator_name,
+            "json_constraints": json_constraints,
+        })
+
     async def query_constraints_result(self, operator_name: str | None = None) -> list[dict]:
         """Query constraints results, optionally filtered by operator name."""
         args: dict[str, Any] = {}

@@ -163,3 +163,15 @@ class JsonConstraintsResponse(BaseModel):
     operator_name: str | None = None
     json_constraints: dict | None = None
     error: str | None = None
+
+
+class UpdateJsonConstraintsRequest(BaseModel):
+    operator_name: str = Field(..., min_length=1)
+    json_constraints: str = Field(..., min_length=2)
+
+
+class UpdateJsonConstraintsResponse(BaseModel):
+    success: bool
+    operator_name: str
+    doc_id: int | None = None
+    error: str | None = None

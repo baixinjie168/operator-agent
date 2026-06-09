@@ -18,6 +18,8 @@ from agent.schemas.query import (
     ParamRelationListResponse,
     PlatformSupportListResponse,
     ReturnCodeListResponse,
+    UpdateJsonConstraintsRequest,
+    UpdateJsonConstraintsResponse,
 )
 
 router = APIRouter(prefix="/api/v1", tags=["query"])
@@ -178,3 +180,29 @@ async def get_json_constraints(
         return JsonConstraintsResponse(success=True, operator_name=operator_name, json_constraints=result)
     except Exception as e:
         return JsonConstraintsResponse(success=False, error=str(e))
+
+
+@router.post("/json-constraints", response_model=UpdateJsonConstraintsResponse)
+async def update_json_constraints(
+    body: UpdateJsonConstraintsRequest,
+) -> UpdateJsonConstraintsResponse:
+    """Update json_constraints for the latest document version of an operator."""
+    try:
+        result = await _mcp_client.update_json_constraints_by_name(
+            body.operator_name, body.json_constraints,
+        )
+        if not result.get("saved"):
+            return UpdateJsonConstraintsResponse(
+                success=False,
+                operator_name=body.operator_name,
+                error=result.get("error", "Save failed"),
+            )
+        return UpdateJsonConstraintsResponse(
+            success=True,
+            operator_name=body.operator_name,
+            doc_id=result.get("doc_id"),
+        )
+    except Exception as e:
+        return UpdateJsonConstraintsResponse(
+            success=False, operator_name=body.operator_name, error=str(e),
+        )

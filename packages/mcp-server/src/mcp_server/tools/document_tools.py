@@ -1416,6 +1416,35 @@ def save_json_constraints(doc_id: int, json_constraints: str) -> dict:
     return {"saved": True}
 
 
+def update_json_constraints_by_name(operator_name: str, json_constraints: str) -> dict:
+    """Update json_constraints for the latest document version of an operator.
+
+    Args:
+        operator_name: Operator name.
+        json_constraints: JSON string of the updated constraints.
+
+    Returns:
+        dict with saved flag and doc_id.
+    """
+    db = get_db()
+    conn = db.conn
+    row = conn.execute(
+        "SELECT dv.id FROM document_versions dv "
+        "JOIN operators o ON dv.operator_id = o.id "
+        "WHERE o.name = ? ORDER BY dv.version DESC LIMIT 1",
+        (operator_name,),
+    ).fetchone()
+    if not row:
+        return {"saved": False, "error": f"Operator '{operator_name}' not found"}
+    doc_id = row[0]
+    conn.execute(
+        "UPDATE document_versions SET json_constraints = ? WHERE id = ?",
+        (json_constraints, doc_id),
+    )
+    conn.commit()
+    return {"saved": True, "doc_id": doc_id}
+
+
 def get_json_constraints(operator_name: str) -> dict | None:
     """Retrieve json_constraints from the latest document version for an operator.
 
