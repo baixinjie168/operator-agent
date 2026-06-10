@@ -120,6 +120,51 @@ async def _run_pipeline(run_id: str, state_input: dict, manager: RuntimeManager)
 
         _persist_to_db(run_id, run, result, manager)
 
+        # Save test cases to test_cases table if generated
+        cases_list = result.get("cases", [])
+        if cases_list and not result.get("error"):
+            try:
+                from agent.db import save_test_cases as db_save_test_cases
+                db_save_test_cases(
+                    task_id=run_id,
+                    operator_name=state_input.get("operator_name", ""),
+                    cases=cases_list,
+                    constraint_doc_id=doc_id,
+                )
+                logger.info("Saved %d test cases for full pipeline run %s", len(cases_list), run_id)
+            except Exception as e:
+                logger.warning("Failed to save test cases in full pipeline: %s", e)
+
+        # Save exec results to exec_results table if executed
+        exec_result = result.get("exec_result", {})
+        if exec_result and not result.get("error") and cases_list:
+            try:
+                from agent.db import (
+                    query_test_cases as db_query_test_cases,
+                )
+                from agent.db import (
+                    save_exec_results as db_save_exec_results,
+                )
+                saved_cases = db_query_test_cases(task_id=run_id)
+                if saved_cases:
+                    case_ids = [c["id"] for c in saved_cases]
+                    passed = exec_result.get("passed", 0)
+                    exec_records = []
+                    for i, cid in enumerate(case_ids):
+                        exec_records.append({
+                            "case_id": cid,
+                            "passed": 1 if i < passed else 0,
+                            "cpu_precision_passed": 1,
+                        })
+                    db_save_exec_results(
+                        task_id=run_id,
+                        operator_name=state_input.get("operator_name", ""),
+                        results=exec_records,
+                    )
+                    logger.info("Saved %d exec results for full pipeline run %s", len(exec_records), run_id)
+            except Exception as e:
+                logger.warning("Failed to save exec results in full pipeline: %s", e)
+
         sc = len(result.get("sections", []))
         pc = len(result.get("parameters", []))
         prod = len(result.get("product_support", []))
