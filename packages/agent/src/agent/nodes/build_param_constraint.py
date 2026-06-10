@@ -154,7 +154,7 @@ async def build_param_constraint_node(state: PipelineState) -> dict[str, Any]:
                     ar_value = ar_map.get((fn_name, pname), [])
 
                 constraint[plat] = {
-                    "description": param.get("param_desc", "") or "",
+                    "description": param.get("param_desc", "") or param.get("llm_description", "") or "",
                     "type": {"value": ptype, "src_text": ""},
                     "format": {"value": fmt, "src_text": ""},
                     "is_optional": {"value": bool(param.get("is_optional")), "src_text": ""},

@@ -10,6 +10,7 @@ Flow:
 import asyncio
 import logging
 import re
+import time
 from typing import Any
 
 from langchain_openai import ChatOpenAI
@@ -43,7 +44,52 @@ async def extract_relations_agent(
         (all_relations, coverage_report)
 
     Any round failure gracefully degrades to already-extracted results.
+    A wall-time guard (MAX_WALL_TIME_PER_DOC) ensures the function returns
+    within the budget; on timeout, round-1 results are returned.
     """
+    t0 = time.monotonic()
+
+    try:
+        all_relations, report = await asyncio.wait_for(
+            _run_agent_rounds(section_content, param_names, llm, t0),
+            timeout=MAX_WALL_TIME_PER_DOC,
+        )
+    except asyncio.TimeoutError:
+        elapsed = time.monotonic() - t0
+        logger.warning(
+            "Agent loop timed out after %.1fs (limit %ds) — returning round-1 results",
+            elapsed, MAX_WALL_TIME_PER_DOC,
+        )
+        # Fallback: re-run only round 1 to get at least partial results
+        try:
+            chunked = await extract_relations_chunked(section_content, llm)
+            all_relations = _dedup_relations(chunked)
+        except Exception:
+            logger.exception("Round-1 fallback also failed")
+            all_relations = []
+        final_unc = find_uncovered_params(param_names, all_relations)
+        report = {
+            "round1": len(all_relations),
+            "round3": 0,
+            "round4": 0,
+            "self_check_rounds": 0,
+            "total_rounds": 1,
+            "total": len(all_relations),
+            "uncovered_params": final_unc,
+            "coverage": f"{len(param_names) - len(final_unc)}/{len(param_names)}",
+            "timed_out": True,
+        }
+
+    return _cleanup(all_relations), report
+
+
+async def _run_agent_rounds(
+    section_content: str,
+    param_names: list[str],
+    llm: ChatOpenAI,
+    t0: float,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Core agent rounds (extracted so asyncio.wait_for can wrap it)."""
     all_relations: list[dict[str, Any]] = []
     report: dict[str, Any] = {
         "round1": 0,
@@ -59,14 +105,15 @@ async def extract_relations_agent(
         chunked = await extract_relations_chunked(section_content, llm)
         all_relations = _dedup_relations(chunked)
         report["round1"] = len(all_relations)
-        logger.info("Agent round 1 (chunked): %d relations", len(all_relations))
+        logger.info("Agent round 1 (chunked): %d relations (%.1fs)",
+                     len(all_relations), time.monotonic() - t0)
 
         if not section_content.strip() or not param_names:
             report["total_rounds"] = 1
             report["total"] = len(all_relations)
             report["uncovered_params"] = param_names
             report["coverage"] = f"0/{len(param_names)}"
-            return _cleanup(all_relations), report
+            return all_relations, report
 
         # ---- Round 2: Dual coverage check ----
         uncovered_params = find_uncovered_params(param_names, all_relations)
@@ -75,10 +122,9 @@ async def extract_relations_agent(
         )
 
         logger.info(
-            "Agent round 2 (coverage): %d/%d params uncovered, %d paragraphs uncovered",
-            len(uncovered_params),
-            len(param_names),
-            len(uncovered_paragraphs),
+            "Agent round 2 (coverage): %d/%d params uncovered, %d paragraphs (%.1fs)",
+            len(uncovered_params), len(param_names),
+            len(uncovered_paragraphs), time.monotonic() - t0,
         )
 
         has_targeted = bool(uncovered_params or uncovered_paragraphs)
@@ -125,7 +171,8 @@ async def extract_relations_agent(
                 all_relations.extend(rels)
             all_relations = _dedup_relations(all_relations)
             report["round3"] = len(all_relations) - report["round1"]
-            logger.info("Agent round 3 (targeted): +%d relations", report["round3"])
+            logger.info("Agent round 3 (targeted): +%d relations (%.1fs)",
+                        report["round3"], time.monotonic() - t0)
 
         # ---- Round 4: Self-reflection (max 2 rounds) ----
         for self_round in range(MAX_SELF_CHECK_ROUNDS):
@@ -146,9 +193,8 @@ async def extract_relations_agent(
             report["round4"] += new_count
             report["self_check_rounds"] += 1
             logger.info(
-                "Agent round 4.%d (self-check): +%d relations",
-                self_round + 1,
-                new_count,
+                "Agent round 4.%d (self-check): +%d relations (%.1fs)",
+                self_round + 1, new_count, time.monotonic() - t0,
             )
 
             if new_count == 0:
@@ -174,13 +220,12 @@ async def extract_relations_agent(
     )
 
     logger.info(
-        "Agent complete: %d relations, coverage=%s, %d rounds",
-        report["total"],
-        report["coverage"],
-        report["total_rounds"],
+        "Agent complete: %d relations, coverage=%s, %d rounds (%.1fs)",
+        report["total"], report["coverage"], report["total_rounds"],
+        time.monotonic() - t0,
     )
 
-    return _cleanup(all_relations), report
+    return all_relations, report
 
 
 def _cleanup(relations: list[dict[str, Any]]) -> list[dict[str, Any]]:

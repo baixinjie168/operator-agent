@@ -117,6 +117,38 @@ class TestSplitIntoChunks:
         # All small paragraphs should be merged into one
         assert len(chunks) == 1
 
+    def test_long_html_table_split_with_header_preserved(self):
+        """HTML table with >15 <tr> should split by 10-row groups, each keeping header."""
+        header = "<table>\n<tr><th>参数名</th><th>说明</th></tr>"
+        rows = [f"<tr><td>p{i}</td><td>desc{i}{'x' * 80}</td></tr>" for i in range(20)]
+        footer = "</table>"
+        text = header + "\n" + "\n".join(rows) + "\n" + footer
+        chunks = split_into_chunks(text)
+        # 20 rows → 2 groups (0-9, 10-19), each with header
+        assert len(chunks) == 2
+        # Both groups should contain the header
+        for chunk in chunks:
+            assert "<th>参数名</th>" in chunk
+        # First group should contain p0..p9, second p10..p19
+        assert "p0" in chunks[0]
+        assert "p9" in chunks[0]
+        assert "p10" in chunks[1]
+        assert "p19" in chunks[1]
+
+    def test_long_markdown_table_split_with_header_preserved(self):
+        """MD table with >15 data rows should split by 10-row groups, each keeping header."""
+        header = "| 参数名 | 说明 |\n| --- | --- |"
+        data_rows = [f"| p{i} | desc{i}{'x' * 80} |" for i in range(20)]
+        text = header + "\n" + "\n".join(data_rows)
+        chunks = split_into_chunks(text)
+        # 20 data rows → 2 groups, each with header (2 lines)
+        assert len(chunks) == 2
+        for chunk in chunks:
+            assert "参数名" in chunk
+            assert "| --- |" in chunk
+        assert "p0" in chunks[0]
+        assert "p10" in chunks[1]
+
 
 class TestMergeSmallBlocks:
     def test_merges_small_blocks(self):

@@ -499,12 +499,12 @@ def update_param_src_content(doc_id: int, updates: list[dict]) -> dict:
 
 
 def update_param_attrs(doc_id: int, updates: list[dict]) -> dict:
-    """Batch update is_support_discontinuous and param_desc fields of parameters.
+    """Batch update is_support_discontinuous field of parameters.
 
     Args:
         doc_id: Primary key of document_versions table.
         updates: List of dicts with keys: function_name, param_name,
-                 is_support_discontinuous, param_desc.
+                 is_support_discontinuous.
 
     Returns:
         dict with count of updated parameters.
@@ -514,10 +514,38 @@ def update_param_attrs(doc_id: int, updates: list[dict]) -> dict:
     count = 0
     for u in updates:
         cursor = conn.execute(
-            "UPDATE parameters SET is_support_discontinuous = ?, param_desc = ? "
+            "UPDATE parameters SET is_support_discontinuous = ? "
             "WHERE doc_id = ? AND function_name = ? AND param_name = ?",
             (
                 u.get("is_support_discontinuous", '{"value":"N/A","src_text":""}'),
+                doc_id,
+                u.get("function_name", ""),
+                u.get("param_name", ""),
+            ),
+        )
+        count += cursor.rowcount
+    conn.commit()
+    return {"updated": count}
+
+
+def update_param_desc(doc_id: int, updates: list[dict]) -> dict:
+    """Batch update param_desc field of parameters.
+
+    Args:
+        doc_id: Primary key of document_versions table.
+        updates: List of dicts with keys: function_name, param_name, param_desc.
+
+    Returns:
+        dict with count of updated parameters.
+    """
+    db = get_db()
+    conn = db.conn
+    count = 0
+    for u in updates:
+        cursor = conn.execute(
+            "UPDATE parameters SET param_desc = ? "
+            "WHERE doc_id = ? AND function_name = ? AND param_name = ?",
+            (
                 u.get("param_desc", ""),
                 doc_id,
                 u.get("function_name", ""),
@@ -526,6 +554,36 @@ def update_param_attrs(doc_id: int, updates: list[dict]) -> dict:
         )
         count += cursor.rowcount
     conn.commit()
+    return {"updated": count}
+
+
+def update_param_direction(doc_id: int, updates: list[dict]) -> dict:
+    """Batch update direction field of parameters.
+
+    Args:
+        doc_id: Primary key of document_versions table.
+        updates: List of dicts with keys: function_name, param_name, direction.
+
+    Returns:
+        dict with count of updated parameters.
+    """
+    db = get_db()
+    conn = db.conn
+    count = 0
+    for u in updates:
+        cursor = conn.execute(
+            "UPDATE parameters SET direction = ? "
+            "WHERE doc_id = ? AND function_name = ? AND param_name = ?",
+            (
+                u.get("direction", ""),
+                doc_id,
+                u.get("function_name", ""),
+                u.get("param_name", ""),
+            ),
+        )
+        count += cursor.rowcount
+    conn.commit()
+    return {"updated": count}
 
 
 def update_llm_descriptions(doc_id: int, updates: list[dict]) -> dict:

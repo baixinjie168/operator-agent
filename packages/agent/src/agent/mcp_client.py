@@ -162,8 +162,22 @@ class MCPClient:
         })
 
     async def update_param_attrs(self, doc_id: int, updates: list[dict]) -> dict:
-        """Batch update is_support_discontinuous and param_desc fields of parameters."""
+        """Batch update is_support_discontinuous field of parameters."""
         return await self._call_tool("update_param_attrs", {
+            "doc_id": doc_id,
+            "updates": json.dumps(updates, ensure_ascii=False),
+        })
+
+    async def update_param_desc(self, doc_id: int, updates: list[dict]) -> dict:
+        """Batch update param_desc field of parameters."""
+        return await self._call_tool("update_param_desc", {
+            "doc_id": doc_id,
+            "updates": json.dumps(updates, ensure_ascii=False),
+        })
+
+    async def update_param_direction(self, doc_id: int, updates: list[dict]) -> dict:
+        """Batch update direction field of parameters."""
+        return await self._call_tool("update_param_direction", {
             "doc_id": doc_id,
             "updates": json.dumps(updates, ensure_ascii=False),
         })

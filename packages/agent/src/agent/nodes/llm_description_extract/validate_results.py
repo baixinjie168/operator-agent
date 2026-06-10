@@ -116,7 +116,7 @@ def _build_coverage_report(
     return {
         "total_params": total,
         "extracted": extracted,
-        "missing": total - extracted,
+        "not_extracted": total - extracted,
         "short_descriptions": short_descs,
         "with_missing_attrs": with_missing,
         "coverage_rate": f"{extracted / total * 100:.1f}%" if total else "N/A",
@@ -155,9 +155,10 @@ async def validate_results_node(state: DescriptionExtractState) -> dict[str, Any
     coverage = _build_coverage_report(all_results, all_params)
 
     logger.info(
-        "ValidateResults: coverage=%s, missing=%d, short=%d",
+        "ValidateResults: coverage=%s, not_extracted=%d, with_missing_attrs=%d, short=%d",
         coverage["coverage_rate"],
-        coverage["missing"],
+        coverage["not_extracted"],
+        coverage["with_missing_attrs"],
         coverage["short_descriptions"],
     )
 

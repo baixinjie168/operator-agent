@@ -99,6 +99,7 @@ details[open] summary{margin-bottom:.4rem}
 
 <h1>param_relations 完整性保障方案 <span style="font-size:.6em;color:#6b7280">v2</span></h1>
 <p class="changelog">v1→v2：<span class="diff-add">+param_names 数据流</span> <span class="diff-add">+HTML 表格分块</span> <span class="diff-add">+段落覆盖率</span> <span class="diff-add">+统一 prompt schema</span> <span class="diff-add">+完整错误处理</span> <span class="diff-add">+测试计划</span></p>
+<p class="changelog">v2 勘误：<code>precondition</code> 字段已随 DB 迁移 v34 重命名为 <code>platform</code>，prompt schema 同步更新。</p>
 
 <div class="metrics-grid">
   <div class="metric-box"><div class="val">~65%</div><div class="label">当前召回率</div></div>
@@ -343,7 +344,7 @@ def find_uncovered_context_mentions(
 <li><strong>3a 参数提取</strong>：<code>extract_relations_for_param</code> — 用 <code>extract_param_context</code> 切取参数上下文，使用 <code>FOCUSED_RELATION_PROMPT</code></li>
 <li><strong>3b 段落提取</strong>：<code>extract_relations_for_paragraph</code> — 对提及多参数的未覆盖段落，使用 <code>PARAGRAPH_RELATION_PROMPT</code></li>
 </ul>
-<p>所有 prompt 输出统一包含：<code>relation_type, precondition, description, params, param_optional, source_citation</code></p>
+<p>所有 prompt 输出统一包含：<code>relation_type, platform, description, params, param_optional, source_citation</code></p>
 <details><summary>展开 Prompt 模板</summary>
 <pre><code>FOCUSED_RELATION_PROMPT = """\
 你是参数关系提取专家。以下文档内容与参数 "{param_name}" 相关。
@@ -359,7 +360,7 @@ def find_uncovered_context_mentions(
 4. 无关系则返回空数组 []
 
 ## 输出格式
-[{{"relation_type":"shape","precondition":"无","description":"...",
+[{{"relation_type":"shape","platform":"","description":"...",
    "params":["{param_name}","other"],"param_optional":{{...}},
    "source_citation":"..."}}]
 

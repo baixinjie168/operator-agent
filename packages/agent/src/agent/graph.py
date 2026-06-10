@@ -3,6 +3,7 @@
 Provides a deterministic pipeline graph for structured processing:
 InitDoc → [ProductSupport ∥ ParseParams ∥ FunctionSignatureExtract
           ∥ FunctionExplanationExtract]
+       → TableColumnExtract
        → LlmDescriptionExtract
        → [ShapeExtract ∥ DtypeExtract ∥ DFormatExtract ∥ OptionalExtract
           ∥ ArrayLengthExtract ∥ AllowedRangeExtract
@@ -38,6 +39,7 @@ from agent.nodes.product_support import product_support_node
 from agent.nodes.return_code_extract import return_code_extract_node
 from agent.nodes.shape_extract import shape_extract_node
 from agent.nodes.state import PipelineState
+from agent.nodes.table_column_extract import table_column_extract_node
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +59,7 @@ def create_pipeline_graph() -> CompiledStateGraph:
     InitDoc → [error → END |
                ProductSupport ∥ ParseParams ∥ FunctionSignatureExtract
                ∥ FunctionExplanationExtract →
+               TableColumnExtract →
                LlmDescriptionExtract →
                 [ShapeExtract ∥ DtypeExtract ∥ DFormatExtract
                                     ∥ OptionalExtract
@@ -72,6 +75,7 @@ def create_pipeline_graph() -> CompiledStateGraph:
     graph.add_node("init_doc", init_doc_node)
     graph.add_node("product_support", product_support_node)
     graph.add_node("parse_params", parse_params_node)
+    graph.add_node("table_column_extract", table_column_extract_node)
     description_subgraph = create_description_extract_subgraph()
     graph.add_node("llm_description_extract", description_subgraph)
     graph.add_node("function_signature_extract", function_signature_extract_node)
@@ -94,10 +98,11 @@ def create_pipeline_graph() -> CompiledStateGraph:
 
     graph.add_edge(START, "init_doc")
     graph.add_conditional_edges("init_doc", _should_continue)
-    graph.add_edge("product_support", "llm_description_extract")
-    graph.add_edge("parse_params", "llm_description_extract")
-    graph.add_edge("function_signature_extract", "llm_description_extract")
-    graph.add_edge("function_explanation_extract", "llm_description_extract")
+    graph.add_edge("product_support", "table_column_extract")
+    graph.add_edge("parse_params", "table_column_extract")
+    graph.add_edge("function_signature_extract", "table_column_extract")
+    graph.add_edge("function_explanation_extract", "table_column_extract")
+    graph.add_edge("table_column_extract", "llm_description_extract")
     graph.add_edge("llm_description_extract", "shape_extract")
     graph.add_edge("llm_description_extract", "dtype_extract")
     graph.add_edge("llm_description_extract", "dformat_extract")

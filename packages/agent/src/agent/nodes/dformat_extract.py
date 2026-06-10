@@ -50,9 +50,9 @@ async def dformat_extract_node(state: PipelineState) -> dict[str, Any]:
             logger.info("DFormatExtract: no parameters in state for doc_id=%s, skipping", doc_id)
             return {"error": None}
 
-        described = [p for p in params if p.get("llm_description")]
+        described = [p for p in params if p.get("llm_description") and not p.get("dformat_desc")]
         if not described:
-            logger.info("DFormatExtract: no parameters with descriptions for doc_id=%s, skipping", doc_id)
+            logger.info("DFormatExtract: no parameters needing dformat extraction for doc_id=%s, skipping", doc_id)
             return {"error": None}
 
         llm = _create_llm()

@@ -136,10 +136,22 @@ async def _extract_one(
         return None
 
     direction = _parse_direction(parsed.get("direction", ""))
-    disc_json = _build_discontinuous_json(
-        parsed.get("is_support_discontinuous"), param_type
-    )
     src_content = parsed.get("src_content", "").strip()
+
+    # If direction was already set by table_column_extract, preserve it.
+    existing_direction = param.get("direction")
+    if existing_direction:
+        direction = existing_direction
+
+    # If is_support_discontinuous was already set by table_column_extract,
+    # preserve it; otherwise build from LLM output.
+    existing_disc = param.get("is_support_discontinuous")
+    if existing_disc:
+        disc_json = existing_disc
+    else:
+        disc_json = _build_discontinuous_json(
+            parsed.get("is_support_discontinuous"), param_type
+        )
 
     return {
         "function_name": function_name,

@@ -1,5 +1,7 @@
 """Tests for agent_loop.py: extract_relations_agent + _cleanup."""
 
+import asyncio
+
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 
@@ -74,3 +76,29 @@ class TestExtractRelationsAgent:
         assert isinstance(relations, list)
         assert isinstance(report, dict)
         assert "total" in report
+
+    @pytest.mark.asyncio
+    async def test_timeout_returns_round1_results(self):
+        """Agent loop should return round-1 results when wall-time limit is exceeded."""
+        llm = MagicMock()
+
+        async def slow_ainvoke(prompt):
+            await asyncio.sleep(2)
+            resp = MagicMock()
+            resp.content = "[]"
+            return resp
+
+        llm.ainvoke = AsyncMock(side_effect=slow_ainvoke)
+
+        # Patch timeout to 0.5s so the first chunked call itself times out
+        with patch(
+            "agent.nodes.param_relation_extract.agent_loop.MAX_WALL_TIME_PER_DOC",
+            0.5,
+        ):
+            relations, report = await extract_relations_agent(
+                "some content mentioning x and y", ["x", "y"], llm,
+            )
+
+        assert isinstance(relations, list)
+        assert report.get("timed_out") is True
+        assert report["total_rounds"] == 1

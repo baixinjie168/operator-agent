@@ -222,6 +222,19 @@
   .task-cat-select-all { display: flex; align-items: center; gap: 6px; font-size: .85rem; color: #4f46e5; cursor: pointer; user-select: none; }
   .task-cat-select-all input[type="checkbox"] { accent-color: #4f46e5; width: 15px; height: 15px; cursor: pointer; }
   .task-cat-select-all:hover { color: #4338ca; }
+
+  /* Top-level task tabs (任务列表 / 执行概览) */
+  .task-top-tab { padding: 8px 20px; font-size: .92rem; cursor: pointer; background: none; border: none; border-bottom: 2px solid transparent; color: #6b7280; font-weight: 500; transition: .15s; margin-bottom: -2px; }
+  .task-top-tab:hover { color: #4f46e5; }
+  .task-top-tab.active { color: #4f46e5; border-bottom-color: #4f46e5; font-weight: 600; }
+
+  /* Summary cards */
+  .summary-card { flex: 1; min-width: 130px; padding: 14px 18px; border: 1px solid #e5e7eb; border-radius: 8px; background: #f9fafb; text-align: center; }
+  .summary-card .sc-val { font-size: 1.5rem; font-weight: 700; color: #111827; }
+  .summary-card .sc-label { font-size: .78rem; color: #6b7280; margin-top: 2px; }
+  .summary-card.sc-ok .sc-val { color: #059669; }
+  .summary-card.sc-err .sc-val { color: #dc2626; }
+  .summary-card.sc-rate .sc-val { color: #4f46e5; }
   .task-cat-name { font-weight: 600; font-size: .9rem; color: #374151; }
 </style>
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
@@ -508,6 +521,15 @@
   <div class="panel" id="panelTasks">
     <div class="card" style="flex:1;display:flex;flex-direction:column;min-height:0;overflow:hidden">
 
+      <!-- Top-level tab bar: 任务列表 | 执行概览 -->
+      <div id="taskTopTabs" style="display:flex;gap:0;border-bottom:2px solid #e5e7eb;margin-bottom:14px">
+        <button class="task-top-tab active" data-tab="list" onclick="switchTaskTopTab('list')">任务列表</button>
+        <button class="task-top-tab" data-tab="summary" onclick="switchTaskTopTab('summary')">执行概览</button>
+      </div>
+
+      <!-- Top-tab: 任务列表 (wraps existing sub-views) -->
+      <div id="taskTopTabList" style="flex:1;display:flex;flex-direction:column;min-height:0">
+
       <!-- Sub-view: Task List -->
       <div class="task-sub-view active" id="taskListView">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
@@ -562,7 +584,20 @@
         <span class="back-link" onclick="showTaskList()">&larr; 返回列表</span>
         <div id="taskDetailHeader" style="margin-bottom:12px"></div>
         <div class="task-progress-bar"><div class="task-progress-fill" id="taskProgressFill"></div></div>
+        <div style="display:flex;gap:8px;margin-bottom:10px" id="taskDetailActions"></div>
         <div id="taskDetailContent" style="flex:1;min-height:0;overflow-y:auto"></div>
+      </div>
+
+      </div><!-- /taskTopTabList -->
+
+      <!-- Top-tab: 执行概览 -->
+      <div id="taskTopTabSummary" style="flex:1;display:none;flex-direction:column;min-height:0">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+          <h2 style="margin:0">执行概览</h2>
+          <button class="secondary" onclick="loadTasksSummary()">刷新</button>
+        </div>
+        <div id="taskSummaryTotals" style="display:flex;gap:14px;margin-bottom:16px;flex-wrap:wrap"></div>
+        <div id="taskSummaryContent" style="flex:1;min-height:0;overflow-y:auto"></div>
       </div>
 
     </div>
@@ -585,6 +620,11 @@
 <script>
 /* ---------- Tab switching ---------- */
 function switchTab(name, el) {
+  // Stop task polling when leaving the tasks panel
+  if (name !== 'tasks') {
+    _stopTaskListPoll();
+    _stopTaskDetailPoll();
+  }
   document.querySelectorAll('.nav-item').forEach(t => t.classList.remove('active'));
   document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
   el.classList.add('active');
@@ -1763,11 +1803,13 @@ function showTaskList() {
 }
 
 function showTaskCreate() {
+  _stopTaskListPoll();
   showTaskSubView('taskCreateView');
   loadTaskDocs();
 }
 
 function showTaskDetail(taskId) {
+  _stopTaskListPoll();
   showTaskSubView('taskDetailView');
   _taskDetailId = taskId;
   loadTaskDetail(taskId);
@@ -2023,8 +2065,16 @@ async function loadTaskList() {
 function _startTaskListPoll() {
   _stopTaskListPoll();
   _taskListPollTimer = setInterval(async () => {
-    // Only poll if the task list view is active
-    if (!document.getElementById('taskListView').classList.contains('active')) return;
+    // Stop polling if the tasks panel itself is not visible (user switched tab)
+    if (!document.getElementById('panelTasks').classList.contains('active')) {
+      _stopTaskListPoll();
+      return;
+    }
+    // Stop polling if the task list sub-view is not active (user navigated to detail/create)
+    if (!document.getElementById('taskListView').classList.contains('active')) {
+      _stopTaskListPoll();
+      return;
+    }
     try {
       const res = await fetch('/api/v1/tasks');
       const data = await res.json();
@@ -2073,6 +2123,14 @@ async function loadTaskDetail(taskId) {
         <span class="badge ${badgeCls}">${t.status}</span>
         <span style="font-size:.85rem;color:#6b7280">${progress}</span>
       </div>`;
+
+    // Download button (only when there are completed items)
+    const actionsEl = document.getElementById('taskDetailActions');
+    if (t.completed_count > 0) {
+      actionsEl.innerHTML = `<button class="secondary" onclick="downloadTaskResults(${t.id}, '${escapeHtml(t.name)}')">⬇ 下载结果 (${t.completed_count})</button>`;
+    } else {
+      actionsEl.innerHTML = '';
+    }
 
     const pct = t.total_count > 0 ? Math.round((t.completed_count + t.failed_count) / t.total_count * 100) : 0;
     progressFill.style.width = pct + '%';
@@ -2134,6 +2192,75 @@ function _formatDuration(startStr, endStr) {
     const remSec = sec % 60;
     return min + 'm ' + remSec + 's';
   } catch (_) { return ''; }
+}
+
+/* -- Download results -- */
+function downloadTaskResults(taskId, taskName) {
+  const a = document.createElement('a');
+  a.href = '/api/v1/tasks/' + taskId + '/download';
+  a.download = (taskName || 'task-' + taskId) + '-results.zip';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+/* -- Top-level tabs (任务列表 / 执行概览) -- */
+function switchTaskTopTab(tab) {
+  document.querySelectorAll('.task-top-tab').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+  const listWrap = document.getElementById('taskTopTabList');
+  const summaryWrap = document.getElementById('taskTopTabSummary');
+  if (tab === 'list') {
+    listWrap.style.display = 'flex';
+    summaryWrap.style.display = 'none';
+  } else {
+    listWrap.style.display = 'none';
+    summaryWrap.style.display = 'flex';
+    loadTasksSummary();
+  }
+}
+
+/* -- Summary view -- */
+async function loadTasksSummary() {
+  const totalsEl = document.getElementById('taskSummaryTotals');
+  const contentEl = document.getElementById('taskSummaryContent');
+  totalsEl.innerHTML = '<span style="color:#9ca3af;font-size:.85rem">加载中…</span>';
+  contentEl.innerHTML = '';
+  try {
+    const res = await fetch('/api/v1/tasks-summary');
+    const data = await res.json();
+    const tot = data.totals || {};
+    totalsEl.innerHTML = `
+      <div class="summary-card"><div class="sc-val">${tot.task_count ?? 0}</div><div class="sc-label">任务总数</div></div>
+      <div class="summary-card"><div class="sc-val">${tot.total_count ?? 0}</div><div class="sc-label">算子总数</div></div>
+      <div class="summary-card sc-ok"><div class="sc-val">${tot.completed_count ?? 0}</div><div class="sc-label">成功</div></div>
+      <div class="summary-card sc-err"><div class="sc-val">${tot.failed_count ?? 0}</div><div class="sc-label">失败</div></div>
+      <div class="summary-card sc-rate"><div class="sc-val">${tot.success_rate ?? 0}%</div><div class="sc-label">成功率</div></div>`;
+
+    const tasks = data.tasks || [];
+    if (tasks.length === 0) {
+      contentEl.innerHTML = '<div class="empty-state">暂无任务数据</div>';
+      return;
+    }
+    let html = '<table class="task-items-table"><thead><tr><th>任务名称</th><th>状态</th><th>总数</th><th>成功</th><th>失败</th><th>成功率</th><th>创建时间</th><th></th></tr></thead><tbody>';
+    tasks.forEach(t => {
+      const statusCls = 'badge-' + t.status;
+      const rateColor = t.success_rate >= 90 ? '#059669' : t.success_rate >= 60 ? '#d97706' : '#dc2626';
+      html += `<tr>
+        <td><strong>${escapeHtml(t.name)}</strong></td>
+        <td><span class="badge ${statusCls}">${t.status}</span></td>
+        <td>${t.total_count}</td>
+        <td style="color:#059669;font-weight:600">${t.completed_count}</td>
+        <td style="color:${t.failed_count > 0 ? '#dc2626' : '#9ca3af'};font-weight:${t.failed_count > 0 ? 600 : 400}">${t.failed_count}</td>
+        <td style="color:${rateColor};font-weight:600">${t.success_rate}%</td>
+        <td style="font-size:.8rem;color:#888">${escapeHtml(t.created_at || '')}</td>
+        <td><span style="cursor:pointer;color:#4f46e5;font-size:.82rem" onclick="switchTaskTopTab('list');showTaskDetail(${t.id})">详情</span></td>
+      </tr>`;
+    });
+    html += '</tbody></table>';
+    contentEl.innerHTML = html;
+  } catch (err) {
+    totalsEl.innerHTML = '<span class="badge badge-err">加载失败: ' + err.message + '</span>';
+  }
 }
 
 </script>

@@ -107,6 +107,40 @@ The tensor x must be contiguous.
         # (unless alpha appears in it, which it doesn't)
         assert "must be contiguous" not in ctx
 
+    def test_html_tr_row_boundary_expansion(self):
+        """Phase 1.5: if matched line is inside <tr>, expand to full <tr>...</tr>."""
+        # Pad alpha's <tr> with enough lines so ±2 window does NOT reach beta's <tr>
+        alpha_row = (
+            "<tr>\n"
+            "  <td>alpha</td>\n"
+            "  <td>first row mentioning alpha and some other info</td>\n"
+            "  <td>extra col 1</td>\n"
+            "  <td>extra col 2</td>\n"
+            "  <td>extra col 3</td>\n"
+            "</tr>"
+        )
+        section = (
+            "<table>\n"
+            + alpha_row + "\n"
+            "<tr>\n"
+            "  <td>beta</td>\n"
+            "  <td>second row about beta only</td>\n"
+            "</tr>\n"
+            "</table>\n"
+            "\n"
+            "Some trailing paragraph about gamma."
+        )
+        ctx = extract_param_context(section, "alpha")
+        # The entire <tr> containing alpha should be included
+        assert "alpha" in ctx
+        assert "<tr>" in ctx
+        assert "</tr>" in ctx
+        # beta's <tr> is far enough that ±2 window won't reach it;
+        # Phase 1.5 should NOT pull beta in since it's in a separate <tr>
+        assert "beta" not in ctx
+        # Trailing paragraph should not appear
+        assert "gamma" not in ctx
+
 
 # ---------------------------------------------------------------------------
 # parse_param_table

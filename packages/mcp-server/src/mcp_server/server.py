@@ -103,6 +103,12 @@ from mcp_server.tools.document_tools import (
     update_param_attrs as _update_param_attrs,
 )
 from mcp_server.tools.document_tools import (
+    update_param_desc as _update_param_desc,
+)
+from mcp_server.tools.document_tools import (
+    update_param_direction as _update_param_direction,
+)
+from mcp_server.tools.document_tools import (
     update_llm_descriptions as _update_llm_descriptions,
 )
 from mcp_server.tools.document_tools import (
@@ -243,11 +249,11 @@ def save_parsed(operator_name: str, version: int, parsed_data: str) -> str:
         parsed_data: JSON string of ParsedOperatorDocument.
 
     Returns:
-        "ok" on success.
+        JSON string {"status": "ok"} on success.
     """
     data = json.loads(parsed_data)
     save_parsed_document(operator_name, version, data)
-    return "ok"
+    return json.dumps({"status": "ok"})
 
 
 @mcp.resource("operator://list")
@@ -294,11 +300,11 @@ def save_product_support(doc_id: int, product_support_data: str) -> str:
         product_support_data: JSON string — array of {product, support} dicts.
 
     Returns:
-        "ok" on success.
+        JSON string {"status": "ok"} on success.
     """
     data = json.loads(product_support_data)
     do_save_product_support(doc_id, data)
-    return "ok"
+    return json.dumps({"status": "ok"})
 
 
 @mcp.resource("operator://{name}")
@@ -436,18 +442,52 @@ def update_param_src_content(doc_id: int, updates: str) -> str:
 
 @mcp.tool()
 def update_param_attrs(doc_id: int, updates: str) -> str:
-    """Batch update is_support_discontinuous and param_desc fields of parameters.
+    """Batch update is_support_discontinuous field of parameters.
 
     Args:
         doc_id: Primary key of document_versions table.
         updates: JSON string — array of dicts with function_name, param_name,
-                 is_support_discontinuous, param_desc.
+                 is_support_discontinuous.
 
     Returns:
         JSON string with count of updated parameters.
     """
     data = json.loads(updates)
     result = _update_param_attrs(doc_id, data)
+    return json.dumps(result, ensure_ascii=False)
+
+
+@mcp.tool()
+def update_param_desc(doc_id: int, updates: str) -> str:
+    """Batch update param_desc field of parameters.
+
+    Args:
+        doc_id: Primary key of document_versions table.
+        updates: JSON string — array of dicts with function_name, param_name,
+                 param_desc.
+
+    Returns:
+        JSON string with count of updated parameters.
+    """
+    data = json.loads(updates)
+    result = _update_param_desc(doc_id, data)
+    return json.dumps(result, ensure_ascii=False)
+
+
+@mcp.tool()
+def update_param_direction(doc_id: int, updates: str) -> str:
+    """Batch update direction field of parameters.
+
+    Args:
+        doc_id: Primary key of document_versions table.
+        updates: JSON string — array of dicts with function_name, param_name,
+                 direction ('input' or 'output').
+
+    Returns:
+        JSON string with count of updated parameters.
+    """
+    data = json.loads(updates)
+    result = _update_param_direction(doc_id, data)
     return json.dumps(result, ensure_ascii=False)
 
 

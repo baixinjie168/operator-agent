@@ -1,15 +1,19 @@
-"""Task routes: list docs, create tasks, query tasks."""
+"""Task routes: list docs, create tasks, query tasks, download results."""
 
 from __future__ import annotations
 
 import asyncio
+import io
+import json
 import logging
 import re
 import shutil
+import zipfile
 from datetime import datetime
 from pathlib import Path
 
 from fastapi import APIRouter, Query
+from fastapi.responses import Response
 
 from agent.core.config import settings
 from agent.mcp_client import MCPClient
@@ -150,6 +154,50 @@ async def list_tasks() -> TaskListResponse:
         return TaskListResponse(tasks=[])
 
 
+@router.get("/tasks-summary")
+async def get_tasks_summary() -> dict:
+    """Aggregated success/failure statistics across all tasks."""
+    try:
+        tasks = await _mcp_client.list_tasks()
+    except Exception:
+        tasks = []
+
+    rows: list[dict] = []
+    total_all = 0
+    completed_all = 0
+    failed_all = 0
+    for t in tasks:
+        total = t.get("total_count", 0)
+        completed = t.get("completed_count", 0)
+        failed = t.get("failed_count", 0)
+        rate = round(completed / total * 100, 1) if total > 0 else 0.0
+        rows.append({
+            "id": t["id"],
+            "name": t["name"],
+            "status": t["status"],
+            "total_count": total,
+            "completed_count": completed,
+            "failed_count": failed,
+            "success_rate": rate,
+            "created_at": t.get("created_at"),
+        })
+        total_all += total
+        completed_all += completed
+        failed_all += failed
+
+    overall_rate = round(completed_all / total_all * 100, 1) if total_all > 0 else 0.0
+    return {
+        "tasks": rows,
+        "totals": {
+            "task_count": len(rows),
+            "total_count": total_all,
+            "completed_count": completed_all,
+            "failed_count": failed_all,
+            "success_rate": overall_rate,
+        },
+    }
+
+
 @router.get("/tasks/{task_id}", response_model=TaskDetailResponse)
 async def get_task_detail(task_id: int) -> TaskDetailResponse:
     """Get task detail with all items."""
@@ -207,3 +255,51 @@ def _extract_operator_name(file_path: Path) -> str:
     except Exception:
         pass
     return stem
+
+
+@router.get("/tasks/{task_id}/download")
+async def download_task_results(task_id: int) -> Response:
+    """Download all completed operator results for a task as a ZIP file.
+
+    Each completed item's json_constraints is written as {operator_name}.json
+    inside the archive.
+    """
+    result = await _mcp_client.get_task_with_items(task_id)
+    if result is None:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    task_name = result.get("name", f"task-{task_id}")
+    items = result.get("items", [])
+
+    buf = io.BytesIO()
+    included = 0
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for item in items:
+            if item.get("status") != "completed":
+                continue
+            operator_name = item.get("operator_name", "")
+            if not operator_name:
+                continue
+            try:
+                jc = await _mcp_client.get_json_constraints(operator_name)
+            except Exception:
+                logger.warning("Failed to fetch json_constraints for %s", operator_name)
+                continue
+            if not jc:
+                continue
+            content = json.dumps(jc, ensure_ascii=False, indent=2)
+            zf.writestr(f"{operator_name}.json", content)
+            included += 1
+
+    if included == 0:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="No completed results to download")
+
+    buf.seek(0)
+    filename = f"{task_name}-results.zip"
+    return Response(
+        content=buf.getvalue(),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )

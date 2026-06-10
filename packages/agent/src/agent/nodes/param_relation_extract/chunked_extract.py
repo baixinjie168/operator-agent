@@ -104,8 +104,8 @@ def split_into_chunks(section_text: str) -> list[str]:
                 # Extract header (first <tr>...</tr> block)
                 header_end = _find_tr_end(table_lines, tr_indices[0])
                 header = table_lines[:header_end]
-                # Split by 10 <tr> groups, each keeping header
-                for group_start in range(0, len(tr_indices), 10):
+                # Split remaining <tr> groups by 10, each keeping header
+                for group_start in range(1, len(tr_indices), 10):
                     group = list(header)
                     end_idx = (
                         tr_indices[group_start + 10]

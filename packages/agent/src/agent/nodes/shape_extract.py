@@ -50,9 +50,9 @@ async def shape_extract_node(state: PipelineState) -> dict[str, Any]:
             logger.info("ShapeExtract: no parameters in state for doc_id=%s, skipping", doc_id)
             return {"error": None}
 
-        described = [p for p in params if p.get("llm_description")]
+        described = [p for p in params if p.get("llm_description") and not p.get("shape")]
         if not described:
-            logger.info("ShapeExtract: no parameters with llm_description for doc_id=%s, skipping", doc_id)
+            logger.info("ShapeExtract: no parameters needing shape extraction for doc_id=%s, skipping", doc_id)
             return {"error": None}
 
         llm = _create_llm()
