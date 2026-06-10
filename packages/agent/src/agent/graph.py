@@ -1,7 +1,7 @@
 """LangGraph pipeline graph for operator document processing.
 
 Provides a deterministic pipeline graph for structured processing:
-InitDoc → [ProductSupport ∥ ParseParams ∥ FunctionSignatureExtract
+InitDoc → [ProductSupport ∥ FunctionSignatureExtract
           ∥ FunctionExplanationExtract]
        → TableColumnExtract
        → LlmDescriptionExtract
@@ -10,6 +10,9 @@ InitDoc → [ProductSupport ∥ ParseParams ∥ FunctionSignatureExtract
           ∥ ParamRelationExtract ∥ ReturnCodeExtract
           ∥ DeterminismExtract ∥ DtypeComboExtract]
        → BuildParamRelations → BuildParamConstraint → AssembleResult → END
+
+Note: FunctionSignatureExtract also produces the flat parameters list
+(replaces the old parse_params node).
 """
 
 import logging
@@ -34,7 +37,6 @@ from agent.nodes.function_explanation_extract import (
 from agent.nodes.init_doc import init_doc_node
 from agent.nodes.optional_extract import optional_extract_node
 from agent.nodes.param_relation_extract import create_param_relation_subgraph
-from agent.nodes.parse_params import parse_params_node
 from agent.nodes.product_support import product_support_node
 from agent.nodes.return_code_extract import return_code_extract_node
 from agent.nodes.shape_extract import shape_extract_node
@@ -45,11 +47,11 @@ logger = logging.getLogger(__name__)
 
 
 def _should_continue(state: dict) -> list[str]:
-    """Route after init_doc: fan out to four nodes, or END on error."""
+    """Route after init_doc: fan out to three nodes, or END on error."""
     status = state.get("status", "new")
     if status in ("error",):
         return END
-    return ["product_support", "parse_params", "function_signature_extract", "function_explanation_extract"]
+    return ["product_support", "function_signature_extract", "function_explanation_extract"]
 
 
 def create_pipeline_graph() -> CompiledStateGraph:
@@ -57,7 +59,7 @@ def create_pipeline_graph() -> CompiledStateGraph:
 
     Flow:
     InitDoc → [error → END |
-               ProductSupport ∥ ParseParams ∥ FunctionSignatureExtract
+               ProductSupport ∥ FunctionSignatureExtract (also produces parameters)
                ∥ FunctionExplanationExtract →
                TableColumnExtract →
                LlmDescriptionExtract →
@@ -74,7 +76,6 @@ def create_pipeline_graph() -> CompiledStateGraph:
     graph = StateGraph(PipelineState)
     graph.add_node("init_doc", init_doc_node)
     graph.add_node("product_support", product_support_node)
-    graph.add_node("parse_params", parse_params_node)
     graph.add_node("table_column_extract", table_column_extract_node)
     description_subgraph = create_description_extract_subgraph()
     graph.add_node("llm_description_extract", description_subgraph)
@@ -99,7 +100,6 @@ def create_pipeline_graph() -> CompiledStateGraph:
     graph.add_edge(START, "init_doc")
     graph.add_conditional_edges("init_doc", _should_continue)
     graph.add_edge("product_support", "table_column_extract")
-    graph.add_edge("parse_params", "table_column_extract")
     graph.add_edge("function_signature_extract", "table_column_extract")
     graph.add_edge("function_explanation_extract", "table_column_extract")
     graph.add_edge("table_column_extract", "llm_description_extract")

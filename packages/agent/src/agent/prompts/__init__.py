@@ -568,3 +568,38 @@ source_citation：{source_citation}
 严格按以下 JSON 返回，不要添加任何其他文字：
 {{"expr_type": "...", "expr": "...", "confidence": "high/medium/low", "uncertainty_reason": "不确定原因（仅当 confidence != high 时）"}}
 """
+
+
+LLM_DESCRIPTION_VERIFY_PROMPT = """\
+你是一个参数描述审核员。请检查参数 "{param_name}" 的描述是否存在信息遗漏。
+
+参数名: {param_name}
+
+当前描述:
+{original_description}
+
+疑似缺失的属性: {missing_attrs}
+
+原始文档内容:
+{document_context}
+
+任务：
+1. 仔细阅读原始文档，检查"疑似缺失的属性"是否在文档中存在相关信息
+2. 如果存在：基于文档内容，将这些信息补充到描述中，生成增强版描述
+3. 如果不存在：说明文档中确实没有这些信息
+
+要求：
+- 增强描述必须基于文档中的实际内容，不要编造
+- 保持原有描述中正确的部分，只补充缺失的信息
+- 遵循与原描述相同的风格（主语明确、自然语言表达）
+- 仍然只包含平台无关的通用属性，不要加入平台特定约束
+- 仍然不要包含跨参数关系约束（如"与X的dtype一致"）
+- enhanced_description 必须比原始描述更完整才有意义，如果无法补充则 has_missing_info 设为 false
+
+严格按以下 JSON 格式返回，不要添加任何其他文字：
+{{
+  "has_missing_info": true/false,
+  "found_attrs": ["在文档中找到的缺失属性列表"],
+  "enhanced_description": "增强后的完整描述（仅当 has_missing_info 为 true 时提供）",
+  "enhanced_src_content": "新增内容对应的原始文档文本"
+}}"""

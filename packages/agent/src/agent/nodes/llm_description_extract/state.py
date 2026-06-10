@@ -35,6 +35,9 @@ class DescriptionExtractState(TypedDict, total=False):
     validation_report: dict[str, Any]
     coverage_report: dict[str, Any]
 
-    # ── error (same reducer as parent) ────────────────────────────────────
+    # verify_and_enhance output
+    enhance_count: int
+
+    # error (same reducer as parent)──────────────────────────────────
     error: Annotated[str | None, merge_errors]
 

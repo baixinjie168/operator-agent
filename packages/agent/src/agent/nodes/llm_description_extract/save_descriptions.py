@@ -46,6 +46,12 @@ def _build_enriched_params(
                 "is_support_discontinuous",
                 json.dumps({"value": "N/A", "src_text": ""}, ensure_ascii=False),
             )
+            # Audit record: serialize to JSON string for DB storage
+            audit = update.get("description_audit")
+            if audit:
+                merged["description_audit"] = json.dumps(
+                    audit, ensure_ascii=False
+                )
             enriched.append(merged)
         else:
             enriched.append(p)

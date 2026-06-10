@@ -127,7 +127,7 @@ class TestBuildCoverageReport:
         report = _build_coverage_report(results, params)
         assert report["total_params"] == 2
         assert report["extracted"] == 2
-        assert report["missing"] == 0
+        assert report["not_extracted"] == 0
         assert report["coverage_rate"] == "100.0%"
 
     def test_partial_coverage(self):
@@ -142,7 +142,7 @@ class TestBuildCoverageReport:
         report = _build_coverage_report(results, params)
         assert report["total_params"] == 3
         assert report["extracted"] == 1
-        assert report["missing"] == 2
+        assert report["not_extracted"] == 2
         assert "33.3%" in report["coverage_rate"]
 
     def test_short_descriptions_counted(self):

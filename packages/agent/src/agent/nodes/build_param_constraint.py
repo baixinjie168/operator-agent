@@ -131,9 +131,13 @@ async def build_param_constraint_node(state: PipelineState) -> dict[str, Any]:
                             if d.strip()
                         })
 
-                # format: split by "/"
-                fmt_str = param.get("data_format", "") or ""
-                fmt = [f.strip() for f in fmt_str.split("/") if f.strip()]
+                # format: non-Tensor → "N/A", Tensor → array (empty or split by "/")
+                is_tensor = "aclTensor" in ptype
+                if not is_tensor:
+                    fmt: list | str = "N/A"
+                else:
+                    fmt_str = param.get("data_format", "") or ""
+                    fmt = [f.strip() for f in fmt_str.split("/") if f.strip()]
 
                 # is_support_discontinuous: JSON parse
                 disc_raw = param.get("is_support_discontinuous", "") or ""
@@ -147,7 +151,6 @@ async def build_param_constraint_node(state: PipelineState) -> dict[str, Any]:
                 dimensions_value = shape_map.get((fn_name, pname), [])
 
                 # allowed_range_value: Tensor → [], else from LLM
-                is_tensor = "aclTensor" in ptype
                 if is_tensor:
                     ar_value: list = []
                 else:

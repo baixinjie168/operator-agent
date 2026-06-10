@@ -466,6 +466,14 @@ class Database:
                 )
         except sqlite3.OperationalError:
             pass
+        # 迁移：v35 — 新增 description_audit 列
+        try:
+            self._conn.execute(
+                "ALTER TABLE parameters ADD COLUMN description_audit "
+                "TEXT NOT NULL DEFAULT ''"
+            )
+        except sqlite3.OperationalError:
+            pass
         self._conn.commit()
 
     @property
