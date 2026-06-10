@@ -1445,6 +1445,46 @@ def update_json_constraints_by_name(operator_name: str, json_constraints: str) -
     return {"saved": True, "doc_id": doc_id}
 
 
+def get_document_content(operator_name: str, version: int | None = None) -> dict | None:
+    """Retrieve raw Markdown content from the latest document version for an operator.
+
+    Args:
+        operator_name: Operator name.
+        version: Version number (defaults to latest).
+
+    Returns:
+        dict with content and version, or None if not found.
+    """
+    db = get_db()
+    conn = db.conn
+
+    operator_row = conn.execute(
+        "SELECT id FROM operators WHERE name = ?", (operator_name,)
+    ).fetchone()
+    if not operator_row:
+        return None
+
+    operator_id = operator_row[0]
+
+    if version is None:
+        row = conn.execute(
+            "SELECT content, version FROM document_versions "
+            "WHERE operator_id = ? ORDER BY version DESC LIMIT 1",
+            (operator_id,),
+        ).fetchone()
+    else:
+        row = conn.execute(
+            "SELECT content, version FROM document_versions "
+            "WHERE operator_id = ? AND version = ?",
+            (operator_id, version),
+        ).fetchone()
+
+    if not row or not row[0]:
+        return None
+
+    return {"content": row[0], "version": row[1], "operator_name": operator_name}
+
+
 def get_json_constraints(operator_name: str) -> dict | None:
     """Retrieve json_constraints from the latest document version for an operator.
 

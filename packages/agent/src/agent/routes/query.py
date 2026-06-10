@@ -8,6 +8,7 @@ from agent.mcp_client import MCPClient
 from agent.schemas.query import (
     ConstraintsResultResponse,
     DeterminismListResponse,
+    DocumentContentResponse,
     DtypeComboListResponse,
     DtypeComboResponse,
     FunctionSignatureListResponse,
@@ -55,6 +56,27 @@ async def get_operator(operator_name: str, version: int | None = None) -> Operat
         version=version,
         parsed_data=result,
     )
+
+
+@router.get("/operators/{operator_name}/document", response_model=DocumentContentResponse)
+async def get_operator_document(
+    operator_name: str, version: int | None = None,
+) -> DocumentContentResponse:
+    """Retrieve raw Markdown content of the operator document."""
+    try:
+        result = await _mcp_client.get_document_content(operator_name, version)
+        if result is None:
+            return DocumentContentResponse(
+                success=False, error=f"Document for operator '{operator_name}' not found",
+            )
+        return DocumentContentResponse(
+            success=True,
+            operator_name=result.get("operator_name", operator_name),
+            version=result.get("version"),
+            content=result.get("content"),
+        )
+    except Exception as e:
+        return DocumentContentResponse(success=False, error=str(e))
 
 
 @router.get("/parameters", response_model=ParameterListResponse)

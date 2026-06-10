@@ -121,10 +121,22 @@ async def _run_execute_pipeline(
     })
 
     llm_tracer = LLMTracer()
+
+    operator_doc = ""
+    try:
+        from agent.mcp_client import MCPClient
+        _mcp = MCPClient()
+        doc_result = await _mcp.get_document_content(operator_name)
+        if doc_result and doc_result.get("content"):
+            operator_doc = doc_result["content"]
+    except Exception as e:
+        logger.warning("Failed to fetch operator document for %s: %s", operator_name, e)
+
     state_input: PipelineState = {
         "operator_name": operator_name,
         "cases_path": cases_path,
         "cases_count": cases_count,
+        "content": operator_doc,
     }
 
     try:

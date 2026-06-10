@@ -354,6 +354,13 @@ class MCPClient:
             "json_constraints": json_constraints,
         })
 
+    async def get_document_content(self, operator_name: str, version: int | None = None) -> dict | None:
+        """Retrieve raw Markdown content from the latest document version for an operator."""
+        args: dict[str, Any] = {"operator_name": operator_name}
+        if version is not None:
+            args["version"] = version
+        return await self._call_tool("get_document_content", args)
+
     async def get_json_constraints(self, operator_name: str) -> dict | None:
         """Retrieve json_constraints from the latest document version for an operator."""
         return await self._call_tool("get_json_constraints", {

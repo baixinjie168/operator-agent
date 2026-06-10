@@ -158,6 +158,14 @@ class ConstraintsResultResponse(BaseModel):
     results: list[ConstraintsResultItem]
 
 
+class DocumentContentResponse(BaseModel):
+    success: bool
+    operator_name: str | None = None
+    version: int | None = None
+    content: str | None = None
+    error: str | None = None
+
+
 class JsonConstraintsResponse(BaseModel):
     success: bool
     operator_name: str | None = None

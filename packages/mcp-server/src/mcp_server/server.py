@@ -23,14 +23,14 @@ from mcp_server.tools.document_tools import (
     save_parsed_document,
     update_param_descriptions,
 )
-from mcp_server.tools.test_case_tools import (
-    do_get_test_cases as _do_get_test_cases,
+from mcp_server.tools.document_tools import (
+    get_document_content as _get_document_content,
 )
-from mcp_server.tools.test_case_tools import (
-    do_list_test_case_operators as _do_list_test_case_operators,
+from mcp_server.tools.document_tools import (
+    get_function_explanation_summary as _get_fn_expl_summary,
 )
-from mcp_server.tools.test_case_tools import (
-    do_save_test_cases as _do_save_test_cases,
+from mcp_server.tools.document_tools import (
+    get_json_constraints as _get_json_constraints,
 )
 from mcp_server.tools.document_tools import get_parsed_by_doc_id as _get_parsed_by_doc_id
 from mcp_server.tools.document_tools import (
@@ -73,28 +73,19 @@ from mcp_server.tools.document_tools import (
     save_constraints_result as _save_constraints_result,
 )
 from mcp_server.tools.document_tools import (
-    save_json_constraints as _save_json_constraints,
-)
-from mcp_server.tools.document_tools import (
-    get_json_constraints as _get_json_constraints,
-)
-from mcp_server.tools.document_tools import (
-    update_json_constraints_by_name as _update_json_constraints_by_name,
-)
-from mcp_server.tools.document_tools import (
-    get_function_explanation_summary as _get_fn_expl_summary,
-)
-from mcp_server.tools.document_tools import (
-    save_function_explanation_summary as _save_fn_expl,
-)
-from mcp_server.tools.document_tools import (
     save_determinism as _save_determinism,
 )
 from mcp_server.tools.document_tools import (
     save_dtype_combinations as _save_dtype_combinations,
 )
 from mcp_server.tools.document_tools import (
+    save_function_explanation_summary as _save_fn_expl,
+)
+from mcp_server.tools.document_tools import (
     save_function_signatures as _save_function_signatures,
+)
+from mcp_server.tools.document_tools import (
+    save_json_constraints as _save_json_constraints,
 )
 from mcp_server.tools.document_tools import (
     save_param_relations as _save_param_relations,
@@ -104,6 +95,9 @@ from mcp_server.tools.document_tools import (
 )
 from mcp_server.tools.document_tools import (
     save_return_codes as _save_return_codes,
+)
+from mcp_server.tools.document_tools import (
+    update_json_constraints_by_name as _update_json_constraints_by_name,
 )
 from mcp_server.tools.document_tools import (
     update_param_allowed_range as _update_param_allowed_range,
@@ -118,9 +112,6 @@ from mcp_server.tools.document_tools import (
     update_param_constraint as _update_param_constraint,
 )
 from mcp_server.tools.document_tools import (
-    update_param_relation_objects as _update_param_relation_objects,
-)
-from mcp_server.tools.document_tools import (
     update_param_dformat as _update_param_dformat,
 )
 from mcp_server.tools.document_tools import (
@@ -130,11 +121,24 @@ from mcp_server.tools.document_tools import (
     update_param_optional as _update_param_optional,
 )
 from mcp_server.tools.document_tools import (
+    update_param_relation_objects as _update_param_relation_objects,
+)
+from mcp_server.tools.document_tools import (
     update_param_shape as _update_param_shape,
 )
 from mcp_server.tools.document_tools import (
     update_param_src_content as _update_param_src_content,
 )
+from mcp_server.tools.test_case_tools import (
+    do_get_test_cases as _do_get_test_cases,
+)
+from mcp_server.tools.test_case_tools import (
+    do_list_test_case_operators as _do_list_test_case_operators,
+)
+from mcp_server.tools.test_case_tools import (
+    do_save_test_cases as _do_save_test_cases,
+)
+
 mcp = FastMCP("operator-agent-mcp-server")
 
 
@@ -837,6 +841,21 @@ def save_json_constraints(doc_id: int, json_constraints: str) -> str:
         JSON string with saved flag.
     """
     result = _save_json_constraints(doc_id, json_constraints)
+    return json.dumps(result, ensure_ascii=False)
+
+
+@mcp.tool()
+def get_document_content(operator_name: str, version: int | None = None) -> str:
+    """Retrieve raw Markdown content from the latest document version for an operator.
+
+    Args:
+        operator_name: Operator name.
+        version: Version number (null for latest).
+
+    Returns:
+        JSON string with content, version, operator_name, or null if not found.
+    """
+    result = _get_document_content(operator_name, version)
     return json.dumps(result, ensure_ascii=False)
 
 
