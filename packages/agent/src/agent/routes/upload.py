@@ -12,6 +12,7 @@ import logging
 import re
 
 from fastapi import APIRouter, Request, UploadFile
+from pydantic import BaseModel, Field
 
 from agent.db import (
     complete_run as db_complete_run,
@@ -25,13 +26,17 @@ from agent.db import (
 from agent.db import (
     update_run_doc_id as db_update_run_doc_id,
 )
-from agent.graph import create_pipeline_graph_after_init
+from agent.graph import PipelineStage, build_pipeline
 from agent.nodes.init_doc import init_doc_node as _init_doc
 from agent.runtime import EventType, LLMTracer, RuntimeManager, traced_node
 from agent.schemas.upload import UploadResponse
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1", tags=["upload"])
+
+
+class ReExtractRequest(BaseModel):
+    operator_name: str = Field(..., min_length=1)
 
 
 def _get_manager(request: Request) -> RuntimeManager:
@@ -69,11 +74,70 @@ async def upload_document(file: UploadFile, request: Request) -> UploadResponse:
     return UploadResponse(success=True, task_id=run.run_id, operator_name=operator_name)
 
 
-async def _run_pipeline(run_id: str, state_input: dict, manager: RuntimeManager) -> None:
+@router.post("/re-extract-constraints", response_model=UploadResponse)
+async def re_extract_constraints(body: ReExtractRequest, request: Request) -> UploadResponse:
+    """Re-extract constraints for an operator using its existing document.
+
+    Fetches the latest document content from the database and runs the
+    constraint extraction pipeline without requiring a new file upload.
+    """
+    operator_name = body.operator_name.strip()
+    if not operator_name:
+        return UploadResponse(success=False, error="operator_name is required")
+
+    # Fetch the latest document content from the database
+    try:
+        from agent.mcp_client import MCPClient
+        mcp = MCPClient()
+        doc_result = await mcp.get_document_content(operator_name)
+        if not doc_result or not doc_result.get("content"):
+            return UploadResponse(
+                success=False,
+                operator_name=operator_name,
+                error=f"未找到算子 {operator_name} 的文档，请先上传文档",
+            )
+        content = doc_result["content"]
+    except Exception as e:
+        logger.exception("Failed to fetch document for %s", operator_name)
+        return UploadResponse(
+            success=False,
+            operator_name=operator_name,
+            error=f"获取文档失败: {e}",
+        )
+
+    content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
+    state_input = {"operator_name": operator_name, "content": content, "content_hash": content_hash}
+
+    manager = _get_manager(request)
+    run = manager.create_run(operator_name)
+    db_create_run(
+        run.run_id,
+        operator_name,
+        content_hash,
+        task_type="constraint_extract",
+    )
+
+    asyncio.create_task(_run_pipeline(run.run_id, state_input, manager, stages=[PipelineStage.EXTRACT]))
+
+    return UploadResponse(success=True, task_id=run.run_id, operator_name=operator_name)
+
+
+async def _run_pipeline(
+    run_id: str,
+    state_input: dict,
+    manager: RuntimeManager,
+    *,
+    stages: list[PipelineStage] | None = None,
+) -> None:
     """Run pipeline with RuntimeManager observability.  Nodes emit events via @traced_node.
 
     init_doc runs first (outside the graph) so doc_id can be persisted to
     pipeline_runs immediately.  The remaining nodes run in a sub-graph afterward.
+
+    Args:
+        stages: Which pipeline stages to run.  Defaults to the full pipeline
+            (extract + generate + execute).  Pass ``[PipelineStage.EXTRACT]``
+            for extraction-only runs (used by ``re-extract-constraints``).
     """
     ctx = manager.enter_context(run_id)
     run = manager.get_run(run_id)
@@ -115,7 +179,9 @@ async def _run_pipeline(run_id: str, state_input: dict, manager: RuntimeManager)
         if isinstance(init_result, dict):
             state_input.update(init_result)
 
-        graph = create_pipeline_graph_after_init()
+        if stages is None:
+            stages = [PipelineStage.EXTRACT, PipelineStage.GENERATE, PipelineStage.EXECUTE]
+        graph = build_pipeline(stages)
         result = await graph.ainvoke(state_input, config={"callbacks": [llm_tracer]})
 
         _persist_to_db(run_id, run, result, manager)

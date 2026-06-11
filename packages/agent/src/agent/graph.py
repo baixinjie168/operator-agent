@@ -1,21 +1,31 @@
-"""LangGraph pipeline graph for operator document processing.
+"""LangGraph pipeline graph -- unified build_pipeline() entry point.
 
-Provides a deterministic pipeline graph for structured processing:
-InitDoc → [ProductSupport ∥ ParseParams ∥ FunctionSignatureExtract
-          ∥ FunctionExplanationExtract]
-       → SrcContentExtract → ParamDescExtract
-       → [ShapeExtract ∥ DtypeExtract ∥ DFormatExtract ∥ OptionalExtract
-          ∥ ParamAttrExtract ∥ ArrayLengthExtract ∥ AllowedRangeExtract
-          ∥ ParamRelationExtract ∥ ReturnCodeExtract ∥ DeterminismExtract
-          ∥ DtypeComboExtract]
-       → BuildParamRelations → BuildParamConstraint → AssembleResult
-       → GeneratorAgent (4-step: match_model → init_static
-                       → solve_constraints → generate)
-       → ExecuterAgent (3-step: generate_atk → cpu_derivation → run_atk)
-       → END
+The pipeline is composed of three independent stages that can be freely
+combined:
+
+    EXTRACT  : DocProcessorAgent + ExtractorAgent (constraint extraction)
+    GENERATE : GeneratorAgent (test case generation)
+    EXECUTE  : ExecuterAgent (test case execution)
+
+Usage::
+
+    build_pipeline(["extract"])                        # extract only
+    build_pipeline(["extract", "generate"])            # extract + generate
+    build_pipeline(["generate"])                       # generate only
+    build_pipeline(["generate", "execute"])            # generate + execute
+    build_pipeline(["extract", "generate", "execute"]) # full pipeline
+
+Prerequisites are checked automatically:
+  - GENERATE without EXTRACT: case_match_model loads constraints from DB;
+    returns error if constraints do not exist.
+  - EXECUTE without GENERATE: exec_generate_atk requires cases_path in
+    state; returns error if not set.
 """
 
+from __future__ import annotations
+
 import logging
+from enum import Enum
 
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
@@ -25,24 +35,23 @@ from agent.nodes.array_length_extract import array_length_extract_node as _array
 from agent.nodes.assemble_result import assemble_result_node as _assemble_result
 from agent.nodes.build_param_constraint import build_param_constraint_node as _build_param_constraint
 from agent.nodes.build_param_relations import build_param_relations_node as _build_param_relations
-from agent.nodes.determinism_extract import determinism_extract_node as _determinism_extract
-from agent.nodes.dformat_extract import dformat_extract_node as _dformat_extract
-from agent.nodes.dtype_combo_extract import dtype_combo_extract_node as _dtype_combo_extract
-from agent.nodes.dtype_extract import dtype_extract_node as _dtype_extract
-from agent.nodes.function_explanation_extract import (
-    function_explanation_extract_node as _function_explanation_extract,
-)
 from agent.nodes.case_subgraph import (
     case_generate_node as _case_generate,
     case_init_static_node as _case_init_static,
     case_match_model_node as _case_match_model,
     case_solve_constraints_node as _case_solve_constraints,
-    create_case_subgraph,
 )
+from agent.nodes.determinism_extract import determinism_extract_node as _determinism_extract
+from agent.nodes.dformat_extract import dformat_extract_node as _dformat_extract
+from agent.nodes.dtype_combo_extract import dtype_combo_extract_node as _dtype_combo_extract
+from agent.nodes.dtype_extract import dtype_extract_node as _dtype_extract
 from agent.nodes.executer_subgraph import (
-    exec_generate_atk_node as _exec_generate_atk,
     exec_cpu_derivation_node as _exec_cpu_derivation,
+    exec_generate_atk_node as _exec_generate_atk,
     exec_run_atk_node as _exec_run_atk,
+)
+from agent.nodes.function_explanation_extract import (
+    function_explanation_extract_node as _function_explanation_extract,
 )
 from agent.nodes.function_signature_extract import function_signature_extract_node as _function_signature_extract
 from agent.nodes.init_doc import init_doc_node as _init_doc
@@ -61,199 +70,233 @@ from agent.runtime import traced_node
 logger = logging.getLogger(__name__)
 
 
-def _should_continue(state: dict) -> list[str]:
-    """Route after init_doc: fan out to four nodes, or END on error."""
-    status = state.get("status", "new")
-    if status in ("error",):
-        return END
-    return ["product_support", "parse_params", "function_signature_extract", "function_explanation_extract"]
+# -------------------------------------------------------------------
+#  Stage enum
+# -------------------------------------------------------------------
+
+class PipelineStage(str, Enum):
+    EXTRACT = "extract"
+    GENERATE = "generate"
+    EXECUTE = "execute"
 
 
-def create_pipeline_graph() -> CompiledStateGraph:
-    """Build a deterministic pipeline for document processing.
+# -------------------------------------------------------------------
+#  Conditional routers
+# -------------------------------------------------------------------
 
-    Nodes are wrapped with @traced_node for automatic span + event emission.
+def _route_after_case_match(state: dict) -> str:
+    return END if state.get("error") else "case_init_static"
 
-    Flow:
-    InitDoc → [error → END |
-               ProductSupport ∥ ParseParams ∥ FunctionSignatureExtract
-               ∥ FunctionExplanationExtract →
-               SrcContentExtract →
-                ParamDescExtract → [ShapeExtract ∥ DtypeExtract ∥ DFormatExtract
-                                    ∥ OptionalExtract ∥ ParamAttrExtract
-                                    ∥ ArrayLengthExtract ∥ AllowedRangeExtract
-                                    ∥ ParamRelationExtract
-                                    ∥ ReturnCodeExtract ∥ DeterminismExtract
-                                    ∥ DtypeComboExtract]
-               → BuildParamRelations → BuildParamConstraint
-               → AssembleResult → END]
 
-    Returns a LangGraph ``CompiledStateGraph`` using ``PipelineState``.
-    """
-    graph = StateGraph(PipelineState)
-    graph.add_node("init_doc", traced_node("init_doc")(_init_doc))
-    graph.add_node("product_support", traced_node("product_support")(_product_support))
-    graph.add_node("parse_params", traced_node("parse_params")(_parse_params))
-    graph.add_node("src_content_extract", traced_node("src_content_extract")(_src_content_extract))
-    graph.add_node("function_signature_extract", traced_node("function_signature_extract")(_function_signature_extract))
-    graph.add_node("function_explanation_extract", traced_node("function_explanation_extract")(_function_explanation_extract))
-    graph.add_node("param_desc_extract", traced_node("param_desc_extract")(_param_desc_extract))
-    graph.add_node("shape_extract", traced_node("shape_extract")(_shape_extract))
-    graph.add_node("dtype_extract", traced_node("dtype_extract")(_dtype_extract))
-    graph.add_node("dformat_extract", traced_node("dformat_extract")(_dformat_extract))
-    graph.add_node("optional_extract", traced_node("optional_extract")(_optional_extract))
-    graph.add_node("param_attr_extract", traced_node("param_attr_extract")(_param_attr_extract))
-    graph.add_node("array_length_extract", traced_node("array_length_extract")(_array_length_extract))
-    graph.add_node("allowed_range_extract", traced_node("allowed_range_extract")(_allowed_range_extract))
-    graph.add_node("return_code_extract", traced_node("return_code_extract")(_return_code_extract))
-    graph.add_node("determinism_extract", traced_node("determinism_extract")(_determinism_extract))
-    graph.add_node("dtype_combo_extract", traced_node("dtype_combo_extract")(_dtype_combo_extract))
-    graph.add_node("build_param_relations", traced_node("build_param_relations")(_build_param_relations))
-    graph.add_node("build_param_constraint", traced_node("build_param_constraint")(_build_param_constraint))
-    graph.add_node("assemble_result", traced_node("assemble_result")(_assemble_result))
-    # ── GeneratorAgent: 4-step case sub-graph (case_*_node) ──
-    graph.add_node("case_match_model", traced_node("case_match_model")(_case_match_model))
-    graph.add_node("case_init_static", traced_node("case_init_static")(_case_init_static))
-    graph.add_node("case_solve_constraints", traced_node("case_solve_constraints")(_case_solve_constraints))
-    graph.add_node("case_generate", traced_node("case_generate")(_case_generate))
-    # ── ExecuterAgent: 3-step execution sub-graph (exec_*_node) ──
-    graph.add_node("exec_generate_atk", traced_node("exec_generate_atk")(_exec_generate_atk))
-    graph.add_node("exec_cpu_derivation", traced_node("exec_cpu_derivation")(_exec_cpu_derivation))
-    graph.add_node("exec_run_atk", traced_node("exec_run_atk")(_exec_run_atk))
+def _route_after_case_init(state: dict) -> str:
+    return END if state.get("error") else "case_solve_constraints"
 
-    param_relation_subgraph = create_param_relation_subgraph()
-    graph.add_node("param_relation_extract", param_relation_subgraph)
 
-    graph.add_edge(START, "init_doc")
-    graph.add_conditional_edges("init_doc", _should_continue)
-    graph.add_edge("product_support", "src_content_extract")
-    graph.add_edge("parse_params", "src_content_extract")
-    graph.add_edge("function_signature_extract", "src_content_extract")
-    graph.add_edge("function_explanation_extract", "src_content_extract")
+def _route_after_exec_generate(state: dict) -> str:
+    return END if state.get("error") else "exec_cpu_derivation"
+
+
+def _route_after_exec_derivation(state: dict) -> str:
+    return END if state.get("error") else "exec_run_atk"
+
+
+# -------------------------------------------------------------------
+#  Node lists
+# -------------------------------------------------------------------
+
+_PARALLEL_FAN_OUT = [
+    "product_support",
+    "parse_params",
+    "function_signature_extract",
+    "function_explanation_extract",
+]
+
+_EXTRACT_NODES = [
+    ("product_support", _product_support),
+    ("parse_params", _parse_params),
+    ("function_signature_extract", _function_signature_extract),
+    ("function_explanation_extract", _function_explanation_extract),
+    ("src_content_extract", _src_content_extract),
+    ("param_desc_extract", _param_desc_extract),
+    ("shape_extract", _shape_extract),
+    ("dtype_extract", _dtype_extract),
+    ("dformat_extract", _dformat_extract),
+    ("optional_extract", _optional_extract),
+    ("param_attr_extract", _param_attr_extract),
+    ("array_length_extract", _array_length_extract),
+    ("allowed_range_extract", _allowed_range_extract),
+    ("return_code_extract", _return_code_extract),
+    ("determinism_extract", _determinism_extract),
+    ("dtype_combo_extract", _dtype_combo_extract),
+    ("build_param_relations", _build_param_relations),
+    ("build_param_constraint", _build_param_constraint),
+    ("assemble_result", _assemble_result),
+]
+
+_GENERATE_NODES = [
+    ("case_match_model", _case_match_model),
+    ("case_init_static", _case_init_static),
+    ("case_solve_constraints", _case_solve_constraints),
+    ("case_generate", _case_generate),
+]
+
+_EXECUTE_NODES = [
+    ("exec_generate_atk", _exec_generate_atk),
+    ("exec_cpu_derivation", _exec_cpu_derivation),
+    ("exec_run_atk", _exec_run_atk),
+]
+
+_DETAIL_EXTRACTORS = [
+    "shape_extract", "dtype_extract", "dformat_extract",
+    "optional_extract", "param_attr_extract", "array_length_extract",
+    "allowed_range_extract", "return_code_extract", "determinism_extract",
+    "dtype_combo_extract", "param_relation_extract",
+]
+
+_STAGE_ORDER = [PipelineStage.EXTRACT, PipelineStage.GENERATE, PipelineStage.EXECUTE]
+
+_STAGE_LAST_NODE = {
+    PipelineStage.EXTRACT: "assemble_result",
+    PipelineStage.GENERATE: "case_generate",
+    PipelineStage.EXECUTE: "exec_run_atk",
+}
+
+_STAGE_FIRST_NODE = {
+    PipelineStage.EXTRACT: None,
+    PipelineStage.GENERATE: "case_match_model",
+    PipelineStage.EXECUTE: "exec_generate_atk",
+}
+
+
+# -------------------------------------------------------------------
+#  Stage builders
+# -------------------------------------------------------------------
+
+def _build_extract(graph: StateGraph, *, is_first: bool, is_last: bool) -> None:
+    for name, fn in _EXTRACT_NODES:
+        graph.add_node(name, traced_node(name)(fn))
+    graph.add_node("param_relation_extract", create_param_relation_subgraph())
+
+    if is_first:
+        for n in _PARALLEL_FAN_OUT:
+            graph.add_edge(START, n)
+
+    for n in _PARALLEL_FAN_OUT:
+        graph.add_edge(n, "src_content_extract")
+
     graph.add_edge("src_content_extract", "param_desc_extract")
-    graph.add_edge("param_desc_extract", "shape_extract")
-    graph.add_edge("param_desc_extract", "dtype_extract")
-    graph.add_edge("param_desc_extract", "dformat_extract")
-    graph.add_edge("param_desc_extract", "optional_extract")
-    graph.add_edge("param_desc_extract", "param_attr_extract")
-    graph.add_edge("param_desc_extract", "array_length_extract")
-    graph.add_edge("param_desc_extract", "allowed_range_extract")
-    graph.add_edge("param_desc_extract", "return_code_extract")
-    graph.add_edge("param_desc_extract", "determinism_extract")
-    graph.add_edge("param_desc_extract", "dtype_combo_extract")
-    graph.add_edge("param_desc_extract", "param_relation_extract")
-    graph.add_edge("shape_extract", "build_param_constraint")
-    graph.add_edge("dtype_extract", "build_param_constraint")
-    graph.add_edge("dformat_extract", "build_param_constraint")
-    graph.add_edge("optional_extract", "build_param_constraint")
-    graph.add_edge("param_attr_extract", "build_param_constraint")
-    graph.add_edge("array_length_extract", "build_param_constraint")
-    graph.add_edge("allowed_range_extract", "build_param_constraint")
-    graph.add_edge("return_code_extract", "build_param_constraint")
-    graph.add_edge("determinism_extract", "build_param_constraint")
-    graph.add_edge("dtype_combo_extract", "build_param_constraint")
-    graph.add_edge("param_relation_extract", "build_param_relations")
+
+    for n in _DETAIL_EXTRACTORS:
+        graph.add_edge("param_desc_extract", n)
+
+    for n in _DETAIL_EXTRACTORS:
+        if n == "param_relation_extract":
+            graph.add_edge(n, "build_param_relations")
+        else:
+            graph.add_edge(n, "build_param_constraint")
+
     graph.add_edge("build_param_relations", "build_param_constraint")
     graph.add_edge("build_param_constraint", "assemble_result")
-    graph.add_edge("assemble_result", "case_match_model")
-    graph.add_edge("case_match_model", "case_init_static")
+
+    if is_last:
+        graph.add_edge("assemble_result", END)
+
+
+def _build_generate(graph: StateGraph, *, is_first: bool, is_last: bool) -> None:
+    for name, fn in _GENERATE_NODES:
+        graph.add_node(name, traced_node(name)(fn))
+
+    if is_first:
+        graph.add_edge(START, "case_match_model")
+
+    # Error short-circuits at match_model and init_static
+    graph.add_conditional_edges("case_match_model", _route_after_case_match)
     graph.add_edge("case_init_static", "case_solve_constraints")
+    graph.add_conditional_edges("case_init_static", _route_after_case_init)
+    # solve_constraints -> generate (unconditional; generate handles its own errors)
     graph.add_edge("case_solve_constraints", "case_generate")
-    graph.add_edge("case_generate", "exec_generate_atk")
-    graph.add_edge("exec_generate_atk", "exec_cpu_derivation")
-    graph.add_edge("exec_cpu_derivation", "exec_run_atk")
+
+
+def _build_execute(graph: StateGraph, *, is_first: bool, is_last: bool) -> None:
+    for name, fn in _EXECUTE_NODES:
+        graph.add_node(name, traced_node(name)(fn))
+
+    if is_first:
+        graph.add_edge(START, "exec_generate_atk")
+
+    graph.add_conditional_edges("exec_generate_atk", _route_after_exec_generate)
+    graph.add_conditional_edges("exec_cpu_derivation", _route_after_exec_derivation)
     graph.add_edge("exec_run_atk", END)
-    return graph.compile(name="operator-pipeline")
 
 
-def create_pipeline_graph_after_init() -> CompiledStateGraph:
-    """Build pipeline starting from fan-out after init_doc has run externally.
+# -------------------------------------------------------------------
+#  Public API
+# -------------------------------------------------------------------
 
-    Used when init_doc is executed separately so doc_id can be persisted
-    to pipeline_runs immediately rather than waiting for the full pipeline.
-    Graph: START → [product_support ∥ parse_params ∥ function_signature_extract
-                    ∥ function_explanation_extract] → src_content_extract →
-    param_desc_extract → [shape_extract ∥ dtype_extract ∥ dformat_extract
-                          ∥ optional_extract ∥ param_attr_extract
-                          ∥ array_length_extract ∥ allowed_range_extract
-                          ∥ return_code_extract ∥ determinism_extract
-                          ∥ dtype_combo_extract ∥ param_relation_extract]
-    → build_param_relations → build_param_constraint → assemble_result
-    → case_match_model → case_load_defs → case_init_static
-    → case_solve_constraints → case_generate → END
+_STAGE_BUILDERS = {
+    PipelineStage.EXTRACT: _build_extract,
+    PipelineStage.GENERATE: _build_generate,
+    PipelineStage.EXECUTE: _build_execute,
+}
+
+
+def build_pipeline(stages: list[PipelineStage | str]) -> CompiledStateGraph:
+    """Build a pipeline graph from the requested stages.
+
+    Args:
+        stages: Ordered list of stages. Accepts PipelineStage values or
+            plain strings ("extract", "generate", "execute").
+            Must follow canonical order: extract -> generate -> execute.
+
+    Returns:
+        A compiled CompiledStateGraph ready for ainvoke.
+
+    Raises:
+        ValueError: If stages is empty or contains invalid values.
     """
+    if not stages:
+        raise ValueError("stages must not be empty")
+
+    normalised: list[PipelineStage] = []
+    for s in stages:
+        if isinstance(s, PipelineStage):
+            normalised.append(s)
+        else:
+            try:
+                normalised.append(PipelineStage(s))
+            except ValueError:
+                raise ValueError(
+                    f"Invalid stage {s!r}. Must be one of: "
+                    f"{[e.value for e in PipelineStage]}"
+                ) from None
+
+    order_indices = [_STAGE_ORDER.index(s) for s in normalised]
+    if order_indices != sorted(order_indices):
+        raise ValueError(
+            f"Stages must follow canonical order "
+            f"(extract -> generate -> execute), got: {[s.value for s in normalised]}"
+        )
+
+    seen: set[PipelineStage] = set()
+    unique: list[PipelineStage] = []
+    for s in normalised:
+        if s not in seen:
+            seen.add(s)
+            unique.append(s)
+
     graph = StateGraph(PipelineState)
-    graph.add_node("product_support", traced_node("product_support")(_product_support))
-    graph.add_node("parse_params", traced_node("parse_params")(_parse_params))
-    graph.add_node("function_signature_extract", traced_node("function_signature_extract")(_function_signature_extract))
-    graph.add_node("function_explanation_extract", traced_node("function_explanation_extract")(_function_explanation_extract))
-    graph.add_node("src_content_extract", traced_node("src_content_extract")(_src_content_extract))
-    graph.add_node("param_desc_extract", traced_node("param_desc_extract")(_param_desc_extract))
-    graph.add_node("shape_extract", traced_node("shape_extract")(_shape_extract))
-    graph.add_node("dtype_extract", traced_node("dtype_extract")(_dtype_extract))
-    graph.add_node("dformat_extract", traced_node("dformat_extract")(_dformat_extract))
-    graph.add_node("optional_extract", traced_node("optional_extract")(_optional_extract))
-    graph.add_node("param_attr_extract", traced_node("param_attr_extract")(_param_attr_extract))
-    graph.add_node("array_length_extract", traced_node("array_length_extract")(_array_length_extract))
-    graph.add_node("allowed_range_extract", traced_node("allowed_range_extract")(_allowed_range_extract))
-    graph.add_node("return_code_extract", traced_node("return_code_extract")(_return_code_extract))
-    graph.add_node("determinism_extract", traced_node("determinism_extract")(_determinism_extract))
-    graph.add_node("dtype_combo_extract", traced_node("dtype_combo_extract")(_dtype_combo_extract))
-    graph.add_node("build_param_relations", traced_node("build_param_relations")(_build_param_relations))
-    graph.add_node("build_param_constraint", traced_node("build_param_constraint")(_build_param_constraint))
-    graph.add_node("assemble_result", traced_node("assemble_result")(_assemble_result))
-    # ── GeneratorAgent: 4-step case sub-graph (case_*_node) ──
-    graph.add_node("case_match_model", traced_node("case_match_model")(_case_match_model))
-    graph.add_node("case_init_static", traced_node("case_init_static")(_case_init_static))
-    graph.add_node("case_solve_constraints", traced_node("case_solve_constraints")(_case_solve_constraints))
-    graph.add_node("case_generate", traced_node("case_generate")(_case_generate))
-    # ── ExecuterAgent: 3-step execution sub-graph (exec_*_node) ──
-    graph.add_node("exec_generate_atk", traced_node("exec_generate_atk")(_exec_generate_atk))
-    graph.add_node("exec_cpu_derivation", traced_node("exec_cpu_derivation")(_exec_cpu_derivation))
-    graph.add_node("exec_run_atk", traced_node("exec_run_atk")(_exec_run_atk))
 
-    param_relation_subgraph = create_param_relation_subgraph()
-    graph.add_node("param_relation_extract", param_relation_subgraph)
+    for idx, stage in enumerate(unique):
+        is_first = (idx == 0)
+        is_last = (idx == len(unique) - 1)
+        _STAGE_BUILDERS[stage](graph, is_first=is_first, is_last=is_last)
 
-    graph.add_edge(START, "product_support")
-    graph.add_edge(START, "parse_params")
-    graph.add_edge(START, "function_signature_extract")
-    graph.add_edge(START, "function_explanation_extract")
-    graph.add_edge("product_support", "src_content_extract")
-    graph.add_edge("parse_params", "src_content_extract")
-    graph.add_edge("function_signature_extract", "src_content_extract")
-    graph.add_edge("function_explanation_extract", "src_content_extract")
-    graph.add_edge("src_content_extract", "param_desc_extract")
-    graph.add_edge("param_desc_extract", "shape_extract")
-    graph.add_edge("param_desc_extract", "dtype_extract")
-    graph.add_edge("param_desc_extract", "dformat_extract")
-    graph.add_edge("param_desc_extract", "optional_extract")
-    graph.add_edge("param_desc_extract", "param_attr_extract")
-    graph.add_edge("param_desc_extract", "array_length_extract")
-    graph.add_edge("param_desc_extract", "allowed_range_extract")
-    graph.add_edge("param_desc_extract", "return_code_extract")
-    graph.add_edge("param_desc_extract", "determinism_extract")
-    graph.add_edge("param_desc_extract", "dtype_combo_extract")
-    graph.add_edge("param_desc_extract", "param_relation_extract")
-    graph.add_edge("shape_extract", "build_param_constraint")
-    graph.add_edge("dtype_extract", "build_param_constraint")
-    graph.add_edge("dformat_extract", "build_param_constraint")
-    graph.add_edge("optional_extract", "build_param_constraint")
-    graph.add_edge("param_attr_extract", "build_param_constraint")
-    graph.add_edge("array_length_extract", "build_param_constraint")
-    graph.add_edge("allowed_range_extract", "build_param_constraint")
-    graph.add_edge("return_code_extract", "build_param_constraint")
-    graph.add_edge("determinism_extract", "build_param_constraint")
-    graph.add_edge("dtype_combo_extract", "build_param_constraint")
-    graph.add_edge("param_relation_extract", "build_param_relations")
-    graph.add_edge("build_param_relations", "build_param_constraint")
-    graph.add_edge("build_param_constraint", "assemble_result")
-    graph.add_edge("assemble_result", "case_match_model")
-    graph.add_edge("case_match_model", "case_init_static")
-    graph.add_edge("case_init_static", "case_solve_constraints")
-    graph.add_edge("case_solve_constraints", "case_generate")
-    graph.add_edge("case_generate", "exec_generate_atk")
-    graph.add_edge("exec_generate_atk", "exec_cpu_derivation")
-    graph.add_edge("exec_cpu_derivation", "exec_run_atk")
-    graph.add_edge("exec_run_atk", END)
-    return graph.compile(name="operator-pipeline")
+        if not is_last:
+            nxt = unique[idx + 1]
+            graph.add_edge(
+                _STAGE_LAST_NODE[stage],
+                _STAGE_FIRST_NODE[nxt],
+            )
+
+    label = "+".join(s.value for s in unique)
+    return graph.compile(name=f"pipeline-{label}")

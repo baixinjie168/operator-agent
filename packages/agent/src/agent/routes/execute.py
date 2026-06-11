@@ -19,7 +19,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Request
 
-from agent.nodes.executer_subgraph import create_executer_subgraph
+from agent.graph import PipelineStage, build_pipeline
 from agent.nodes.state import PipelineState
 from agent.runtime import EventType, LLMTracer, RuntimeManager
 from agent.schemas.cases import ExecuteRunRequest, ExecuteRunResponse
@@ -161,7 +161,7 @@ async def _run_execute_pipeline(
     }
 
     try:
-        graph = create_executer_subgraph()
+        graph = build_pipeline([PipelineStage.EXECUTE])
         result = await graph.ainvoke(state_input, config={"callbacks": [llm_tracer]})
 
         events_payload = []

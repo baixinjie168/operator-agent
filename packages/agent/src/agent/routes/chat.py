@@ -77,8 +77,21 @@ _INTENT_PATTERNS: list[tuple[str, str]] = [
     (r"^(?:好的|确认|继续|执行吧|没问题|可以|ok|yes|对|是|行)$", "__confirm__"),
     (r"^(?:算了|取消|不要了|不了|no|不)$", "__cancel__"),
 
-    # Compound: generate + execute
-    (r"(?:生成|创建)\s*(\w+)\s*(?:的)?(?:测试)?用例\s*(?:并|然后|再)\s*(?:执行|跑|测试)", "generate_and_execute"),
+    # Compound actions (must come before single actions to match first)
+    # operator name + extract + generate: e.g. "aclnnAbs重新提取约束生成测试用例"
+    (
+        r"([a-zA-Z_][a-zA-Z0-9_]*)\s*(?:重新)?(?:提取|跑)\s*(?:算子)?约束\s*(?:并|然后|再)?\s*(?:生成|创建)\s*(?:测试)?用例",
+        "extract_then_generate",
+    ),
+    # extract + generate: e.g. "重新提取约束生成测试用例", "提取约束并生成用例"
+    (
+        r"(?:重新)?(?:提取|跑)\s*(?:算子)?约束\s*(?:并|然后|再)?\s*(?:生成|创建)\s*(?:测试)?用例",
+        "extract_then_generate",
+    ),
+    # operator name + generate + execute
+    (r"([a-zA-Z_][a-zA-Z0-9_]*)\s*(?:生成|创建)\s*(?:测试)?用例\s*(?:并|然后|再)\s*(?:执行|跑|测试)", "generate_and_execute"),
+    # generate + execute
+    (r"(?:生成|创建)\s*(?:测试)?用例\s*(?:并|然后|再)\s*(?:执行|跑|测试)", "generate_and_execute"),
 
     # Data queries (must come before list_operators to match first)
     (
@@ -87,27 +100,30 @@ _INTENT_PATTERNS: list[tuple[str, str]] = [
     ),
     (r"(?:哪些|多少)\s*算子\s*(?:有|生成|创建)\s*(?:了)?(?:测试)?用例", "query_operators_with_cases"),
     (
-        r"([a-zA-Z_]\w*)\s*(?:算子)?(?:的)?(?:最近|最新)\s*(?:的)?(?:测试)?(?:用例)?(?:执行)?结果",
+        r"([a-zA-Z_][a-zA-Z0-9_]*)\s*(?:算子)?(?:的)?(?:最近|最新)\s*(?:的)?(?:测试)?(?:用例)?(?:执行)?结果",
         "query_exec_results",
     ),
-    (r"(?:查看|查询)\s*([a-zA-Z_]\w*)\s*(?:算子)?(?:的)?(?:执行)?结果", "query_exec_results"),
+    (r"(?:查看|查询)\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*(?:算子)?(?:的)?(?:执行)?结果", "query_exec_results"),
 
     # List operators (must come before view_cases to match first)
     (r"(?:有哪些|列出|所有|当前)\s*(?:算子|operator)", "list_operators"),
     (r"(?:哪些|多少)\s*算子\s*(?:有|生成|创建)", "list_operators"),
 
     # Read-only
-    (r"(?:查看|看看|查一下|打开|显示)\s*([a-zA-Z_]\w*)\s*(?:的)?约束", "view_constraints"),
-    (r"(?:查看|看看|有哪些|显示)\s*([a-zA-Z_]\w*)\s*(?:的)?用例", "view_cases"),
-    (r"(?:查看|看看|显示)\s*([a-zA-Z_]\w*)\s*(?:的)?(?:执行)?结果", "view_results"),
-    (r"(?:查看|看看|显示)\s*([a-zA-Z_]\w*)\s*(?:的)?文档", "view_document"),
+    (r"(?:查看|看看|查一下|打开|显示)\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*(?:的)?约束", "view_constraints"),
+    (r"(?:查看|看看|有哪些|显示)\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*(?:的)?用例", "view_cases"),
+    (r"(?:查看|看看|显示)\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*(?:的)?(?:执行)?结果", "view_results"),
+    (r"(?:查看|看看|显示)\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*(?:的)?文档", "view_document"),
     (r"(?:历史|记录|任务列表|任务)", "view_task_history"),
     (r"(?:帮助|怎么用|能做什么|help)", "help"),
 
     # Write operations
-    (r"(?:提取|重新提取|跑一下)\s*([a-zA-Z_]\w*)\s*(?:的)?约束", "extract_constraints"),
-    (r"(?:生成|创建)\s*([a-zA-Z_]\w*)\s*(?:的)?(?:测试)?用例", "generate_cases"),
-    (r"(?:执行|运行|跑)\s*([a-zA-Z_]\w*)\s*(?:的)?(?:测试)?(?:用例|测试)", "execute_tests"),
+    (r"([a-zA-Z_][a-zA-Z0-9_]*)\s*(?:重新)?(?:提取|跑一下?)\s*(?:算子)?约束", "extract_constraints"),
+    (r"(?:提取|重新提取|跑一下)\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*(?:的)?约束", "extract_constraints"),
+    (r"([a-zA-Z_][a-zA-Z0-9_]*)\s*(?:生成|创建)\s*(?:测试)?用例", "generate_cases"),
+    (r"(?:生成|创建)\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*(?:的)?(?:测试)?用例", "generate_cases"),
+    (r"([a-zA-Z_][a-zA-Z0-9_]*)\s*(?:执行|运行|跑)\s*(?:测试)?(?:用例|测试)", "execute_tests"),
+    (r"(?:执行|运行|跑)\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*(?:的)?(?:测试)?(?:用例|测试)", "execute_tests"),
     (r"(?:上传|导入)\s*(?:算子)?文档", "upload_document"),
 ]
 
@@ -196,6 +212,10 @@ _INTENT_PARSE_PROMPT = """你是一个昇腾算子测试平台的意图解析器
 - view_task_history: 任务历史
 - help: 帮助
 
+### 复合操作（多步骤串行执行）
+- extract_then_generate: 提取约束并生成用例（如"重新提取约束生成测试用例"、"提取约束并生成用例"）
+- generate_and_execute: 生成用例并执行（如"生成用例并执行"、"生成然后跑一下"）
+
 ### 写操作（需要确认）
 - extract_constraints: 提取约束
 - generate_cases: 生成用例
@@ -251,20 +271,46 @@ async def _llm_parse_intent(
             conversation_history=history_text or "无",
         )
 
+        logger.info("=" * 60)
+        logger.info("[LLM Intent Parse] Request:")
+        logger.info("  User input: %s", text)
+        logger.info("  Current operator: %s", current_operator or "无")
+        logger.info("  System prompt:\n%s", prompt)
+        logger.info("=" * 60)
+
         response = await llm.ainvoke([
             {"role": "system", "content": prompt},
             {"role": "user", "content": text},
         ])
 
         raw = response.content.strip() if hasattr(response, "content") else str(response)
+        
+        logger.info("[LLM Intent Parse] Response:")
+        logger.info("  Raw response: %s", raw)
+        
         # Extract JSON from response
+        import contextlib
         import json
-        json_match = re.search(r"\{[^{}]+\}", raw)
-        if json_match:
-            result = json.loads(json_match.group())
+        result = None
+        # Try direct parse first
+        with contextlib.suppress(json.JSONDecodeError, ValueError):
+            result = json.loads(raw)
+        # Fallback: extract JSON object from response text
+        if not result:
+            # Match balanced braces (supports nested {})
+            json_match = re.search(r"\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}", raw)
+            if json_match:
+                with contextlib.suppress(json.JSONDecodeError, ValueError):
+                    result = json.loads(json_match.group())
+        if result and isinstance(result, dict) and result.get("action"):
             if not result.get("operator_name"):
                 result["operator_name"] = current_operator
+            logger.info("  Parsed intent: %s", json.dumps(result, ensure_ascii=False))
+            logger.info("=" * 60)
             return result
+        else:
+            logger.warning("  Failed to extract JSON from response")
+            logger.info("=" * 60)
 
     except Exception as e:
         logger.warning("LLM intent parsing failed: %s", e)
@@ -645,6 +691,25 @@ def _build_response(
         }
 
     # Write actions: need confirmation
+    if action == "extract_then_generate":
+        return {
+            "response_type": "confirm",
+            "response_message": (
+                f"将为 {op_name} 执行以下操作：\n"
+                f"  1. 重新提取算子约束\n"
+                f"  2. 生成测试用例\n"
+                f"确认？"
+            ),
+            "suggested_actions": [
+                SuggestedAction(
+                    label="确认执行",
+                    action="extract_then_generate",
+                    params={"operator_name": op_name},
+                ),
+                SuggestedAction(label="取消", action="cancel"),
+            ],
+        }
+
     if action == "extract_constraints":
         return {
             "response_type": "confirm",
@@ -760,6 +825,16 @@ async def parse_intent(body: ParseIntentRequest) -> ParseIntentResponse:
     if confirm_match and session.get("pending_action"):
         intent = session["pending_action"]
         session["pending_action"] = None
+        op_name = intent.get("operator_name") or current_op
+        readiness = _check_readiness(op_name) if op_name else {"exists": False}
+        _add_message(session, "assistant", f"正在执行 {intent['action']}...", intent)
+        return ParseIntentResponse(
+            intent=intent,
+            readiness=readiness,
+            response_type="direct",
+            response_message=f"正在执行 {intent['action']}...",
+            suggested_actions=[],
+        )
     elif cancel_match:
         session["pending_action"] = None
         intent = {"action": "cancel", "operator_name": current_op, "confidence": 1.0, "parameters": {}}

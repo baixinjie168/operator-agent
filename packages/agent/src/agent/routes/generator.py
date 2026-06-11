@@ -17,16 +17,10 @@ import hashlib
 import logging
 
 from fastapi import APIRouter, Request
-from langgraph.graph import END, START, StateGraph
 
-from agent.nodes.case_subgraph import (
-    case_generate_node,
-    case_init_static_node,
-    case_match_model_node,
-    case_solve_constraints_node,
-)
+from agent.graph import PipelineStage, build_pipeline
 from agent.nodes.state import PipelineState
-from agent.runtime import EventType, LLMTracer, RuntimeManager, traced_node
+from agent.runtime import EventType, LLMTracer, RuntimeManager
 from agent.schemas.cases import GeneratorRunRequest, GeneratorRunResponse
 
 logger = logging.getLogger(__name__)
@@ -35,35 +29,6 @@ router = APIRouter(prefix="/api/v1", tags=["generator"])
 
 def _get_manager(request: Request) -> RuntimeManager:
     return request.app.state.runtime_manager
-
-
-def _build_case_subgraph():
-    """Build a 4-node sequential graph for the GeneratorAgent.
-
-    Each node is wrapped with ``@traced_node`` so spans + SSE events fire
-    under ``agent_id="case"``.  On error, the sub-graph short-circuits to END.
-    """
-    graph = StateGraph(PipelineState)
-    graph.add_node("case_match_model", traced_node("case_match_model")(case_match_model_node))
-    graph.add_node("case_init_static", traced_node("case_init_static")(case_init_static_node))
-    graph.add_node("case_solve_constraints", traced_node("case_solve_constraints")(case_solve_constraints_node))
-    graph.add_node("case_generate", traced_node("case_generate")(case_generate_node))
-
-    def _route_after_match(state: dict) -> str:
-        return END if state.get("error") else "case_init_static"
-
-    def _route_after_init(state: dict) -> str:
-        return END if state.get("error") else "case_solve_constraints"
-
-    def _route_after_solve(state: dict) -> str:
-        return END if state.get("error") else "case_generate"
-
-    graph.add_edge(START, "case_match_model")
-    graph.add_conditional_edges("case_match_model", _route_after_match)
-    graph.add_conditional_edges("case_init_static", _route_after_init)
-    graph.add_conditional_edges("case_solve_constraints", _route_after_solve)
-    graph.add_edge("case_generate", END)
-    return graph.compile(name="case-pipeline")
 
 
 def _synthetic_content_hash(operator_name: str, count: int, seed: int, run_id: str) -> str:
@@ -164,7 +129,7 @@ async def _run_case_pipeline(
     }
 
     try:
-        graph = _build_case_subgraph()
+        graph = build_pipeline([PipelineStage.GENERATE])
         result = await graph.ainvoke(state_input, config={"callbacks": [llm_tracer]})
 
         # Persist all runtime events to DB.  Use the alias name (e.g.
