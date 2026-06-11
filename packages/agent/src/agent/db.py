@@ -303,10 +303,11 @@ def save_test_cases(
     for idx, case in enumerate(cases):
         case_name = case.get("name", f"{operator_name}_case_{idx}")
         case_data = json.dumps(case, ensure_ascii=False)
+        supported_product = case.get("supported_product", "")
         db.conn.execute(
-            "INSERT INTO test_cases (task_id, operator_name, case_index, case_name, case_data, constraint_doc_id) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (task_id, operator_name, idx, case_name, case_data, constraint_doc_id),
+            "INSERT INTO test_cases (task_id, operator_name, case_index, case_name, case_data, constraint_doc_id, supported_product) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (task_id, operator_name, idx, case_name, case_data, constraint_doc_id, supported_product),
         )
     db.conn.commit()
     logger.info("Saved %d test cases for task %s", len(cases), task_id)
@@ -332,12 +333,12 @@ def query_test_cases(
     params.append(limit)
     rows = db.conn.execute(
         f"SELECT id, task_id, operator_name, case_index, case_name, case_data, "
-        f"constraint_doc_id, created_at FROM test_cases{where} "
+        f"constraint_doc_id, supported_product, created_at FROM test_cases{where} "
         f"ORDER BY case_index LIMIT ?",
         params,
     ).fetchall()
     cols = ["id", "task_id", "operator_name", "case_index", "case_name",
-            "case_data", "constraint_doc_id", "created_at"]
+            "case_data", "constraint_doc_id", "supported_product", "created_at"]
     results = []
     for r in rows:
         row = dict(zip(cols, r, strict=False))
@@ -435,3 +436,66 @@ def query_exec_results(
                 pass
         results.append(row)
     return results
+
+
+# ── Servers ─────────────────────────────────────────────────────────────────
+
+def create_server(name: str, ip: str, port: int, username: str, password: str, supported_product: str = "") -> int:
+    """Create a new server record. Returns the new server id."""
+    db = get_db()
+    cursor = db.conn.execute(
+        "INSERT INTO servers (name, ip, port, username, password, supported_product) VALUES (?, ?, ?, ?, ?, ?)",
+        (name, ip, port, username, password, supported_product),
+    )
+    db.conn.commit()
+    return cursor.lastrowid
+
+
+def update_server(server_id: int, **fields) -> bool:
+    """Update a server. Only provided fields are updated."""
+    if not fields:
+        return False
+    allowed = {"name", "ip", "port", "username", "password", "status", "supported_product"}
+    updates = {k: v for k, v in fields.items() if k in allowed and v is not None}
+    if not updates:
+        return False
+    set_clause = ", ".join(f"{k} = ?" for k in updates)
+    set_clause += ", updated_at = datetime('now')"
+    values = list(updates.values()) + [server_id]
+    db = get_db()
+    db.conn.execute(f"UPDATE servers SET {set_clause} WHERE id = ?", values)
+    db.conn.commit()
+    return True
+
+
+def delete_server(server_id: int) -> bool:
+    """Delete a server by id."""
+    db = get_db()
+    cursor = db.conn.execute("DELETE FROM servers WHERE id = ?", (server_id,))
+    db.conn.commit()
+    return cursor.rowcount > 0
+
+
+def query_servers() -> list[dict]:
+    """Query all servers, ordered by created_at DESC (newest first)."""
+    db = get_db()
+    rows = db.conn.execute(
+        "SELECT id, name, ip, port, username, password, supported_product, status, created_at, updated_at "
+        "FROM servers ORDER BY id DESC"
+    ).fetchall()
+    cols = ["id", "name", "ip", "port", "username", "password", "supported_product", "status", "created_at", "updated_at"]
+    return [dict(zip(cols, r, strict=False)) for r in rows]
+
+
+def get_server(server_id: int) -> dict | None:
+    """Get a single server by id."""
+    db = get_db()
+    row = db.conn.execute(
+        "SELECT id, name, ip, port, username, password, supported_product, status, created_at, updated_at "
+        "FROM servers WHERE id = ?",
+        (server_id,),
+    ).fetchone()
+    if not row:
+        return None
+    cols = ["id", "name", "ip", "port", "username", "password", "supported_product", "status", "created_at", "updated_at"]
+    return dict(zip(cols, row, strict=False))

@@ -28,13 +28,16 @@ def generate(
     count: int,
     seed: int | None,
 ) -> list[TestCaseRecord]:
-    """Return ``count`` test cases for the given parsed ``GeneratorContext``.
+    """Return test cases for ALL supported platforms.
+
+    For each supported platform, ``count`` cases are generated.
+    Each case is tagged with its ``supported_product``.
 
     Contract:
         generate(context, *, count, seed) -> list[TestCaseRecord]
 
     Determinism:
-        Same ``context`` + same ``seed`` ⇒ identical case list.
+        Same ``context`` + same ``seed`` => identical case list.
     """
     if count < 0:
         raise ValueError(f"count must be >= 0, got {count}")
@@ -45,26 +48,27 @@ def generate(
     shape_groups = build_shape_equal_groups(
         {"constraints_in_parameters": context.constraints_in_parameters}
     )
-    # fixed_values is computed for API symmetry; not yet applied to scalar inputs.
     _ = build_fixed_values(
         {"constraints_in_parameters": context.constraints_in_parameters}
     )
 
-    platform = _select_platform(context)
+    platforms = context.supported_platforms if context.supported_platforms else ["default"]
+
     cases: list[TestCaseRecord] = []
-    for i in range(count):
-        case = build_single_case(
-            rng,
-            context,
-            idx=i,
-            platform=platform,
-            shape_groups=shape_groups,
-        )
-        cases.append(case)
+    global_idx = 0
+    for platform in platforms:
+        for i in range(count):
+            case = build_single_case(
+                rng,
+                context,
+                idx=global_idx,
+                platform=platform,
+                shape_groups=shape_groups,
+            )
+            # Tag the case with its product/platform
+            case_data = case.model_dump()
+            case_data["supported_product"] = platform
+            case_data["id"] = global_idx
+            cases.append(TestCaseRecord(**case_data))
+            global_idx += 1
     return cases
-
-
-def _select_platform(context: GeneratorContext) -> str:
-    if context.supported_platforms:
-        return context.supported_platforms[0]
-    return "default"

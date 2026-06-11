@@ -14,6 +14,7 @@ from agent.routes.execute import router as execute_router
 from agent.routes.generator import router as generator_router
 from agent.routes.query import router as query_router
 from agent.routes.runs import router as runs_router
+from agent.routes.servers import router as servers_router
 from agent.routes.upload import router as upload_router
 from agent.runtime import RuntimeManager
 
@@ -46,6 +47,7 @@ def create_app() -> FastAPI:
     app.include_router(generator_router)
     app.include_router(execute_router)
     app.include_router(chat_router)
+    app.include_router(servers_router)
 
     @app.get("/health")
     async def health() -> dict:

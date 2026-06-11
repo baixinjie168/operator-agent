@@ -70,8 +70,42 @@ async def run_execute(body: ExecuteRunRequest, request: Request) -> ExecuteRunRe
         db_cases = db_query_test_cases(task_id=parent_id)
         case_ids = [c["id"] for c in db_cases]
 
+    # Look up server info if server_id is provided
+    server_info = None
+    if body.server_id:
+        try:
+            from agent.db import get_server as db_get_server
+            server_info = db_get_server(body.server_id)
+        except Exception as e:
+            logger.warning("Failed to fetch server info: %s", e)
+
     if db_cases:
         cases_data = [c["case_data"] for c in db_cases]
+        # Filter cases by server's supported_product if server is specified
+        if server_info and server_info.get("supported_product"):
+            server_product = server_info["supported_product"]
+            filtered = []
+            filtered_ids = []
+            for i, c in enumerate(db_cases):
+                case_product = c.get("supported_product", "") or c.get("case_data", {}).get("supported_product", "")
+                if case_product == server_product or not case_product:
+                    filtered.append(c["case_data"])
+                    filtered_ids.append(c["id"])
+            if not filtered:
+                # Collect unique products from cases
+                case_products = set()
+                for c in db_cases:
+                    p = c.get("supported_product", "") or c.get("case_data", {}).get("supported_product", "")
+                    if p:
+                        case_products.add(p)
+                return ExecuteRunResponse(
+                    success=False, task_id="", operator_name=operator_name,
+                    error=f"服务器 {server_info['name']} 支持的产品为「{server_product}」，"
+                          f"但用例对应的产品为「{'、'.join(case_products) or '未知'}」，产品不匹配无法执行。"
+                          f"请切换服务器或重新生成对应用例。",
+                )
+            cases_data = filtered
+            case_ids = filtered_ids
         cases_json_str = json.dumps(cases_data, ensure_ascii=False)
     else:
         try:
@@ -109,12 +143,12 @@ async def run_execute(body: ExecuteRunRequest, request: Request) -> ExecuteRunRe
     cases_path.write_text(cases_json_str, encoding="utf-8")
 
     logger.info(
-        "POST /execute/run: op=%s cases=%d run_id=%s source=%s",
-        operator_name, len(cases_data), run_id, "db" if db_cases else "request",
+        "POST /execute/run: op=%s cases=%d run_id=%s source=%s server_id=%s",
+        operator_name, len(cases_data), run_id, "db" if db_cases else "request", body.server_id,
     )
 
     asyncio.create_task(
-        _run_execute_pipeline(run_id, operator_name, str(cases_path), len(cases_data), case_ids, manager)
+        _run_execute_pipeline(run_id, operator_name, str(cases_path), len(cases_data), case_ids, manager, server_info)
     )
 
     return ExecuteRunResponse(
@@ -124,7 +158,7 @@ async def run_execute(body: ExecuteRunRequest, request: Request) -> ExecuteRunRe
 
 async def _run_execute_pipeline(
     run_id: str, operator_name: str, cases_path: str, cases_count: int,
-    case_ids: list[int], manager: RuntimeManager,
+    case_ids: list[int], manager: RuntimeManager, server_info: dict | None = None,
 ) -> None:
     """Run the 3-step execution sub-graph with RuntimeManager observability."""
     ctx = manager.enter_context(run_id)
@@ -134,10 +168,12 @@ async def _run_execute_pipeline(
 
     await asyncio.sleep(0.3)
 
+    server_name = server_info["name"] if server_info else "本地执行"
+
     manager.emit(EventType.WORKFLOW_START, run_id, run.spans[run_id], {
         "agent_id": "execute",
         "node_id": "exec_generate_atk",
-        "message": f"ExecuterAgent 开始为 {operator_name} 执行测试用例...",
+        "message": f"ExecuterAgent 开始为 {operator_name} 执行测试用例（{server_name}）...",
         "step_index": 0, "progress_pct": 0, "progress_text": "开始",
     })
 
@@ -158,6 +194,7 @@ async def _run_execute_pipeline(
         "cases_path": cases_path,
         "cases_count": cases_count,
         "content": operator_doc,
+        "server_info": server_info,
     }
 
     try:

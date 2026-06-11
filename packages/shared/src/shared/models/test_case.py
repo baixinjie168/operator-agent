@@ -71,6 +71,7 @@ class TestCaseRecord(BaseModel):
     id: int
     name: str
     aclnn_name: str
+    supported_product: str = ""
     triton_name: str | None = None
     version: str = "v1.0"
     expected_error_msg: str | None = None

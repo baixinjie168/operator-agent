@@ -59,6 +59,7 @@ class ExecuteRunRequest(BaseModel):
 
     operator_name: str = Field(..., min_length=1, description="Operator name (e.g. 'aclnnAdaLayerNorm').")
     cases_json: str = Field(..., min_length=2, description="Test cases JSON array string.")
+    server_id: int | None = Field(default=None, description="Server ID for remote execution. If not provided, uses local execution.")
 
 
 class ExecuteRunResponse(BaseModel):

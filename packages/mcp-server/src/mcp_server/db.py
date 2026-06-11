@@ -485,6 +485,37 @@ class Database:
             """)
         except sqlite3.OperationalError:
             pass
+        # 迁移：v32 — 新建 servers 表（服务器管理）
+        try:
+            self._conn.executescript("""
+                CREATE TABLE IF NOT EXISTS servers (
+                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name        TEXT NOT NULL,
+                    ip          TEXT NOT NULL,
+                    port        INTEGER NOT NULL DEFAULT 22,
+                    username    TEXT NOT NULL,
+                    password    TEXT NOT NULL,
+                    status      TEXT NOT NULL DEFAULT 'active',
+                    created_at  TEXT DEFAULT (datetime('now')),
+                    updated_at  TEXT DEFAULT (datetime('now'))
+                );
+            """)
+        except sqlite3.OperationalError:
+            pass
+        # 迁移：v32b — servers 新增 supported_product 列
+        try:
+            self._conn.execute(
+                "ALTER TABLE servers ADD COLUMN supported_product TEXT NOT NULL DEFAULT ''"
+            )
+        except sqlite3.OperationalError:
+            pass
+        # 迁移：v32c — test_cases 新增 supported_product 列
+        try:
+            self._conn.execute(
+                "ALTER TABLE test_cases ADD COLUMN supported_product TEXT NOT NULL DEFAULT ''"
+            )
+        except sqlite3.OperationalError:
+            pass
         self._conn.commit()
         self._migrate()
 
