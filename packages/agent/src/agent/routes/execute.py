@@ -81,32 +81,66 @@ async def run_execute(body: ExecuteRunRequest, request: Request) -> ExecuteRunRe
 
     if db_cases:
         cases_data = [c["case_data"] for c in db_cases]
-        # Filter cases by server's supported_product if server is specified
+        logger.info("execute: loaded %d cases from DB for operator=%s", len(db_cases), operator_name)
+
+        # Determine which product to filter by
+        server_product = None
         if server_info and server_info.get("supported_product"):
             server_product = server_info["supported_product"]
+            logger.info("execute: using server product filter: %s", server_product)
+        else:
+            # No server configured or no supported_product - default to first product found
+            first_product = None
+            for c in db_cases:
+                p = c.get("supported_product", "")
+                if not p and isinstance(c.get("case_data"), dict):
+                    p = c["case_data"].get("supported_product", "")
+                if p:
+                    first_product = p
+                    break
+            if first_product:
+                server_product = first_product
+                logger.info("execute: no server configured, defaulting to first product: %s", server_product)
+
+        # Filter cases by product if determined
+        if server_product:
             filtered = []
             filtered_ids = []
-            for i, c in enumerate(db_cases):
-                case_product = c.get("supported_product", "") or c.get("case_data", {}).get("supported_product", "")
-                if case_product == server_product or not case_product:
+            for c in db_cases:
+                # Read product from column or from case_data JSON
+                case_product = c.get("supported_product", "")
+                if not case_product and isinstance(c.get("case_data"), dict):
+                    case_product = c["case_data"].get("supported_product", "")
+                # Only include cases that match the product
+                if case_product == server_product:
                     filtered.append(c["case_data"])
                     filtered_ids.append(c["id"])
+
+            logger.info(
+                "execute: product filter — product=%s total=%d matched=%d",
+                server_product, len(db_cases), len(filtered),
+            )
+
             if not filtered:
-                # Collect unique products from cases
+                # Collect unique products from cases for error message
                 case_products = set()
                 for c in db_cases:
-                    p = c.get("supported_product", "") or c.get("case_data", {}).get("supported_product", "")
+                    p = c.get("supported_product", "")
+                    if not p and isinstance(c.get("case_data"), dict):
+                        p = c["case_data"].get("supported_product", "")
                     if p:
                         case_products.add(p)
+                server_name = server_info.get("name", "未配置") if server_info else "未配置"
                 return ExecuteRunResponse(
                     success=False, task_id="", operator_name=operator_name,
-                    error=f"服务器 {server_info['name']} 支持的产品为「{server_product}」，"
-                          f"但用例对应的产品为「{'、'.join(case_products) or '未知'}」，产品不匹配无法执行。"
-                          f"请切换服务器或重新生成对应用例。",
+                    error=f"服务器「{server_name}」支持的产品为「{server_product}」，"
+                          f"但用例对应的产品为「{'、'.join(sorted(case_products)) or '未知'}」，"
+                          f"产品不匹配无法执行。请切换服务器或重新生成对应用例。",
                 )
             cases_data = filtered
             case_ids = filtered_ids
         cases_json_str = json.dumps(cases_data, ensure_ascii=False)
+        logger.info("execute: final cases_data count=%d, writing to file", len(cases_data))
     else:
         try:
             cases_data = json.loads(body.cases_json)
@@ -152,7 +186,7 @@ async def run_execute(body: ExecuteRunRequest, request: Request) -> ExecuteRunRe
     )
 
     return ExecuteRunResponse(
-        success=True, task_id=run_id, operator_name=operator_name,
+        success=True, task_id=run_id, operator_name=operator_name, cases_count=len(cases_data),
     )
 
 

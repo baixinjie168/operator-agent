@@ -62,11 +62,11 @@ def traced_node(node_id: str):
         async def wrapper(state, config=None):
             ctx = get_context()
             if ctx is None:
-                return await fn(state, config)
+                return await fn(state)
 
             run = ctx.manager.get_run(ctx.run_id)
             if not run:
-                return await fn(state, config)
+                return await fn(state)
 
             agent_id = _AGENT_MAP.get(node_id, "doc")
             span = ctx.manager.open_span(

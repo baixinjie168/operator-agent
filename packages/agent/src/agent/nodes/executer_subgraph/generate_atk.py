@@ -20,7 +20,16 @@ logger = logging.getLogger(__name__)
 _RESOURCES_DIR = Path(__file__).resolve().parent / "resources"
 _GENERATOR_SCRIPT = _RESOURCES_DIR / "generator.py"
 _SIGNATURES_FILE = _RESOURCES_DIR / "aclnn_extracted.txt"
-_OUTPUT_DIR = Path(__file__).resolve().parents[5] / "executors"
+# Project root = parents[6] of this file:
+#   executer_subgraph/generate_atk.py
+#   executer_subgraph/     -> parents[0]
+#   nodes/                 -> parents[1]
+#   agent/                 -> parents[2]
+#   src/                   -> parents[3]
+#   agent/ (package)       -> parents[4]
+#   packages/              -> parents[5]
+#   operator-agent/        -> parents[6]  <- project root
+_OUTPUT_DIR = Path(__file__).resolve().parents[6] / "executors"
 
 
 def _run_generator(cmd: list[str]) -> tuple[int, str, str]:
@@ -45,6 +54,18 @@ async def exec_generate_atk_node(state: PipelineState) -> dict[str, Any]:
         return {"error": "operator_name is required"}
     if not cases_path:
         return {"error": "cases_path is required — run GeneratorAgent first"}
+
+    # Log the actual number of cases in the file
+    try:
+        import json as _json
+        cases_file = Path(cases_path)
+        if cases_file.exists():
+            file_cases = _json.loads(cases_file.read_text(encoding="utf-8"))
+            logger.info("exec_generate_atk: cases file %s contains %d cases", cases_path, len(file_cases))
+        else:
+            logger.warning("exec_generate_atk: cases file not found: %s", cases_path)
+    except Exception as e:
+        logger.warning("exec_generate_atk: failed to read cases file: %s", e)
 
     logger.info("exec_generate_atk: generating ATK executor for %s", operator_name)
 

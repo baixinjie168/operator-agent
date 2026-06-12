@@ -54,6 +54,11 @@ def generate(
 
     platforms = context.supported_platforms if context.supported_platforms else ["default"]
 
+    import logging as _logging
+    _logger = _logging.getLogger(__name__)
+    _logger.info("generate: operator=%s count_per_platform=%d platforms=%d total_expected=%d",
+                 context.operator_name, count, len(platforms), count * len(platforms))
+
     cases: list[TestCaseRecord] = []
     global_idx = 0
     for platform in platforms:
@@ -71,4 +76,6 @@ def generate(
             case_data["id"] = global_idx
             cases.append(TestCaseRecord(**case_data))
             global_idx += 1
+
+    _logger.info("generate: actual total cases=%d", len(cases))
     return cases

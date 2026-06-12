@@ -20,6 +20,7 @@ def last_value(current: Any, new: Any) -> Any:
 class PipelineState(TypedDict, total=False):
     """State flowing through the document processing pipeline."""
 
+    run_id: str  # Current task/run ID for database operations
     operator_id: int
     doc_id: int
     operator_name: str

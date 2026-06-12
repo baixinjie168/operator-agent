@@ -72,4 +72,5 @@ class ExecuteRunResponse(BaseModel):
     success: bool
     task_id: str
     operator_name: str
+    cases_count: int = 0
     error: str | None = None

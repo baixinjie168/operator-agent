@@ -27,6 +27,7 @@ class ParseIntentRequest(BaseModel):
     text: str = Field(..., min_length=1)
     session_id: str | None = None
     current_operator: str | None = None
+    server_id: int | None = None
 
 
 class SuggestedAction(BaseModel):
@@ -496,6 +497,7 @@ def _build_response(
     intent: dict,
     readiness: dict,
     session: dict,
+    server_id: int | None = None,
 ) -> dict:
     """Build response with response_type, message, and suggested actions."""
     action = intent.get("action", "unknown")
@@ -755,10 +757,40 @@ def _build_response(
                     SuggestedAction(label="取消", action="cancel"),
                 ],
             }
-        cc = readiness.get("cases_count", 0)
+        total_cc = readiness.get("cases_count", 0)
+
+        # Filter by server's supported_product if server is specified
+        server_product = None
+        filtered_cc = total_cc
+        if server_id:
+            try:
+                from agent.db import get_server as db_get_server
+                srv = db_get_server(server_id)
+                if srv and srv.get("supported_product"):
+                    server_product = srv["supported_product"]
+                    # Count cases matching this product
+                    from agent.db import query_test_cases as db_query_test_cases
+                    from agent.db import find_parent_task
+                    parent_id = find_parent_task(op_name, "case_generate")
+                    if parent_id:
+                        cases = db_query_test_cases(task_id=parent_id)
+                        filtered_cc = sum(
+                            1 for c in cases
+                            if (c.get("supported_product", "")
+                                or (isinstance(c.get("case_data"), dict) and c["case_data"].get("supported_product", "")))
+                            == server_product
+                        )
+            except Exception as e:
+                logger.warning("Failed to filter cases by server product: %s", e)
+
+        if server_product:
+            msg = f"当前服务器支持「{server_product}」，算子 {op_name} 共有 {filtered_cc} 条匹配用例（总计 {total_cc} 条），确认执行？"
+        else:
+            msg = f"算子 {op_name} 共有 {total_cc} 条测试用例，将根据当前执行服务器的支持产品筛选后执行，确认？"
+
         return {
             "response_type": "confirm",
-            "response_message": f"将执行 {op_name} 的 {cc} 条测试用例，确认？",
+            "response_message": msg,
             "suggested_actions": [
                 SuggestedAction(label="确认执行", action="execute_tests", params={"operator_name": op_name}),
                 SuggestedAction(label="取消", action="cancel"),
@@ -868,7 +900,7 @@ async def parse_intent(body: ParseIntentRequest) -> ParseIntentResponse:
     readiness = _check_readiness(op_name) if op_name else {"exists": False}
 
     # Build response
-    response = _build_response(intent, readiness, session)
+    response = _build_response(intent, readiness, session, server_id=body.server_id)
 
     # Store pending action for multi-turn confirm
     if response["response_type"] == "confirm":

@@ -123,6 +123,7 @@ async def _run_case_pipeline(
 
     llm_tracer = LLMTracer()
     state_input: PipelineState = {
+        "run_id": run_id,
         "operator_name": operator_name,
         "cases_count": count,
         "cases_seed": seed,
@@ -167,38 +168,8 @@ async def _run_case_pipeline(
             type(cases_list).__name__, len(cases_list), error,
         )
 
-        # Save individual case records to test_cases table
-        if not error and cases_list:
-            logger.info("Attempting to save %d cases to test_cases table...", len(cases_list))
-            try:
-                from agent.db import query_run as db_query_run
-                from agent.db import save_test_cases as db_save_test_cases
-
-                constraint_doc_id = None
-                if parent_task_id:
-                    parent_run = db_query_run(parent_task_id)
-                    if parent_run:
-                        constraint_doc_id = parent_run.get("doc_id")
-
-                logger.info(
-                    "save_test_cases params: task_id=%s, operator=%s, "
-                    "cases_len=%d, constraint_doc_id=%s",
-                    run_id, operator_name, len(cases_list), constraint_doc_id,
-                )
-                save_result = db_save_test_cases(
-                    task_id=run_id,
-                    operator_name=operator_name,
-                    cases=cases_list,
-                    constraint_doc_id=constraint_doc_id,
-                )
-                logger.info("Saved test cases to DB: %s", save_result)
-            except Exception as e:
-                logger.exception("Failed to save test cases to DB: %s", e)
-        else:
-            logger.warning(
-                "Skipping test_cases save: error=%s, cases_list_empty=%s",
-                error, not cases_list,
-            )
+        # Note: test cases are now saved inside case_generate_node itself
+        # to ensure they're available immediately when the node completes
 
         # ── Mirror upload.py: write the final run row (status +
         # result_json) so the DB reflects what really happened.  Without

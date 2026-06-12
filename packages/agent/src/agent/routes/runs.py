@@ -195,12 +195,19 @@ async def get_run_parameters(run_id: str):
 
     Looks up doc_id from pipeline_runs, then queries the parameters table
     for param_name, param_type, direction, src_content and other fields.
+    If the current run has no doc_id, walk up the parent task chain.
     """
     db_run = db_query_run(run_id)
     if not db_run:
         return {"success": False, "error": "Run not found"}
 
     doc_id = db_run.get("doc_id")
+    if not doc_id:
+        chain = db_get_task_chain(run_id)
+        for task in chain:
+            if task.get("doc_id"):
+                doc_id = task["doc_id"]
+                break
     if not doc_id:
         return {"success": False, "error": "Run has no doc_id yet — pipeline may still be running"}
 
@@ -233,12 +240,19 @@ async def get_run_relations(run_id: str):
     """Return all param_relations for a pipeline run.
 
     Looks up doc_id from pipeline_runs, then queries param_relations table.
+    If the current run has no doc_id, walk up the parent task chain.
     """
     db_run = db_query_run(run_id)
     if not db_run:
         return {"success": False, "error": "Run not found"}
 
     doc_id = db_run.get("doc_id")
+    if not doc_id:
+        chain = db_get_task_chain(run_id)
+        for task in chain:
+            if task.get("doc_id"):
+                doc_id = task["doc_id"]
+                break
     if not doc_id:
         return {"success": False, "error": "Run has no doc_id yet — pipeline may still be running"}
 
@@ -255,12 +269,25 @@ async def get_run_relations(run_id: str):
 
 @router.get("/runs/{run_id}/json-constraints")
 async def get_run_json_constraints(run_id: str):
-    """Return json_constraints from document_versions for a pipeline run."""
+    """Return json_constraints from document_versions for a pipeline run.
+
+    If the current run has no doc_id (e.g. case_generate / test_execute tasks),
+    walk up the parent task chain to find one that does.
+    """
     db_run = db_query_run(run_id)
     if not db_run:
         return {"success": False, "error": "Run not found"}
 
     doc_id = db_run.get("doc_id")
+
+    # Walk up parent chain to find a doc_id
+    if not doc_id:
+        chain = db_get_task_chain(run_id)
+        for task in chain:
+            if task.get("doc_id"):
+                doc_id = task["doc_id"]
+                break
+
     if not doc_id:
         return {"success": False, "error": "Run has no doc_id yet — pipeline may still be running"}
 
@@ -305,14 +332,49 @@ async def delete_run(run_id: str):
 async def list_test_cases(
     task_id: str | None = Query(default=None),
     operator_name: str | None = Query(default=None),
+    supported_product: str | None = Query(default=None),
     limit: int = Query(default=500),
 ):
-    """Query test cases by task_id or operator_name."""
+    """Query test cases by task_id or operator_name, optionally filtered by product."""
     cases = db_query_test_cases(task_id=task_id, operator_name=operator_name, limit=limit)
+
+    # Filter by supported_product if specified
+    if supported_product:
+        filtered = []
+        for c in cases:
+            case_product = c.get("supported_product", "")
+            if not case_product and isinstance(c.get("case_data"), dict):
+                case_product = c["case_data"].get("supported_product", "")
+            if case_product == supported_product:
+                filtered.append(c)
+        cases = filtered
+
     return {
         "success": True,
         "count": len(cases),
         "cases": cases,
+    }
+
+
+@router.get("/test-cases/products")
+async def list_test_case_products(
+    task_id: str | None = Query(default=None),
+    operator_name: str | None = Query(default=None),
+):
+    """Get list of unique supported_product values for test cases."""
+    cases = db_query_test_cases(task_id=task_id, operator_name=operator_name, limit=5000)
+
+    products = set()
+    for c in cases:
+        p = c.get("supported_product", "")
+        if not p and isinstance(c.get("case_data"), dict):
+            p = c["case_data"].get("supported_product", "")
+        if p:
+            products.add(p)
+
+    return {
+        "success": True,
+        "products": sorted(list(products)),
     }
 
 
