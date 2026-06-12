@@ -168,6 +168,7 @@
 - `.dtype` — 参数的数据类型
 - `.format` — 参数的数据格式
 - `.range_value` — 参数的取值（用于衍生参数引用）
+- `len(x.shape)` — 参数的shape长度（维度个数/ndim）。**注意**：Markdown中的"shape size"指的就是shape的长度（维度个数），不是元素总数。例如 x 的 shape 是 (B,C,T)，那么 x 的 shape size 是 3，而不是 B*C*T
 - `is None` — 判断可选参数是否未提供
 - 条件表达式：`A if condition else B`
 
@@ -214,6 +215,7 @@
 | "数据类型与入参x一致" | type_equality | `x2.dtype == x1.dtype` |
 | "数据格式与入参x一致" | type_equality | `x2.format == x1.format` |
 | "shape与x保持一致" | shape_dependency | `out.shape == x.shape` |
+| "shape size大于等于x的shape size" | shape_dependency | `len(out.shape) >= len(x.shape)`（shape size = 维度个数，即 `len(shape)`） |
 | "shape为[B, H]或[B, 1, H]" | shape_choice | 多分支or表达式 |
 | "shape为[H]，H与x中H维一致" | shape_dependency | `w.shape[0] == x.shape[-1]` |
 | "shape为(num_layers, batch, hidden)" | shape_value_dependency | `shape[0] == numLayers` |

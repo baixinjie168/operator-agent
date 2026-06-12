@@ -59,6 +59,7 @@ class LLMProvider(StrEnum):
     ZAI = "zai"
     DEEPSEEK = "deepseek"
     OWN_AI = "own-ai"
+    QWEN = "qwen"
 
 
 class TestCaseCategory(StrEnum):

@@ -20,6 +20,10 @@ _PROVIDER_DEFAULTS: dict[LLMProvider, dict[str, str]] = {
         "base_url": "https://api.openai.com/v1",
         "model": "gpt-4o",
     },
+    LLMProvider.QWEN: {
+        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "model": "qwen3.7-max",
+    },
 }
 
 
@@ -61,6 +65,11 @@ class Settings(BaseSettings):
     own_ai_base_url: str = _PROVIDER_DEFAULTS[LLMProvider.OWN_AI]["base_url"]
     own_ai_model: str = _PROVIDER_DEFAULTS[LLMProvider.OWN_AI]["model"]
 
+    # Qwen-specific configuration (DashScope OpenAI-compatible)
+    qwen_api_key: SecretStr = SecretStr("")
+    qwen_base_url: str = _PROVIDER_DEFAULTS[LLMProvider.QWEN]["base_url"]
+    qwen_model: str = _PROVIDER_DEFAULTS[LLMProvider.QWEN]["model"]
+
     # Shared LLM settings
     llm_temperature: float = Field(default=0.7, ge=0.0, le=2.0)
 
@@ -89,6 +98,8 @@ class Settings(BaseSettings):
                 return self.deepseek_base_url
             case LLMProvider.OWN_AI:
                 return self.own_ai_base_url
+            case LLMProvider.QWEN:
+                return self.qwen_base_url
 
     @property
     def active_model(self) -> str:
@@ -100,6 +111,8 @@ class Settings(BaseSettings):
                 return self.deepseek_model
             case LLMProvider.OWN_AI:
                 return self.own_ai_model
+            case LLMProvider.QWEN:
+                return self.qwen_model
 
     def _active_api_key(self) -> str:
         match self.llm_provider:
@@ -109,6 +122,8 @@ class Settings(BaseSettings):
                 return self.deepseek_api_key.get_secret_value()
             case LLMProvider.OWN_AI:
                 return self.own_ai_api_key.get_secret_value()
+            case LLMProvider.QWEN:
+                return self.qwen_api_key.get_secret_value()
 
 
 settings = Settings()

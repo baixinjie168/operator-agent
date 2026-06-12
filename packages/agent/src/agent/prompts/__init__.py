@@ -532,6 +532,15 @@ RELATION_OBJECT_BUILD_PROMPT = """\
     必须使用负索引 shape[-1] 而非固定正索引 shape[1] 或 shape[2]，
     因为同一参数可能有多种 shape 形式（如"(T,N,C)或(T,C)"），
     正索引在不同 shape 下指向不同的维度
+16. 引用参数时必须使用 params 列表中的原始名称，不要自行转换命名风格
+    （如不要将 camelCase 的 numLayers 转成 snake_case 的 num_layers）
+17. 对于标量维度变量（如 time_step、batch_size、hidden_size 等非 Tensor 的
+    隐含维度参数），引用其数值时必须使用 .range_value，
+    例如 time_step.range_value，而非直接写 time_step
+18. "shape size"（或"shape 大小"、"shape 长度"、"维度数"）指的是 shape 的
+    **维数（rank）**，即 len(x.shape)，而不是各维大小的乘积（元素总数）。
+    例如 x 的 shape 是 (B, C, T)，则 x 的 shape size 是 3，不是 B*C*T。
+    表达式中用 len(x.shape) 表示 shape size
 
 ## 示例
 
@@ -560,6 +569,22 @@ RELATION_OBJECT_BUILD_PROMPT = """\
 输入: description="x 的取值需满足特定条件（详见说明）", params=["x"]
 输出: {{"expr_type": "value_dependency", "expr": ""}}
 注意：无法写出明确表达式时返回空字符串
+
+### 示例 7: shape_value_dependency（隐含维度变量 + camelCase 参数名）
+输入: description="initH 的 shape 为 (numLayers, batch_size, hidden_size)，bidirection 为 True 时第一维为 2 * numLayers",
+      params=["initH", "numLayers", "bidirection", "batch_size", "hidden_size"]
+输出: {{"expr_type": "shape_value_dependency", "expr": "(initH.shape[0] == (2 * numLayers.range_value if bidirection.range_value else numLayers.range_value)) and initH.shape[1] == batch_size.range_value and initH.shape[2] == hidden_size.range_value"}}
+注意：
+- numLayers 是 params 中的原始名称（camelCase），不要转换为 num_layers
+- batch_size、hidden_size 是标量维度变量，引用其值时使用 .range_value
+- numLayers 也是标量参数，引用其值时同样使用 .range_value
+
+### 示例 8: shape_dependency（shape size / 维度数比较）
+输入: description="out 的 shape size 大于等于 x1 的 shape size", params=["out", "x1"]
+输出: {{"expr_type": "shape_dependency", "expr": "len(out.shape) >= len(x1.shape)"}}
+注意：
+- "shape size" 指维数（rank），用 len(x.shape) 表示
+- 不是各维大小的乘积，不要写成 out.shape[0]*out.shape[1]*... 的形式
 
 ## 函数签名上下文
 {signatures_text}

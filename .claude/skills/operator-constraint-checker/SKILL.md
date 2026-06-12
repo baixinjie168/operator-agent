@@ -237,6 +237,7 @@ JSON约束文档的完整结构详见 `references/json-schema.md`。核心结构
 - **self_shape_nonempty**：`all(d > 0 for d in x.shape)` 格式是否正确
 - **self_dtype_consistency**：TensorList内dtype一致性表达是否正确
 - **expr_type 分类**：`expr_type` 是否与约束的实际语义匹配（如混合了类型一致性和shape约束的不应该标为 `value_dependency`）
+- **"shape size" 术语**：Markdown中的"shape size"指的是 shape 的长度（即维度个数/ndim），**不是**元素总数。例如 x 的 shape 是 (B,C,T)，那么 x 的 shape size 是 3，而不是 B*C*T。对应的表达式应使用 `len(x.shape)` 表示
 
 **输出**：每条约束的四项子检查结果表格，列出表达式、四项子检查的结论和分析详情。
 
@@ -279,3 +280,4 @@ JSON约束文档的完整结构详见 `references/json-schema.md`。核心结构
 6. **可选参数**：参数名含Optional的参数，在表达式中需检查 `is None` 判断是否完整
 7. **函数签名解析**：从 `function_signature` 或 Markdown代码块中提取参数列表时，需要去掉 `const`、`*`、`&` 修饰符来获取纯类型名
 8. **array_length**：仅对数组类型参数（如 `aclIntArray`、`aclTensorList`、`aclFloatArray` 等）有意义，非数组类型应为 "N/A"
+9. **"shape size" 含义**：Markdown中出现的"shape size"指的是 shape 的长度（维度个数/ndim），而非元素总数。例：x 的 shape 是 (B,C,T)，则 x 的 shape size = 3（不是 B×C×T）。在表达式中用 `len(x.shape)` 表示

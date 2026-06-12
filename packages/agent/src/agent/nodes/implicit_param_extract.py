@@ -39,25 +39,63 @@ _SHAPE_TUPLE_RE = re.compile(r"[（(]\s*([^)）]+)\s*[）)]")
 # Named dimension variable: lowercase snake_case identifier
 _DIM_VAR_RE = re.compile(r"\b([a-z][a-z0-9]*(?:_[a-z][a-z0-9]*)*)\b")
 
-# Words that look like dimension variables but are not
+# Words that look like dimension variables but are not.
+#
+# Organised by category.  When adding new entries, keep them sorted
+# within each group so duplicates are easy to spot.
 _EXCLUDE_WORDS = frozenset({
-    # Python / JSON literals
+    # -- Python / JSON literals --
     "true", "false", "none", "null",
-    # Common non-dimension terms
+
+    # -- Common non-dimension terms --
     "shape", "dtype", "format", "type",
     "input", "output", "tensor", "optional",
     "nd", "acl",
-    # Data type names
+
+    # -- C base type keywords (no digit suffix) --
+    "float", "double", "void", "char", "int", "long", "short",
+    "signed", "unsigned", "struct", "union", "enum",
+
+    # -- C fixed-width type keywords (with _t suffix) --
+    "int8_t", "int16_t", "int32_t", "int64_t",
+    "uint8_t", "uint16_t", "uint32_t", "uint64_t",
+    "size_t", "ptrdiff_t",
+
+    # -- Bare data-type names (with digit suffix, already existed) --
     "float16", "float32", "float64",
     "int8", "int16", "int32", "int64",
     "uint8", "uint16", "uint32", "uint64",
     "bool", "string",
-    # Common non-variable words
+
+    # -- Common non-variable identifiers from Markdown / URLs --
+    "common", "md", "html", "http", "https", "www",
+    "aclnn", "aclrt", "device", "host",
+
+    # -- English stop-words / logical operators --
     "or", "and", "if", "else", "when",
+    "the", "for", "not", "with", "from",
 })
 
-_SECTION_TYPES = ("params_get_workspace", "params_execute")
 
+def _is_markdown_url(content: str) -> bool:
+    """Return True if *content* looks like a Markdown hyperlink URL.
+
+    ``_SHAPE_TUPLE_RE`` happily matches the ``(url)`` part of
+    ``[text](url)`` links.  Such matches are never shape tuples and
+    should be skipped to avoid extracting spurious identifiers like
+    ``common`` or ``md`` from paths such as ``../common/xxx.md``.
+    """
+    stripped = content.strip()
+    if "/" in stripped:
+        return True
+    if stripped.endswith(".md") or stripped.endswith(".html"):
+        return True
+    if stripped.startswith("..") or stripped.startswith("./"):
+        return True
+    return False
+
+
+_SECTION_TYPES = ("params_get_workspace", "params_execute")
 
 # ---------------------------------------------------------------------------
 # Helper functions
@@ -88,10 +126,17 @@ def _collect_signature_params(signatures: list[dict]) -> set[str]:
 
 
 def _extract_dim_vars(text: str) -> set[str]:
-    """Extract named dimension variables from shape tuple strings."""
+    """Extract named dimension variables from shape tuple strings.
+
+    Skips parenthesized content that looks like a Markdown hyperlink URL
+    (e.g. ``../common/非连续的Tensor.md``) to avoid extracting spurious
+    identifiers such as ``common`` or ``md``.
+    """
     dim_vars: set[str] = set()
     for match in _SHAPE_TUPLE_RE.finditer(text):
         tuple_content = match.group(1)
+        if _is_markdown_url(tuple_content):
+            continue
         for var_match in _DIM_VAR_RE.finditer(tuple_content):
             var_name = var_match.group(1)
             if var_name not in _EXCLUDE_WORDS:
@@ -139,6 +184,9 @@ def _identify_implicit_params(
 
     for match in _SHAPE_TUPLE_RE.finditer(sections_text):
         tuple_content = match.group(1)
+        # Skip Markdown hyperlink URLs like (../common/xxx.md)
+        if _is_markdown_url(tuple_content):
+            continue
         for var_match in _DIM_VAR_RE.finditer(tuple_content):
             var_name = var_match.group(1)
             if var_name in _EXCLUDE_WORDS or var_name in sig_params:
