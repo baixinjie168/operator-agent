@@ -37,7 +37,7 @@ async def build_param_constraint_node(state: PipelineState) -> dict[str, Any]:
     1. Query params (full columns), function_signatures, platform_support, dtype_combos
     2. Build indexes: sig_type_map, operator_params, dtype_by_platform
     3. LLM batch parse shape → dimensions
-    4. LLM batch extract allowed_range_value (non-Tensor params only)
+    4. LLM batch extract allowed_range_value (all param types)
     5. Assemble constraint JSON per (function_name, param_name) × platform
     6. Batch update param_constraint via MCP
     """
@@ -98,17 +98,11 @@ async def build_param_constraint_node(state: PipelineState) -> dict[str, Any]:
         # Step 3: LLM batch parse shape → dimensions
         shape_map = await _batch_parse_dimensions(params)
 
-        # Step 4: LLM batch extract allowed_range_value for non-Tensor params
-        non_tensor_params = [
-            p for p in params
-            if "aclTensor" not in sig_type_map.get(
-                (p["function_name"], p["param_name"]), ""
-            )
-        ]
+        # Step 4: LLM batch extract allowed_range_value for all params
         constraints_section = await _mcp_client.get_section(doc_id, "constraints")
         constraints_text = (constraints_section or {}).get("content", "") or ""
         ar_map = await _batch_extract_allowed_range(
-            non_tensor_params, constraints_text
+            params, constraints_text
         )
 
         # Step 4b: Narrow bool allowed_range_value using existing constraints
@@ -118,7 +112,7 @@ async def build_param_constraint_node(state: PipelineState) -> dict[str, Any]:
         # for a bool parameter, we narrow the default [True, False] to the
         # single constrained value (e.g. [False]).
         bool_params = [
-            p for p in non_tensor_params
+            p for p in params
             if _is_bool_type(p.get("param_type", ""))
         ]
         if bool_params:
@@ -188,11 +182,8 @@ async def build_param_constraint_node(state: PipelineState) -> dict[str, Any]:
                 shape_raw = param.get("shape", "") or ""
                 dimensions_value = shape_map.get((fn_name, pname), [])
 
-                # allowed_range_value: Tensor → [], else from LLM
-                if is_tensor:
-                    ar_value: list = []
-                else:
-                    ar_value = ar_map.get((fn_name, pname), [])
+                # allowed_range_value: from LLM extraction (all param types)
+                ar_value = ar_map.get((fn_name, pname), [])
 
                 constraint[plat] = {
                     "description": param.get("param_desc", "") or param.get("llm_description", "") or "",
@@ -706,7 +697,7 @@ async def _batch_extract_allowed_range(
     params: list[dict],
     constraints_text: str,
 ) -> dict[tuple[str, str], list]:
-    """Batch extract allowed_range_value for non-Tensor params via LLM.
+    """Batch extract allowed_range_value for all params via LLM.
 
     Flow:
     1. Bool type params: short-circuit with [True, False]
@@ -857,7 +848,7 @@ async def _batch_extract_allowed_range(
 
     extracted = sum(1 for v in result.values() if v)
     logger.info(
-        "BuildParamConstraint: extracted allowed_range for %d/%d non-Tensor params "
+        "BuildParamConstraint: extracted allowed_range for %d/%d params "
         "(%d bool short-circuited, %d deterministic, %d LLM)",
         extracted, len(params), len(bool_params), deterministic_count, len(llm_needed),
     )

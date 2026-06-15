@@ -117,25 +117,12 @@ def _is_bool_type(param_type: str) -> bool:
     return param_type.lower() == "bool"
 
 
-def _is_tensor_type(param_type: str) -> bool:
-    """Check if parameter type is a Tensor type (aclTensor, aclTensorList, etc.)."""
-    return "aclTensor" in param_type
-
-
 async def _extract_allowed_range(llm: ChatOpenAI, param: dict, sections_text: str) -> dict | None:
     param_name = param.get("param_name", "")
     param_type = param.get("param_type", "")
     function_name = param.get("function_name", "")
 
     if not sections_text.strip():
-        return {
-            "function_name": function_name,
-            "param_name": param_name,
-            "allowed_range_value": "[]",
-        }
-
-    # Tensor types: no value range concept, skip LLM call
-    if _is_tensor_type(param_type):
         return {
             "function_name": function_name,
             "param_name": param_name,

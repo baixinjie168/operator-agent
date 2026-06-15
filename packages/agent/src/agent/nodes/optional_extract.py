@@ -25,7 +25,7 @@ _JSON_BLOCK_RE = re.compile(r"```(?:json)?\s*([\s\S]*?)```", re.IGNORECASE)
 async def optional_extract_node(state: PipelineState) -> dict[str, Any]:
     """Judge whether each parameter is optional from its description and persist to DB.
 
-    Reads parameters from state (populated by param_desc_extract) instead of
+    Reads parameters from state (populated by llm_description_extract) instead of
     making a redundant MCP query. Each parameter gets its own LLM call
     for precise判断, with controlled concurrency.
 

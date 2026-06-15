@@ -138,9 +138,11 @@ async def _extract_one(
     direction = _parse_direction(parsed.get("direction", ""))
     src_content = parsed.get("src_content", "").strip()
 
-    # If direction was already set by table_column_extract, preserve it.
+    # If direction was already set by table_column_extract to a valid value,
+    # preserve it.  Only "input" / "output" are authoritative — ignore any
+    # other value (e.g. a DB default or placeholder).
     existing_direction = param.get("direction")
-    if existing_direction:
+    if existing_direction in ("input", "output"):
         direction = existing_direction
 
     # If is_support_discontinuous was already set by table_column_extract,

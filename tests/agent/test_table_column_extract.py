@@ -173,7 +173,7 @@ class TestExtract4Columns:
     def test_dash_values_treated_as_empty(self):
         grid, col_map, name_idx = self._get_grid_and_map()
         result = extract_4_columns_from_table(grid, col_map, "y", "aclTensor", name_idx)
-        assert result["shape"] == ""  # dash → empty
+        assert result.get("shape") in (None, "")  # dash → not included or empty
         assert result["dtype_desc"] == "INT64"
         assert result["dformat_desc"] == "ND、NZ"
         disc = json.loads(result["is_support_discontinuous"])
@@ -183,7 +183,7 @@ class TestExtract4Columns:
         grid, col_map, name_idx = self._get_grid_and_map()
         result = extract_4_columns_from_table(grid, col_map, "offset", "uint64_t", name_idx)
         assert result["shape"] == "1"
-        assert result["dformat_desc"] == ""  # dash → empty
+        assert result.get("dformat_desc") in (None, "")  # dash → not included or empty
         disc = json.loads(result["is_support_discontinuous"])
         assert disc["value"] == "N/A"
 
@@ -299,3 +299,93 @@ class TestExtractDiscontinuous:
     def test_src_text_preserved(self):
         disc = json.loads(_extract_discontinuous("√", "aclTensor"))
         assert disc["src_text"] == "√"
+
+
+# ---------------------------------------------------------------------------
+# Relative-reference handling (e.g. "与self一致")
+# ---------------------------------------------------------------------------
+
+from agent.utils.table_parser import _is_relative_ref
+
+
+class TestIsRelativeRef:
+    """Test _is_relative_ref detects cross-parameter references."""
+
+    def test_yu_self_yizhi(self):
+        assert _is_relative_ref("与self一致") is True
+
+    def test_yu_backtick_self_yizhi(self):
+        assert _is_relative_ref("与`self`一致") is True
+
+    def test_tong_input_yizhi(self):
+        assert _is_relative_ref("同input一致") is True
+
+    def test_yu_x_xiangtong(self):
+        assert _is_relative_ref("与x相同") is True
+
+    def test_he_self_yiyang(self):
+        assert _is_relative_ref("和self一样") is True
+
+    def test_yu_self_baochi_yizhi(self):
+        assert _is_relative_ref("与self保持一致") is True
+
+    def test_valid_dtype_not_ref(self):
+        assert _is_relative_ref("FLOAT32") is False
+        assert _is_relative_ref("FLOAT16、BFLOAT16") is False
+
+    def test_valid_shape_not_ref(self):
+        assert _is_relative_ref("1-8") is False
+        assert _is_relative_ref("(N,C,H,W)") is False
+
+    def test_valid_format_not_ref(self):
+        assert _is_relative_ref("ND") is False
+        assert _is_relative_ref("ND、NZ") is False
+
+    def test_empty_string(self):
+        assert _is_relative_ref("") is False
+
+    def test_dash(self):
+        assert _is_relative_ref("-") is False
+
+
+class TestExtract4ColumnsRelativeRef:
+    """Ensure relative references in dtype/shape/dformat are cleared."""
+
+    def test_dtype_relative_ref_cleared(self):
+        header = ["参数名", "数据类型", "数据格式", "维度(shape)", "非连续Tensor"]
+        grid = [header, ["gradOutput", "与`self`一致", "ND", "-", "√"]]
+        col_map = detect_table_columns(header)
+        name_idx = find_param_name_column(header)
+        result = extract_4_columns_from_table(grid, col_map, "gradOutput", "aclTensor", name_idx)
+        # dtype should be cleared (relative ref)
+        assert result.get("dtype_desc") is None or result.get("dtype_desc") == ""
+        # dformat "ND" is a real value — should be preserved
+        assert result["dformat_desc"] == "ND"
+        # shape "-" → empty
+        assert result.get("shape") is None or result.get("shape") == ""
+        # discontinuous should work normally
+        disc = json.loads(result["is_support_discontinuous"])
+        assert disc["value"] is True
+
+    def test_shape_relative_ref_cleared(self):
+        header = ["参数名", "数据类型", "维度(shape)"]
+        grid = [header, ["target", "FLOAT32", "与self一致"]]
+        col_map = detect_table_columns(header)
+        name_idx = find_param_name_column(header)
+        result = extract_4_columns_from_table(grid, col_map, "target", "aclTensor", name_idx)
+        # dtype "FLOAT32" is real — preserved
+        assert result["dtype_desc"] == "FLOAT32"
+        # shape "与self一致" should be cleared
+        assert result.get("shape") is None or result.get("shape") == ""
+
+    def test_param_desc_relative_ref_preserved(self):
+        """param_desc should NOT be cleared — it's useful context for LLM."""
+        header = ["参数名", "数据类型", "描述"]
+        grid = [header, ["out", "与self一致", "shape与self相同"]]
+        col_map = detect_table_columns(header)
+        name_idx = find_param_name_column(header)
+        result = extract_4_columns_from_table(grid, col_map, "out", "aclTensor", name_idx)
+        # dtype cleared (relative ref)
+        assert result.get("dtype_desc") is None or result.get("dtype_desc") == ""
+        # param_desc preserved (even if it contains relative ref language)
+        assert result["param_desc"] == "shape与self相同"

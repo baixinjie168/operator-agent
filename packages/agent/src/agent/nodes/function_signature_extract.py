@@ -160,8 +160,8 @@ def _signatures_to_parameters(signatures: list[dict]) -> list[dict]:
     Each signature's parameters array is expanded into individual records
     with keys: function_name, param_name, param_type.
 
-    The ``direction`` field is intentionally omitted so the DB default
-    ('input') takes effect.  Downstream nodes (table_column_extract and
+    The ``direction`` field is intentionally omitted so the DB stores an
+    empty string as placeholder.  Downstream nodes (table_column_extract and
     llm_description_extract) will fill in the correct direction.
     """
     parameters: list[dict] = []

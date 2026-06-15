@@ -19,27 +19,51 @@ logger = logging.getLogger(__name__)
 # Attribute checklist
 # ---------------------------------------------------------------------------
 
+def _section_filled(desc: str, header: str) -> bool:
+    """Check whether a structured ``# header`` section in *desc* has real content.
+
+    Returns True when the section exists and its body is not just "无" or
+    whitespace.  For backward compatibility with old natural-language
+    descriptions (which never contain ``# `` headers), returns False so
+    that the caller can fall back to keyword-based checks.
+    """
+    import re as _re
+
+    pattern = _re.compile(
+        r"^#\s+" + _re.escape(header) + r"\s*\n(.*?)(?=^#|\Z)",
+        _re.MULTILINE | _re.DOTALL,
+    )
+    m = pattern.search(desc)
+    if m is None:
+        return False
+    body = m.group(1).strip()
+    return bool(body) and body != "无"
+
+
 ATTR_CHECKLIST: list[tuple[str, Any]] = [
     ("direction", lambda r: r.get("direction") in ("input", "output")),
     (
         "dtype",
-        lambda r: any(
+        lambda r: _section_filled(r.get("llm_description", ""), "数据类型")
+        or any(
             k in r.get("llm_description", "").lower()
             for k in ["float", "int", "bool", "dtype", "type"]
         ),
     ),
     (
         "shape",
-        lambda r: any(
+        lambda r: _section_filled(r.get("llm_description", ""), "维度约束")
+        or any(
             k in r.get("llm_description", "").lower()
-            for k in ["shape", "dim", "dimension"]
+            for k in ["shape", "dim", "dimension", "维度", "形状"]
         ),
     ),
     (
         "optional",
-        lambda r: any(
-            k in r.get("llm_description", "").lower()
-            for k in ["optional", "required", "mandatory"]
+        lambda r: _section_filled(r.get("llm_description", ""), "是否可选")
+        or any(
+            k in r.get("llm_description", "")
+            for k in ["optional", "required", "mandatory", "必选", "可选"]
         ),
     ),
     (

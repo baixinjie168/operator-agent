@@ -114,3 +114,111 @@ async def run_task(task_id: int) -> None:
             task["completed_count"],
             task["failed_count"],
         )
+
+
+async def retry_failed_task(task_id: int) -> dict:
+    """Retry failed operators from a completed task.
+
+    Extracts all failed items from the original task, creates a new
+    task containing only those items, and kicks off background execution.
+
+    Args:
+        task_id: The original task ID whose failed items should be retried.
+
+    Returns:
+        dict with new_task_id, new_task_name, failed_count, upload_dir.
+
+    Raises:
+        ValueError: If the task is not found, still running, or has no
+            failed items.
+    """
+    mcp = MCPClient()
+
+    # Verify the original task exists
+    task = await mcp.get_task(task_id)
+    if task is None:
+        raise ValueError(f"Task {task_id} not found")
+
+    # Only allow retry for finished tasks (completed or failed)
+    if task["status"] == "running":
+        raise ValueError("Cannot retry a task that is still running")
+
+    # Fetch all items and filter failed ones
+    task_detail = await mcp.get_task_with_items(task_id)
+    if task_detail is None:
+        raise ValueError(f"Task {task_id} detail not found")
+
+    failed_items = [
+        item for item in task_detail.get("items", [])
+        if item["status"] == "failed"
+    ]
+    if not failed_items:
+        raise ValueError("No failed items to retry")
+
+    # Build new task name
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    original_name = task["name"]
+    new_name = f"{original_name}-retry-{timestamp}"
+
+    # Reuse the original upload_dir (files are still on disk)
+    upload_dir = task["upload_dir"]
+
+    # Build item list for the new task
+    items = [
+        {
+            "seq": seq,
+            "operator_name": item["operator_name"],
+            "file_path": item["file_path"],
+        }
+        for seq, item in enumerate(failed_items, start=1)
+    ]
+
+    # Create new task + items in DB
+    result = await mcp.create_task(new_name, len(items), upload_dir)
+    new_task_id = result["task_id"]
+    await mcp.create_task_items(new_task_id, items)
+
+    # Kick off background execution
+    asyncio.create_task(run_task(new_task_id))
+
+    logger.info(
+        "Created retry task %s (name=%s) for %d failed items from task %s",
+        new_task_id,
+        new_name,
+        len(items),
+        task_id,
+    )
+
+    return {
+        "new_task_id": new_task_id,
+        "new_task_name": new_name,
+        "failed_count": len(items),
+        "upload_dir": upload_dir,
+    }
+
+
+async def resume_task(task_id: int) -> dict:
+    """Resume a stuck task by resetting stuck items and re-running.
+
+    1. Reset all task items stuck in 'running' back to 'pending'.
+    2. Re-run the task via run_task() which picks up pending items.
+
+    Returns:
+        dict with reset_count (number of items reset from 'running').
+    """
+    mcp = MCPClient()
+
+    # Reset stuck items
+    result = await mcp.reset_stuck_task_items(task_id)
+    reset_count = result.get("reset_count", 0)
+
+    logger.info(
+        "Resuming task %s: reset %d stuck items to pending",
+        task_id,
+        reset_count,
+    )
+
+    # Re-run the task (acquires lock internally)
+    asyncio.create_task(run_task(task_id))
+
+    return {"reset_count": reset_count, "task_id": task_id}

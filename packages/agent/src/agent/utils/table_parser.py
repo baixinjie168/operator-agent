@@ -162,6 +162,36 @@ def _clean_cell_value(value: str) -> str:
     return v
 
 
+# ---------------------------------------------------------------------------
+# Relative-reference detection
+# ---------------------------------------------------------------------------
+# Some table cells contain cross-references like "与self一致", "同input一
+# 致", "与`self`相同" instead of concrete values.  These should NOT be
+# treated as valid dtype / shape / dformat values — downstream LLM nodes
+# need to resolve them.
+
+_RELATIVE_REF_RE = re.compile(
+    r"^(?:与|同|和|跟)"          # leading preposition
+    r".{1,20}"                   # target param name (possibly in backticks)
+    r"(?:一致|相同|一样|保持一致|保持一致|同)$",  # trailing comparator
+)
+
+
+def _is_relative_ref(value: str) -> bool:
+    """Return True if *value* is a cross-reference like '与self一致'.
+
+    Such values appear in dtype / shape / dformat columns when a parameter
+    inherits its properties from another parameter.  They are not directly
+    usable and must be resolved by the LLM extract nodes.
+    """
+    v = value.strip()
+    if not v:
+        return False
+    # Strip backtick quoting: 与`self`一致 → 与self一致
+    v = v.replace("`", "")
+    return bool(_RELATIVE_REF_RE.match(v))
+
+
 def _extract_direction(cell_value: str) -> str:
     """Normalize direction cell value to 'input' / 'output' / ''.
 
@@ -227,17 +257,26 @@ def extract_4_columns_from_table(
     if "shape" in col_map:
         idx = col_map["shape"]
         if idx < len(target_row):
-            result["shape"] = _clean_cell_value(target_row[idx])
+            val = _clean_cell_value(target_row[idx])
+            # "与self一致" etc. is not a real shape — let LLM resolve it.
+            if val and not _is_relative_ref(val):
+                result["shape"] = val
 
     if "dtype_desc" in col_map:
         idx = col_map["dtype_desc"]
         if idx < len(target_row):
-            result["dtype_desc"] = _clean_cell_value(target_row[idx])
+            val = _clean_cell_value(target_row[idx])
+            # "与self一致" etc. is not a real dtype — let LLM resolve it.
+            if val and not _is_relative_ref(val):
+                result["dtype_desc"] = val
 
     if "dformat_desc" in col_map:
         idx = col_map["dformat_desc"]
         if idx < len(target_row):
-            result["dformat_desc"] = _clean_cell_value(target_row[idx])
+            val = _clean_cell_value(target_row[idx])
+            # "与self一致" etc. is not a real format — let LLM resolve it.
+            if val and not _is_relative_ref(val):
+                result["dformat_desc"] = val
 
     if "is_support_discontinuous" in col_map:
         idx = col_map["is_support_discontinuous"]

@@ -2126,17 +2126,29 @@ async function loadTaskDetail(taskId) {
 
     // Download button (only when there are completed items)
     const actionsEl = document.getElementById('taskDetailActions');
-    if (t.completed_count > 0) {
-      actionsEl.innerHTML = `<button class="secondary" onclick="downloadTaskResults(${t.id}, '${escapeHtml(t.name)}')">⬇ 下载结果 (${t.completed_count})</button>`;
-    } else {
-      actionsEl.innerHTML = '';
+    let actionsHtml = '';
+
+    // Count stuck (running) and pending items
+    const items = t.items || [];
+    const stuckCount = items.filter(i => i.status === 'running').length;
+    const pendingCount = items.filter(i => i.status === 'pending').length;
+    const canResume = stuckCount > 0 || pendingCount > 0;
+
+    if (canResume) {
+      const resumeLabel = stuckCount > 0
+        ? `▶ 继续执行 (重置 ${stuckCount} 个卡住 + ${pendingCount} 个待处理)`
+        : `▶ 继续执行 (${pendingCount} 个待处理)`;
+      actionsHtml += `<button onclick="resumeTask(${t.id})">${resumeLabel}</button>`;
     }
+    if (t.completed_count > 0) {
+      actionsHtml += `<button class="secondary" onclick="downloadTaskResults(${t.id}, '${escapeHtml(t.name)}')">⬇ 下载结果 (${t.completed_count})</button>`;
+    }
+    actionsEl.innerHTML = actionsHtml;
 
     const pct = t.total_count > 0 ? Math.round((t.completed_count + t.failed_count) / t.total_count * 100) : 0;
     progressFill.style.width = pct + '%';
     progressFill.className = 'task-progress-fill' + (t.failed_count > 0 ? ' has-errors' : '');
 
-    const items = t.items || [];
     if (items.length === 0) {
       contentEl.innerHTML = '<div class="empty-state">无任务条目</div>';
       return;
@@ -2180,6 +2192,23 @@ function _startTaskDetailPoll(taskId) {
 
 function _stopTaskDetailPoll() {
   if (_taskDetailPollTimer) { clearInterval(_taskDetailPollTimer); _taskDetailPollTimer = null; }
+}
+
+/* -- Resume stuck task -- */
+async function resumeTask(taskId) {
+  try {
+    const res = await fetch('/api/v1/tasks/' + taskId + '/resume', { method: 'POST' });
+    const data = await res.json();
+    if (data.success) {
+      // Restart polling to show live progress
+      _startTaskDetailPoll(taskId);
+      loadTaskDetail(taskId);
+    } else {
+      alert('恢复失败: ' + (data.error || '未知错误'));
+    }
+  } catch (err) {
+    alert('恢复失败: ' + err.message);
+  }
 }
 
 function _formatDuration(startStr, endStr) {

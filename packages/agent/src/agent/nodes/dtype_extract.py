@@ -21,11 +21,48 @@ _CONCURRENCY_LIMIT = 5
 
 _JSON_BLOCK_RE = re.compile(r"```(?:json)?\s*([\s\S]*?)```", re.IGNORECASE)
 
+_VALID_DTYPES = frozenset({
+    "FLOAT", "FLOAT32", "FLOAT16", "INT8", "INT32", "UINT8",
+    "INT16", "UINT16", "UINT32", "INT64", "UINT64", "DOUBLE",
+    "FLOAT64", "BOOL", "STRING", "COMPLEX64", "COMPLEX128",
+    "BF16", "BFLOAT16", "INT", "UINT1", "COMPLEX32",
+})
+
+# Matches cross-reference patterns like "与self一致", "同input相同"
+_RELATIVE_REF_RE = re.compile(
+    r"^(?:与|同|和|跟)"
+    r".{1,20}"
+    r"(?:一致|相同|一样|保持一致|保持一致|同)$",
+)
+
+
+def _is_dtype_valid(dtype_desc: str) -> bool:
+    """Check whether an existing dtype_desc value is reasonable.
+
+    Returns False for values that should trigger re-extraction:
+    - Empty / whitespace-only strings
+    - Dash variants
+    - Cross-references to other params
+    - Tokens not in the approved dtype whitelist
+    """
+    s = dtype_desc.strip()
+    if not s:
+        return False
+    if s in ("-", "—", "–", "－"):
+        return False
+    cleaned = s.replace("`", "")
+    if _RELATIVE_REF_RE.match(cleaned):
+        return False
+    tokens = [t.strip().upper() for t in re.split(r"[,、，/]", s) if t.strip()]
+    if not tokens:
+        return False
+    return all(t in _VALID_DTYPES for t in tokens)
+
 
 async def dtype_extract_node(state: PipelineState) -> dict[str, Any]:
     """Extract data type values from parameter descriptions and persist to DB.
 
-    Reads parameters from state (populated by param_desc_extract) instead of
+    Reads parameters from state (populated by llm_description_extract) instead of
     making a redundant MCP query. Each parameter gets its own LLM call
     for precise extraction, with controlled concurrency.
 
@@ -50,10 +87,28 @@ async def dtype_extract_node(state: PipelineState) -> dict[str, Any]:
             logger.info("DtypeExtract: no parameters in state for doc_id=%s, skipping", doc_id)
             return {"error": None}
 
-        described = [p for p in params if p.get("llm_description") and not p.get("dtype_desc")]
+        described = [
+            p for p in params
+            if p.get("llm_description")
+            and (not p.get("dtype_desc") or not _is_dtype_valid(p.get("dtype_desc", "")))
+        ]
         if not described:
             logger.info("DtypeExtract: no parameters needing dtype extraction for doc_id=%s, skipping", doc_id)
             return {"error": None}
+
+        # Clear invalid dtype values before re-extraction so downstream
+        # nodes don't see stale bad data.
+        invalid_clears = [
+            {"function_name": p["function_name"], "param_name": p["param_name"], "dtype": ""}
+            for p in described
+            if p.get("dtype_desc") and not _is_dtype_valid(p.get("dtype_desc", ""))
+        ]
+        if invalid_clears:
+            await _mcp_client.update_param_dtype(doc_id, invalid_clears)
+            logger.info(
+                "DtypeExtract: cleared %d invalid dtype values (doc_id=%s)",
+                len(invalid_clears), doc_id,
+            )
 
         llm = _create_llm()
         sem = asyncio.Semaphore(_CONCURRENCY_LIMIT)

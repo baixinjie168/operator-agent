@@ -119,13 +119,6 @@ class MCPClient:
             "section_type": section_type,
         })
 
-    async def update_param_descriptions(self, doc_id: int, updates: list[dict]) -> dict:
-        """Batch update parameter description fields."""
-        return await self._call_tool("update_param_descs", {
-            "doc_id": doc_id,
-            "updates": json.dumps(updates, ensure_ascii=False),
-        })
-
     async def update_param_shape(self, doc_id: int, updates: list[dict]) -> dict:
         """Batch update only the shape field of parameters."""
         return await self._call_tool("update_param_shape", {
@@ -150,13 +143,6 @@ class MCPClient:
     async def update_param_optional(self, doc_id: int, updates: list[dict]) -> dict:
         """Batch update only the is_optional field of parameters."""
         return await self._call_tool("update_param_optional", {
-            "doc_id": doc_id,
-            "updates": json.dumps(updates, ensure_ascii=False),
-        })
-
-    async def update_param_src_content(self, doc_id: int, updates: list[dict]) -> dict:
-        """Batch update only the src_content field of parameters."""
-        return await self._call_tool("update_param_src_content", {
             "doc_id": doc_id,
             "updates": json.dumps(updates, ensure_ascii=False),
         })
@@ -452,3 +438,7 @@ class MCPClient:
     async def refresh_task_progress(self, task_id: int) -> dict:
         """Refresh task progress counts."""
         return await self._call_tool("refresh_task_progress", {"task_id": task_id})
+
+    async def reset_stuck_task_items(self, task_id: int) -> dict:
+        """Reset task items stuck in 'running' back to 'pending'."""
+        return await self._call_tool("reset_stuck_task_items", {"task_id": task_id})

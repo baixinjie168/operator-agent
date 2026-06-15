@@ -289,7 +289,7 @@ def save_parameters(doc_id: int, parameters: list[dict]) -> dict:
                 param.get("function_name", ""),
                 param.get("param_name", ""),
                 param.get("param_type", ""),
-                param.get("direction", "input"),
+                param.get("direction", ""),
                 param.get("src_content", ""),
                 param.get("data_type", ""),
                 param.get("data_format", ""),
@@ -341,41 +341,6 @@ def query_params_by_doc_id(doc_id: int) -> list[dict]:
         }
         for r in rows
     ]
-
-
-def update_param_descriptions(doc_id: int, updates: list[dict]) -> dict:
-    """Batch update parameter llm_description fields.
-
-    Args:
-        doc_id: Primary key of document_versions table.
-        updates: List of dicts with keys: function_name, param_name,
-                 direction, data_type, data_format, shape, description.
-
-    Returns:
-        dict with count of updated parameters.
-    """
-    db = get_db()
-    conn = db.conn
-    count = 0
-    for u in updates:
-        cursor = conn.execute(
-            "UPDATE parameters SET direction = ?, llm_description = ?, "
-            "dtype_desc = ?, dformat_desc = ?, shape = ? "
-            "WHERE doc_id = ? AND function_name = ? AND param_name = ?",
-            (
-                u.get("direction", ""),
-                u.get("llm_description", ""),
-                u.get("data_type", ""),
-                u.get("data_format", ""),
-                u.get("shape", ""),
-                doc_id,
-                u.get("function_name", ""),
-                u.get("param_name", ""),
-            ),
-        )
-        count += cursor.rowcount
-    conn.commit()
-    return {"updated": count}
 
 
 def update_param_shape(doc_id: int, updates: list[dict]) -> dict:
@@ -468,30 +433,6 @@ def update_param_optional(doc_id: int, updates: list[dict]) -> dict:
             "UPDATE parameters SET is_optional = ? "
             "WHERE doc_id = ? AND function_name = ? AND param_name = ?",
             (u.get("is_optional", 0), doc_id, u.get("function_name", ""), u.get("param_name", "")),
-        )
-        count += cursor.rowcount
-    conn.commit()
-    return {"updated": count}
-
-
-def update_param_src_content(doc_id: int, updates: list[dict]) -> dict:
-    """Batch update only the src_content field of parameters.
-
-    Args:
-        doc_id: Primary key of document_versions table.
-        updates: List of dicts with keys: function_name, param_name, src_content.
-
-    Returns:
-        dict with count of updated parameters.
-    """
-    db = get_db()
-    conn = db.conn
-    count = 0
-    for u in updates:
-        cursor = conn.execute(
-            "UPDATE parameters SET src_content = ? "
-            "WHERE doc_id = ? AND function_name = ? AND param_name = ?",
-            (u.get("src_content", ""), doc_id, u.get("function_name", ""), u.get("param_name", "")),
         )
         count += cursor.rowcount
     conn.commit()

@@ -21,7 +21,6 @@ from mcp_server.tools.document_tools import (
     save_document,
     save_parameters,
     save_parsed_document,
-    update_param_descriptions,
 )
 from mcp_server.tools.document_tools import get_parsed_by_doc_id as _get_parsed_by_doc_id
 from mcp_server.tools.document_tools import (
@@ -129,9 +128,6 @@ from mcp_server.tools.document_tools import (
 from mcp_server.tools.document_tools import (
     update_param_shape as _update_param_shape,
 )
-from mcp_server.tools.document_tools import (
-    update_param_src_content as _update_param_src_content,
-)
 from mcp_server.tools.task_tools import (
     create_task as _create_task,
 )
@@ -152,6 +148,9 @@ from mcp_server.tools.task_tools import (
 )
 from mcp_server.tools.task_tools import (
     refresh_task_progress as _refresh_task_progress,
+)
+from mcp_server.tools.task_tools import (
+    reset_stuck_task_items as _reset_stuck_task_items,
 )
 from mcp_server.tools.task_tools import (
     update_task_item_status as _update_task_item_status,
@@ -344,23 +343,6 @@ def query_params_by_doc(doc_id: int) -> str:
 
 
 @mcp.tool()
-def update_param_descs(doc_id: int, updates: str) -> str:
-    """Batch update parameter description fields.
-
-    Args:
-        doc_id: Primary key of document_versions table.
-        updates: JSON string — array of dicts with function_name, param_name,
-                 description, data_type, data_format, shape.
-
-    Returns:
-        JSON string with count of updated parameters.
-    """
-    data = json.loads(updates)
-    result = update_param_descriptions(doc_id, data)
-    return json.dumps(result, ensure_ascii=False)
-
-
-@mcp.tool()
 def update_param_shape(doc_id: int, updates: str) -> str:
     """Batch update only the shape field of parameters.
 
@@ -421,22 +403,6 @@ def update_param_optional(doc_id: int, updates: str) -> str:
     """
     data = json.loads(updates)
     result = _update_param_optional(doc_id, data)
-    return json.dumps(result, ensure_ascii=False)
-
-
-@mcp.tool()
-def update_param_src_content(doc_id: int, updates: str) -> str:
-    """Batch update only the src_content field of parameters.
-
-    Args:
-        doc_id: Primary key of document_versions table.
-        updates: JSON string — array of dicts with function_name, param_name, src_content.
-
-    Returns:
-        JSON string with count of updated parameters.
-    """
-    data = json.loads(updates)
-    result = _update_param_src_content(doc_id, data)
     return json.dumps(result, ensure_ascii=False)
 
 
@@ -1100,6 +1066,24 @@ def refresh_task_progress(task_id: int) -> str:
         JSON string with updated completed_count and failed_count.
     """
     result = _refresh_task_progress(task_id)
+    return json.dumps(result, ensure_ascii=False)
+
+
+@mcp.tool()
+def reset_stuck_task_items(task_id: int) -> str:
+    """Reset task items stuck in 'running' back to 'pending'.
+
+    Handles the case where the server crashed while items were being
+    processed, leaving them in 'running' status indefinitely.
+    Also resets the parent task status from 'running' to 'pending'.
+
+    Args:
+        task_id: Task ID.
+
+    Returns:
+        JSON string with count of reset items.
+    """
+    result = _reset_stuck_task_items(task_id)
     return json.dumps(result, ensure_ascii=False)
 
 

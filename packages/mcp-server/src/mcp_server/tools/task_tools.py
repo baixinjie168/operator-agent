@@ -274,3 +274,46 @@ def refresh_task_progress(task_id: int) -> dict:
     )
     conn.commit()
     return {"completed_count": completed, "failed_count": failed}
+
+
+def reset_stuck_task_items(task_id: int) -> dict:
+    """Reset task items stuck in 'running' back to 'pending'.
+
+    This handles the case where the server crashed or was restarted while
+    items were being processed.  Those items remain in 'running' status
+    indefinitely and block subsequent execution.
+
+    Also resets the parent task status to 'pending' if it was 'running'.
+
+    Args:
+        task_id: Task ID.
+
+    Returns:
+        dict with count of reset items.
+    """
+    db = get_db()
+    conn = db.conn
+
+    # Count stuck items first
+    stuck_count = conn.execute(
+        "SELECT COUNT(*) FROM task_items WHERE task_id = ? AND status = 'running'",
+        (task_id,),
+    ).fetchone()[0]
+
+    if stuck_count > 0:
+        # Reset stuck items to pending, clear started_at
+        conn.execute(
+            "UPDATE task_items SET status = 'pending', started_at = NULL "
+            "WHERE task_id = ? AND status = 'running'",
+            (task_id,),
+        )
+
+    # Reset task status from 'running' to 'pending'
+    conn.execute(
+        "UPDATE tasks SET status = 'pending', updated_at = ? "
+        "WHERE id = ? AND status = 'running'",
+        (_now_iso(), task_id),
+    )
+    conn.commit()
+
+    return {"reset_count": stuck_count}

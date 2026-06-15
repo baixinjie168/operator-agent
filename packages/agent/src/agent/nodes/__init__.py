@@ -8,12 +8,10 @@ from agent.nodes.function_signature_extract import (
 )
 from agent.nodes.init_doc import init_doc_node
 from agent.nodes.product_support import product_support_node
-from agent.nodes.src_content_extract import src_content_extract_node
 
 __all__ = [
     "init_doc_node",
     "product_support_node",
     "function_signature_extract_node",
     "function_explanation_extract_node",
-    "src_content_extract_node",
 ]

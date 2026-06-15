@@ -20,6 +20,7 @@ from agent.mcp_client import MCPClient
 from agent.schemas.task import (
     CreateTaskRequest,
     CreateTaskResponse,
+    RetryTaskResponse,
     TaskDetailResponse,
     TaskDocItem,
     TaskDocsResponse,
@@ -27,7 +28,7 @@ from agent.schemas.task import (
     TaskListResponse,
     TaskSummary,
 )
-from agent.services.task_engine import run_task
+from agent.services.task_engine import resume_task, retry_failed_task, run_task
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1", tags=["task"])
@@ -303,3 +304,58 @@ async def download_task_results(task_id: int) -> Response:
         media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@router.post("/tasks/{task_id}/resume")
+async def resume_stuck_task(task_id: int) -> dict:
+    """Resume a task that has items stuck in 'running' status.
+
+    Resets stuck items to 'pending' and re-starts background execution.
+    """
+    # Verify task exists
+    task = await _mcp_client.get_task(task_id)
+    if task is None:
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    try:
+        result = await resume_task(task_id)
+        return {
+            "success": True,
+            "task_id": task_id,
+            "reset_count": result["reset_count"],
+        }
+    except Exception as e:
+        logger.exception("Failed to resume task %s", task_id)
+        return {"success": False, "error": str(e)}
+
+
+@router.post("/tasks/{task_id}/retry-failed", response_model=RetryTaskResponse)
+async def retry_failed_operators(task_id: int) -> RetryTaskResponse:
+    """Retry all failed operators from a completed task.
+
+    Creates a new task containing only the operators that failed in the
+    original task, then kicks off background execution for the new task.
+    """
+    # Verify task exists
+    task = await _mcp_client.get_task(task_id)
+    if task is None:
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    try:
+        result = await retry_failed_task(task_id)
+        return RetryTaskResponse(
+            success=True,
+            new_task_id=result["new_task_id"],
+            new_task_name=result["new_task_name"],
+            failed_count=result["failed_count"],
+            upload_dir=result["upload_dir"],
+        )
+    except ValueError as e:
+        return RetryTaskResponse(success=False, error=str(e))
+    except Exception as e:
+        logger.exception("Failed to retry task %s", task_id)
+        return RetryTaskResponse(success=False, error=str(e))

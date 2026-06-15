@@ -57,6 +57,17 @@ class TaskListResponse(BaseModel):
     tasks: list[TaskSummary]
 
 
+class RetryTaskResponse(BaseModel):
+    """Response for POST /api/v1/tasks/{task_id}/retry-failed."""
+
+    success: bool
+    new_task_id: int | None = None
+    new_task_name: str | None = None
+    failed_count: int | None = None
+    upload_dir: str | None = None
+    error: str | None = None
+
+
 class TaskItemDetail(BaseModel):
     """Detail of a single task item."""
 
