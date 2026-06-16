@@ -92,7 +92,7 @@ def query_params_by_doc_id(doc_id: int) -> list[dict]:
     """
     db = get_db()
     rows = db.conn.execute(
-        "SELECT id, function_name, param_name, param_type, direction, description, "
+        "SELECT id, function_name, param_name, param_type, direction, llm_description, "
         "dtype_desc, dformat_desc, shape, src_content, is_optional, "
         "is_support_discontinuous, array_length, allowed_range_value, param_constraint "
         "FROM parameters WHERE doc_id = ? "
@@ -125,7 +125,7 @@ def query_relations_by_doc_id(doc_id: int) -> list[dict]:
     """Query all param_relations for a specific document version by doc_id."""
     db = get_db()
     rows = db.conn.execute(
-        "SELECT id, function_name, relation_type, precondition, description, "
+        "SELECT id, function_name, relation_type, platform, description, "
         "params, source_citation, relation_object "
         "FROM param_relations WHERE doc_id = ? "
         "ORDER BY id",
@@ -136,7 +136,7 @@ def query_relations_by_doc_id(doc_id: int) -> list[dict]:
             "id": r[0],
             "function_name": r[1],
             "relation_type": r[2],
-            "precondition": r[3],
+            "platform": r[3],
             "description": r[4],
             "params": json.loads(r[5]) if r[5] else [],
             "source_citation": r[6],
