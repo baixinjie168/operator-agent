@@ -193,6 +193,11 @@ async def _fetch_sections(doc_id: int, section_types: list[str]) -> str:
     return "\n\n".join(parts)
 
 
+def _is_bool_type(param_type: str) -> bool:
+    """Check if parameter type is bool."""
+    return param_type.lower() == "bool"
+
+
 async def _extract_allowed_range(llm: ChatOpenAI, param: dict, sections_text: str) -> dict | None:
     param_name = param.get("param_name", "")
     param_type = param.get("param_type", "")
@@ -203,6 +208,17 @@ async def _extract_allowed_range(llm: ChatOpenAI, param: dict, sections_text: st
             "function_name": function_name,
             "param_name": param_name,
             "allowed_range_value": "[]",
+        }
+
+    # Bool type: short-circuit with [true, false]
+    if _is_bool_type(param_type):
+        return {
+            "function_name": function_name,
+            "param_name": param_name,
+            "allowed_range_value": json.dumps(
+                [{"platform": "", "allowed_range_value": "true, false"}],
+                ensure_ascii=False,
+            ),
         }
 
     prompt = ALLOWED_RANGE_EXTRACT_PROMPT.format(

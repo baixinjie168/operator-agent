@@ -21,7 +21,6 @@ from mcp_server.tools.document_tools import (
     save_document,
     save_parameters,
     save_parsed_document,
-    update_param_descriptions,
 )
 from mcp_server.tools.document_tools import (
     get_document_content as _get_document_content,
@@ -109,6 +108,15 @@ from mcp_server.tools.document_tools import (
     update_param_attrs as _update_param_attrs,
 )
 from mcp_server.tools.document_tools import (
+    update_param_desc as _update_param_desc,
+)
+from mcp_server.tools.document_tools import (
+    update_param_direction as _update_param_direction,
+)
+from mcp_server.tools.document_tools import (
+    update_llm_descriptions as _update_llm_descriptions,
+)
+from mcp_server.tools.document_tools import (
     update_param_constraint as _update_param_constraint,
 )
 from mcp_server.tools.document_tools import (
@@ -126,8 +134,35 @@ from mcp_server.tools.document_tools import (
 from mcp_server.tools.document_tools import (
     update_param_shape as _update_param_shape,
 )
-from mcp_server.tools.document_tools import (
-    update_param_src_content as _update_param_src_content,
+from mcp_server.tools.task_tools import (
+    create_task as _create_task,
+)
+from mcp_server.tools.task_tools import (
+    create_task_items as _create_task_items,
+)
+from mcp_server.tools.task_tools import (
+    get_pending_task_items as _get_pending_task_items,
+)
+from mcp_server.tools.task_tools import (
+    get_task as _get_task,
+)
+from mcp_server.tools.task_tools import (
+    get_task_with_items as _get_task_with_items,
+)
+from mcp_server.tools.task_tools import (
+    list_tasks as _list_tasks,
+)
+from mcp_server.tools.task_tools import (
+    refresh_task_progress as _refresh_task_progress,
+)
+from mcp_server.tools.task_tools import (
+    reset_stuck_task_items as _reset_stuck_task_items,
+)
+from mcp_server.tools.task_tools import (
+    update_task_item_status as _update_task_item_status,
+)
+from mcp_server.tools.task_tools import (
+    update_task_status as _update_task_status,
 )
 from mcp_server.tools.test_case_tools import (
     do_get_test_cases as _do_get_test_cases,
@@ -228,11 +263,11 @@ def save_parsed(operator_name: str, version: int, parsed_data: str) -> str:
         parsed_data: JSON string of ParsedOperatorDocument.
 
     Returns:
-        "ok" on success.
+        JSON string {"status": "ok"} on success.
     """
     data = json.loads(parsed_data)
     save_parsed_document(operator_name, version, data)
-    return "ok"
+    return json.dumps({"status": "ok"})
 
 
 @mcp.resource("operator://list")
@@ -279,11 +314,11 @@ def save_product_support(doc_id: int, product_support_data: str) -> str:
         product_support_data: JSON string — array of {product, support} dicts.
 
     Returns:
-        "ok" on success.
+        JSON string {"status": "ok"} on success.
     """
     data = json.loads(product_support_data)
     do_save_product_support(doc_id, data)
-    return "ok"
+    return json.dumps({"status": "ok"})
 
 
 @mcp.resource("operator://{name}")
@@ -319,23 +354,6 @@ def query_params_by_doc(doc_id: int) -> str:
         JSON array of parameter objects.
     """
     result = query_params_by_doc_id(doc_id)
-    return json.dumps(result, ensure_ascii=False)
-
-
-@mcp.tool()
-def update_param_descs(doc_id: int, updates: str) -> str:
-    """Batch update parameter description fields.
-
-    Args:
-        doc_id: Primary key of document_versions table.
-        updates: JSON string — array of dicts with function_name, param_name,
-                 description, data_type, data_format, shape.
-
-    Returns:
-        JSON string with count of updated parameters.
-    """
-    data = json.loads(updates)
-    result = update_param_descriptions(doc_id, data)
     return json.dumps(result, ensure_ascii=False)
 
 
@@ -404,35 +422,70 @@ def update_param_optional(doc_id: int, updates: str) -> str:
 
 
 @mcp.tool()
-def update_param_src_content(doc_id: int, updates: str) -> str:
-    """Batch update only the src_content field of parameters.
-
-    Args:
-        doc_id: Primary key of document_versions table.
-        updates: JSON string — array of dicts with function_name, param_name, src_content.
-
-    Returns:
-        JSON string with count of updated parameters.
-    """
-    data = json.loads(updates)
-    result = _update_param_src_content(doc_id, data)
-    return json.dumps(result, ensure_ascii=False)
-
-
-@mcp.tool()
 def update_param_attrs(doc_id: int, updates: str) -> str:
-    """Batch update is_support_discontinuous and param_desc fields of parameters.
+    """Batch update is_support_discontinuous field of parameters.
 
     Args:
         doc_id: Primary key of document_versions table.
         updates: JSON string — array of dicts with function_name, param_name,
-                 is_support_discontinuous, param_desc.
+                 is_support_discontinuous.
 
     Returns:
         JSON string with count of updated parameters.
     """
     data = json.loads(updates)
     result = _update_param_attrs(doc_id, data)
+    return json.dumps(result, ensure_ascii=False)
+
+
+@mcp.tool()
+def update_param_desc(doc_id: int, updates: str) -> str:
+    """Batch update param_desc field of parameters.
+
+    Args:
+        doc_id: Primary key of document_versions table.
+        updates: JSON string — array of dicts with function_name, param_name,
+                 param_desc.
+
+    Returns:
+        JSON string with count of updated parameters.
+    """
+    data = json.loads(updates)
+    result = _update_param_desc(doc_id, data)
+    return json.dumps(result, ensure_ascii=False)
+
+
+@mcp.tool()
+def update_param_direction(doc_id: int, updates: str) -> str:
+    """Batch update direction field of parameters.
+
+    Args:
+        doc_id: Primary key of document_versions table.
+        updates: JSON string — array of dicts with function_name, param_name,
+                 direction ('input' or 'output').
+
+    Returns:
+        JSON string with count of updated parameters.
+    """
+    data = json.loads(updates)
+    result = _update_param_direction(doc_id, data)
+    return json.dumps(result, ensure_ascii=False)
+
+
+@mcp.tool()
+def update_llm_descriptions(doc_id: int, updates: str) -> str:
+    """Batch update llm_description, src_content, direction, and is_support_discontinuous.
+
+    Args:
+        doc_id: Primary key of document_versions table.
+        updates: JSON string — array of dicts with function_name, param_name,
+                 llm_description, src_content, direction, is_support_discontinuous.
+
+    Returns:
+        JSON string with count of updated parameters.
+    """
+    data = json.loads(updates)
+    result = _update_llm_descriptions(doc_id, data)
     return json.dumps(result, ensure_ascii=False)
 
 
@@ -945,6 +998,82 @@ def save_test_cases(
 
 
 @mcp.tool()
+def create_task(name: str, total_count: int, upload_dir: str) -> str:
+    """Create a new batch processing task.
+
+    Args:
+        name: Task name (e.g. 'batch-20260604').
+        total_count: Total number of documents in the task.
+        upload_dir: Directory path where uploaded files are stored.
+
+    Returns:
+        JSON string with task_id and status.
+    """
+    result = _create_task(name, total_count, upload_dir)
+    return json.dumps(result, ensure_ascii=False)
+
+
+@mcp.tool()
+def create_task_items(task_id: int, items: str) -> str:
+    """Batch create task items for a task.
+
+    Args:
+        task_id: Parent task ID.
+        items: JSON string — array of dicts with seq, operator_name, file_path.
+
+    Returns:
+        JSON string with count of inserted items.
+    """
+    data = json.loads(items)
+    result = _create_task_items(task_id, data)
+    return json.dumps(result, ensure_ascii=False)
+
+
+@mcp.tool()
+def update_task_status(task_id: int, status: str) -> str:
+    """Update task status.
+
+    Args:
+        task_id: Task ID.
+        status: New status (pending/running/completed/failed).
+
+    Returns:
+        JSON string with updated flag.
+    """
+    result = _update_task_status(task_id, status)
+    return json.dumps(result, ensure_ascii=False)
+
+
+@mcp.tool()
+def update_task_item_status(
+    item_id: int,
+    status: str,
+    error: str | None = None,
+    doc_id: int | None = None,
+    started_at: str | None = None,
+    finished_at: str | None = None,
+) -> str:
+    """Update task item status and optional fields.
+
+    Args:
+        item_id: Task item ID.
+        status: New status (pending/running/completed/failed).
+        error: Error message (if failed).
+        doc_id: Document version ID (if completed).
+        started_at: ISO timestamp when processing started.
+        finished_at: ISO timestamp when processing finished.
+
+    Returns:
+        JSON string with updated flag.
+    """
+    result = _update_task_item_status(
+        item_id, status, error=error, doc_id=doc_id,
+        started_at=started_at, finished_at=finished_at,
+    )
+    return json.dumps(result, ensure_ascii=False)
+
+
+@mcp.tool()
 def get_test_cases(operator_name: str) -> str:
     """Return the most recent saved test cases for ``operator_name``.
 
@@ -959,6 +1088,20 @@ def get_test_cases(operator_name: str) -> str:
 
 
 @mcp.tool()
+def get_pending_task_items(task_id: int) -> str:
+    """Get all pending task items for a task, ordered by seq.
+
+    Args:
+        task_id: Task ID.
+
+    Returns:
+        JSON array of task item dicts with status='pending'.
+    """
+    result = _get_pending_task_items(task_id)
+    return json.dumps(result, ensure_ascii=False)
+
+
+@mcp.tool()
 def list_test_case_operators() -> str:
     """List operator names that have saved test cases, with counts.
 
@@ -966,6 +1109,77 @@ def list_test_case_operators() -> str:
         JSON array of ``{operator_name, count, last_created_at}`` objects.
     """
     result = _do_list_test_case_operators()
+    return json.dumps(result, ensure_ascii=False)
+
+
+@mcp.tool()
+def get_task(task_id: int) -> str:
+    """Get a single task by ID.
+
+    Args:
+        task_id: Task ID.
+
+    Returns:
+        JSON string of task dict, or "null" if not found.
+    """
+    result = _get_task(task_id)
+    return json.dumps(result, ensure_ascii=False)
+
+
+@mcp.tool()
+def list_tasks() -> str:
+    """List all tasks ordered by created_at DESC.
+
+    Returns:
+        JSON array of task dicts.
+    """
+    result = _list_tasks()
+    return json.dumps(result, ensure_ascii=False)
+
+
+@mcp.tool()
+def get_task_with_items(task_id: int) -> str:
+    """Get a task with all its items.
+
+    Args:
+        task_id: Task ID.
+
+    Returns:
+        JSON string of task dict with items array, or "null" if not found.
+    """
+    result = _get_task_with_items(task_id)
+    return json.dumps(result, ensure_ascii=False)
+
+
+@mcp.tool()
+def refresh_task_progress(task_id: int) -> str:
+    """Recount completed/failed items and update task progress.
+
+    Args:
+        task_id: Task ID.
+
+    Returns:
+        JSON string with updated completed_count and failed_count.
+    """
+    result = _refresh_task_progress(task_id)
+    return json.dumps(result, ensure_ascii=False)
+
+
+@mcp.tool()
+def reset_stuck_task_items(task_id: int) -> str:
+    """Reset task items stuck in 'running' back to 'pending'.
+
+    Handles the case where the server crashed while items were being
+    processed, leaving them in 'running' status indefinitely.
+    Also resets the parent task status from 'running' to 'pending'.
+
+    Args:
+        task_id: Task ID.
+
+    Returns:
+        JSON string with count of reset items.
+    """
+    result = _reset_stuck_task_items(task_id)
     return json.dumps(result, ensure_ascii=False)
 
 

@@ -26,8 +26,47 @@ _STEP_LABEL = "Shape提取"
 
 _JSON_BLOCK_RE = re.compile(r"```(?:json)?\s*([\s\S]*?)```", re.IGNORECASE)
 
+# Matches cross-reference patterns like "与self一致", "同input相同"
+_RELATIVE_REF_RE = re.compile(
+    r"^(?:与|同|和|跟)"
+    r".{1,20}"
+    r"(?:一致|相同|一样|保持一致|保持一致|同)$",
+)
+
+
+def _is_shape_valid(shape: str) -> bool:
+    """Check whether an existing shape value is reasonable.
+
+    Returns False for values that should trigger re-extraction from
+    llm_description:
+    - Empty / whitespace-only strings
+    - Dash variants (-, —, –, －)
+    - Cross-references to other params (e.g. "与self一致")
+    """
+    s = shape.strip()
+    if not s:
+        return False
+    if s in ("-", "—", "–", "－"):
+        return False
+    cleaned = s.replace("`", "")
+    if _RELATIVE_REF_RE.match(cleaned):
+        return False
+    return True
+
 
 async def shape_extract_node(state: PipelineState) -> dict[str, Any]:
+    """Extract unconditional shape values from parameter descriptions and persist to DB.
+
+    Reads parameters from state (populated by llm_description_extract) instead of
+    making a redundant MCP query. Each parameter gets its own LLM call
+    for precise extraction, with controlled concurrency.
+
+    Flow:
+    1. Read parameters from state.parameters (no MCP query needed)
+    2. Filter to parameters with non-empty descriptions
+    3. Concurrent LLM call per parameter (Semaphore controlled)
+    4. Batch update shape field via MCP
+    """
     doc_id = state.get("doc_id", 0)
     operator_name = state.get("operator_name", "")
 
@@ -43,9 +82,14 @@ async def shape_extract_node(state: PipelineState) -> dict[str, Any]:
             logger.info("ShapeExtract: no parameters in state for doc_id=%s, skipping", doc_id)
             return {"error": None}
 
-        described = [p for p in params if p.get("description")]
-        undescribed = [p for p in params if not p.get("description")]
+        described = [
+            p for p in params
+            if p.get("llm_description")
+            and (not p.get("shape") or not _is_shape_valid(p.get("shape", "")))
+        ]
+        undescribed = [p for p in params if not p.get("llm_description")]
 
+        ctx = get_context()
         if undescribed and ctx and ctx.manager:
             for p in undescribed:
                 pn = p.get("param_name", "")
@@ -66,10 +110,23 @@ async def shape_extract_node(state: PipelineState) -> dict[str, Any]:
                     "message": f"参数 {pn} {_STEP_LABEL} 已跳过: 无参数描述",
                     "error": "无参数描述",
                 })
-
         if not described:
-            logger.info("ShapeExtract: no parameters with descriptions for doc_id=%s, skipping", doc_id)
+            logger.info("ShapeExtract: no parameters needing shape extraction for doc_id=%s, skipping", doc_id)
             return {"error": None}
+
+        # Clear invalid shape values before re-extraction so downstream
+        # nodes don't see stale bad data.
+        invalid_clears = [
+            {"function_name": p["function_name"], "param_name": p["param_name"], "shape": ""}
+            for p in described
+            if p.get("shape") and not _is_shape_valid(p.get("shape", ""))
+        ]
+        if invalid_clears:
+            await _mcp_client.update_param_shape(doc_id, invalid_clears)
+            logger.info(
+                "ShapeExtract: cleared %d invalid shape values (doc_id=%s)",
+                len(invalid_clears), doc_id,
+            )
 
         llm = _create_llm()
         sem = asyncio.Semaphore(_CONCURRENCY_LIMIT)
@@ -160,7 +217,7 @@ async def _extract_shape(llm: ChatOpenAI, param: dict) -> dict | None:
     """Call LLM to extract shape for a single parameter."""
     param_name = param.get("param_name", "")
     function_name = param.get("function_name", "")
-    description = param.get("description", "")
+    description = param.get("llm_description", "")
 
     prompt = SHAPE_EXTRACT_PROMPT.format(param_name=param_name, params_text=description)
     response = await llm.ainvoke(prompt)

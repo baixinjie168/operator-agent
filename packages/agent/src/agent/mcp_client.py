@@ -204,13 +204,6 @@ class MCPClient:
             "section_type": section_type,
         })
 
-    async def update_param_descriptions(self, doc_id: int, updates: list[dict]) -> dict:
-        """Batch update parameter description fields."""
-        return await self._call_tool("update_param_descs", {
-            "doc_id": doc_id,
-            "updates": json.dumps(updates, ensure_ascii=False),
-        })
-
     async def update_param_shape(self, doc_id: int, updates: list[dict]) -> dict:
         """Batch update only the shape field of parameters."""
         return await self._call_tool("update_param_shape", {
@@ -239,16 +232,30 @@ class MCPClient:
             "updates": json.dumps(updates, ensure_ascii=False),
         })
 
-    async def update_param_src_content(self, doc_id: int, updates: list[dict]) -> dict:
-        """Batch update only the src_content field of parameters."""
-        return await self._call_tool("update_param_src_content", {
+    async def update_param_attrs(self, doc_id: int, updates: list[dict]) -> dict:
+        """Batch update is_support_discontinuous field of parameters."""
+        return await self._call_tool("update_param_attrs", {
             "doc_id": doc_id,
             "updates": json.dumps(updates, ensure_ascii=False),
         })
 
-    async def update_param_attrs(self, doc_id: int, updates: list[dict]) -> dict:
-        """Batch update is_support_discontinuous and param_desc fields of parameters."""
-        return await self._call_tool("update_param_attrs", {
+    async def update_param_desc(self, doc_id: int, updates: list[dict]) -> dict:
+        """Batch update param_desc field of parameters."""
+        return await self._call_tool("update_param_desc", {
+            "doc_id": doc_id,
+            "updates": json.dumps(updates, ensure_ascii=False),
+        })
+
+    async def update_param_direction(self, doc_id: int, updates: list[dict]) -> dict:
+        """Batch update direction field of parameters."""
+        return await self._call_tool("update_param_direction", {
+            "doc_id": doc_id,
+            "updates": json.dumps(updates, ensure_ascii=False),
+        })
+
+    async def update_llm_descriptions(self, doc_id: int, updates: list[dict]) -> dict:
+        """Batch update llm_description, src_content, direction, is_support_discontinuous."""
+        return await self._call_tool("update_llm_descriptions", {
             "doc_id": doc_id,
             "updates": json.dumps(updates, ensure_ascii=False),
         })
@@ -494,3 +501,72 @@ class MCPClient:
     async def list_test_case_operators(self) -> list[dict]:
         """List operator names that have saved test cases, with counts."""
         return await self._call_tool("list_test_case_operators", {})
+
+    # ── Task management tools ────────────────────────────────────────
+
+    async def create_task(self, name: str, total_count: int, upload_dir: str) -> dict:
+        """Create a new batch processing task."""
+        return await self._call_tool("create_task", {
+            "name": name,
+            "total_count": total_count,
+            "upload_dir": upload_dir,
+        })
+
+    async def create_task_items(self, task_id: int, items: list[dict]) -> dict:
+        """Batch create task items."""
+        return await self._call_tool("create_task_items", {
+            "task_id": task_id,
+            "items": json.dumps(items, ensure_ascii=False),
+        })
+
+    async def update_task_status(self, task_id: int, status: str) -> dict:
+        """Update task status."""
+        return await self._call_tool("update_task_status", {
+            "task_id": task_id,
+            "status": status,
+        })
+
+    async def update_task_item_status(
+        self,
+        item_id: int,
+        status: str,
+        error: str | None = None,
+        doc_id: int | None = None,
+        started_at: str | None = None,
+        finished_at: str | None = None,
+    ) -> dict:
+        """Update task item status."""
+        args: dict[str, Any] = {"item_id": item_id, "status": status}
+        if error is not None:
+            args["error"] = error
+        if doc_id is not None:
+            args["doc_id"] = doc_id
+        if started_at is not None:
+            args["started_at"] = started_at
+        if finished_at is not None:
+            args["finished_at"] = finished_at
+        return await self._call_tool("update_task_item_status", args)
+
+    async def get_pending_task_items(self, task_id: int) -> list[dict]:
+        """Get all pending task items for a task."""
+        return await self._call_tool("get_pending_task_items", {"task_id": task_id})
+
+    async def get_task(self, task_id: int) -> dict | None:
+        """Get a single task by ID."""
+        return await self._call_tool("get_task", {"task_id": task_id})
+
+    async def list_tasks(self) -> list[dict]:
+        """List all tasks."""
+        return await self._call_tool("list_tasks", {})
+
+    async def get_task_with_items(self, task_id: int) -> dict | None:
+        """Get a task with all its items."""
+        return await self._call_tool("get_task_with_items", {"task_id": task_id})
+
+    async def refresh_task_progress(self, task_id: int) -> dict:
+        """Refresh task progress counts."""
+        return await self._call_tool("refresh_task_progress", {"task_id": task_id})
+
+    async def reset_stuck_task_items(self, task_id: int) -> dict:
+        """Reset task items stuck in 'running' back to 'pending'."""
+        return await self._call_tool("reset_stuck_task_items", {"task_id": task_id})

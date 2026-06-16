@@ -1,0 +1,17 @@
+{
+    "python.defaultInterpreterPath": "${workspaceFolder}/.venv/Scripts/python.exe",
+    "python.testing.pytestEnabled": true,
+    "python.testing.pytestArgs": [
+        "tests"
+    ],
+    "python.analysis.extraPaths": [
+        "packages/shared/src",
+        "packages/mcp-server/src",
+        "packages/agent/src"
+    ],
+    "python.envFile": "${workspaceFolder}/.env",
+    "terminal.integrated.env.windows": {
+        "PYTHONPATH": "${workspaceFolder}/packages/shared/src;${workspaceFolder}/packages/mcp-server/src;${workspaceFolder}/packages/agent/src"
+    },
+    "Codegeex.RepoIndex": true
+}

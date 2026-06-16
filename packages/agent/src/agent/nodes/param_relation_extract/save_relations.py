@@ -16,6 +16,14 @@ _STEP_NAME = "param_relation_extract"
 _STEP_LABEL = "参数约束关系提取"
 
 
+def _saved_count(res: object) -> int:
+    """Safely extract 'saved' count from MCP response."""
+    if isinstance(res, dict):
+        return res.get("saved", 0)
+    logger.warning("SaveRelations: unexpected MCP response type: %r", res)
+    return 0
+
+
 async def save_relations_node(state: RelationExtractState) -> dict[str, Any]:
     doc_id = state.get("doc_id", 0)
     operator_name = state.get("operator_name", "")
@@ -48,11 +56,27 @@ async def save_relations_node(state: RelationExtractState) -> dict[str, Any]:
             })
         return {"merged_relations": [], "error": None}
 
+    # Log coverage report for monitoring
+    report = state.get("coverage_report")
+    if report:
+        for section, section_report in report.items():
+            if not isinstance(section_report, dict):
+                continue
+            logger.info(
+                "CoverageReport: doc_id=%s section=%s coverage=%s uncovered=%s rounds=%d total=%d",
+                doc_id,
+                section,
+                section_report.get("coverage", ""),
+                section_report.get("uncovered_params", []),
+                section_report.get("total_rounds", 0),
+                section_report.get("total", 0),
+            )
+
     try:
         result = await _mcp_client.save_param_relations(doc_id, merged)
         logger.info(
             "SaveRelations: saved %d relations (doc_id=%s)",
-            result.get("saved", 0),
+            _saved_count(result),
             doc_id,
         )
 

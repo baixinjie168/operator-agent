@@ -44,6 +44,16 @@ async def assemble_result_node(state: PipelineState) -> dict[str, Any]:
         return_codes = await _mcp_client.query_return_codes_by_doc_id(doc_id)
         dtype_combos = await _mcp_client.query_dtype_combos_by_doc_id(doc_id)
 
+        # Log single-param vs multi-param relation breakdown
+        single_count = sum(
+            1 for r in relations
+            if r.get("relation_type") == "self_constraint"
+        )
+        logger.info(
+            "assemble_result: %d total relations (%d single-param, %d multi-param)",
+            len(relations), single_count, len(relations) - single_count,
+        )
+
         # Step 2b: Fetch function_explanation_summary from document_versions
         fn_expl_summary = await _mcp_client.get_function_explanation_summary(doc_id)
         description = fn_expl_summary.get("description", "")
@@ -78,7 +88,7 @@ async def assemble_result_node(state: PipelineState) -> dict[str, Any]:
         # Step 3e: Build new fields
         det_computing = _build_deterministic_computing(platform_support_data)
         inputs_dict, outputs_dict = _build_inputs_outputs(params)
-        constraints_ip = _build_constraints_in_parameters(relations, product_support_list)
+        constraints_ip = _build_constraints_in_parameters(relations, product_support_list, params)
         dtype_support = _build_dtype_support(dtype_combos)
 
         # Step 4: Save to constraints_result table
@@ -130,6 +140,23 @@ async def assemble_result_node(state: PipelineState) -> dict[str, Any]:
         return {"error": str(e)}
 
 
+def _has_meaningful_expr(obj: dict) -> bool:
+    """Check if a relation_object has a non-empty expr field.
+
+    Relations with empty expr (e.g. presence_dependency descriptions like
+    "当weightOptional为空时，会以self的shape创建一个全1的Tensor") are
+    implementation notes, not verifiable constraints — they should be
+    excluded from the final output.
+    """
+    if not isinstance(obj, dict):
+        return True
+    expr = obj.get("expr", "")
+    if isinstance(expr, str):
+        return bool(expr.strip())
+    # Non-string expr (e.g. list, number) is considered meaningful
+    return True
+
+
 def _build_function_explanation(
     params: list[dict],
     relations: list[dict],
@@ -155,7 +182,11 @@ def _build_function_explanation(
 
     for fn in sorted(all_fn_names):
         fn_params = [p for p in params if p.get("function_name") == fn]
-        fn_relations = [r for r in relations if r.get("function_name") == fn]
+        fn_relations = [
+            r for r in relations
+            if r.get("function_name") == fn
+            and _has_meaningful_expr(r.get("relation_object", {}))
+        ]
         fn_sig = next(
             (s for s in signatures if s.get("function_name") == fn), None,
         )
@@ -242,17 +273,78 @@ def _build_inputs_outputs(
 def _build_constraints_in_parameters(
     relations: list[dict],
     supported_platforms: list[str],
+    params: list[dict],
 ) -> dict[str, list[dict]]:
-    """Build constraints_in_parameters: {platform: [relation_object]}."""
+    """Build constraints_in_parameters: {platform: [relation_object]}.
+
+    Deduplicates single-parameter value_dependency constraints when the
+    parameter already has a non-empty allowed_range_value in inputs/outputs
+    (the structured range is the canonical representation).
+
+    Args:
+        relations: List of param_relation dicts with 'platform' and 'relation_object' fields.
+        supported_platforms: List of platform names where is_supported=1.
+        params: List of parameter dicts (used to build allowed_range_value lookup).
+
+    Returns:
+        Dict mapping platform name to list of relation_object dicts.
+        If a relation's platform is empty, it applies to all supported platforms.
+        If a relation's platform specifies platforms, it only applies to those
+        that are also in supported_platforms.
+    """
+    from agent.utils.platform_utils import resolve_target_platforms
+
+    # Build {param_name: allowed_range_value} lookup from param_constraint JSON
+    ar_lookup: dict[str, list] = {}
+    for p in params:
+        name = p.get("param_name", "")
+        constraint_raw = p.get("param_constraint", "{}") or "{}"
+        try:
+            constraint = json.loads(constraint_raw) if isinstance(constraint_raw, str) else constraint_raw
+        except (json.JSONDecodeError, TypeError):
+            continue
+        # Extract allowed_range_value from any platform (they are all identical)
+        if isinstance(constraint, dict):
+            for plat_data in constraint.values():
+                if isinstance(plat_data, dict):
+                    ar = plat_data.get("allowed_range_value", {})
+                    if isinstance(ar, dict):
+                        val = ar.get("value", [])
+                        if val:
+                            ar_lookup[name] = val
+                    break
     grouped: dict[str, list[dict]] = {}
+    skipped_count = 0
     for r in relations:
         obj = r.get("relation_object", {})
         if not obj or obj == {}:
             continue
-        precondition = r.get("precondition", "无")
-        targets = supported_platforms if precondition == "无" else [precondition]
+        if not _has_meaningful_expr(obj):
+            continue
+
+        # Dedup: skip single-param value_dependency when allowed_range_value covers it
+        expr_type = obj.get("expr_type", "")
+        rel_params = obj.get("relation_params", [])
+        if (
+            expr_type == "value_dependency"
+            and len(rel_params) == 1
+            and rel_params[0] in ar_lookup
+        ):
+            skipped_count += 1
+            continue
+
+        platform_str = r.get("platform", "")
+        targets = resolve_target_platforms(platform_str, supported_platforms)
         for plat in targets:
             grouped.setdefault(plat, []).append(obj)
+
+    if skipped_count > 0:
+        logger.info(
+            "assemble_result: deduplicated %d single-param value_dependency "
+            "constraints (covered by allowed_range_value)",
+            skipped_count,
+        )
+
     return grouped
 
 

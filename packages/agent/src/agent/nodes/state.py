@@ -33,6 +33,8 @@ class PipelineState(TypedDict, total=False):
     product_support: list[dict[str, Any]]
     cann_version: str | None
     function_explanation_summary: dict[str, Any]
+    single_param_constraints: list[dict[str, Any]]
+    implicit_params: list[dict[str, Any]]
     error: Annotated[str | None, merge_errors]
     # ── GeneratorAgent output (set by case_subgraph nodes) ──
     # Loaded by case_match_model

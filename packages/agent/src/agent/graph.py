@@ -20,6 +20,17 @@ Prerequisites are checked automatically:
     returns error if constraints do not exist.
   - EXECUTE without GENERATE: exec_generate_atk requires cases_path in
     state; returns error if not set.
+
+EXTRACT stage flow (updated from main branch):
+    InitDoc -> [ProductSupport || FunctionSignatureExtract || FunctionExplanationExtract]
+           -> TableColumnExtract -> ImplicitParamExtract
+           -> LlmDescriptionExtract (subgraph)
+           -> [detail extractors in parallel]
+           -> BuildParamRelations -> BuildSingleParamConstraint
+           -> BuildParamConstraint -> AssembleResult -> END
+
+Note: FunctionSignatureExtract also produces the flat parameters list
+(replaces the old parse_params node).
 """
 
 from __future__ import annotations
@@ -30,41 +41,50 @@ from enum import Enum
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
+# -- Extract stage nodes (from main branch new architecture) --
 from agent.nodes.allowed_range_extract import allowed_range_extract_node as _allowed_range_extract
 from agent.nodes.array_length_extract import array_length_extract_node as _array_length_extract
 from agent.nodes.assemble_result import assemble_result_node as _assemble_result
 from agent.nodes.build_param_constraint import build_param_constraint_node as _build_param_constraint
 from agent.nodes.build_param_relations import build_param_relations_node as _build_param_relations
+from agent.nodes.determinism_extract import determinism_extract_node as _determinism_extract
+from agent.nodes.dformat_extract import dformat_extract_node as _dformat_extract
+from agent.nodes.dtype_combo_extract import dtype_combo_extract_node as _dtype_combo_extract
+from agent.nodes.dtype_extract import dtype_extract_node as _dtype_extract
+from agent.nodes.function_explanation_extract import (
+    function_explanation_extract_node as _function_explanation_extract,
+)
+from agent.nodes.function_signature_extract import function_signature_extract_node as _function_signature_extract
+from agent.nodes.implicit_param_extract import implicit_param_extract_node as _implicit_param_extract
+from agent.nodes.init_doc import init_doc_node as _init_doc
+from agent.nodes.llm_description_extract import create_description_extract_subgraph
+from agent.nodes.optional_extract import optional_extract_node as _optional_extract
+from agent.nodes.param_relation_extract import create_param_relation_subgraph
+from agent.nodes.product_support import product_support_node as _product_support
+from agent.nodes.return_code_extract import return_code_extract_node as _return_code_extract
+from agent.nodes.shape_extract import shape_extract_node as _shape_extract
+from agent.nodes.single_param_constraint import (
+    build_single_param_constraint_node as _build_single_param_constraint,
+)
+from agent.nodes.state import PipelineState
+from agent.nodes.table_column_extract import table_column_extract_node as _table_column_extract
+
+# -- Generate stage nodes --
 from agent.nodes.case_subgraph import (
     case_generate_node as _case_generate,
     case_init_static_node as _case_init_static,
     case_match_model_node as _case_match_model,
     case_solve_constraints_node as _case_solve_constraints,
 )
-from agent.nodes.determinism_extract import determinism_extract_node as _determinism_extract
-from agent.nodes.dformat_extract import dformat_extract_node as _dformat_extract
-from agent.nodes.dtype_combo_extract import dtype_combo_extract_node as _dtype_combo_extract
-from agent.nodes.dtype_extract import dtype_extract_node as _dtype_extract
+
+# -- Execute stage nodes --
 from agent.nodes.executer_subgraph import (
     exec_cpu_derivation_node as _exec_cpu_derivation,
     exec_generate_atk_node as _exec_generate_atk,
     exec_run_atk_node as _exec_run_atk,
 )
-from agent.nodes.function_explanation_extract import (
-    function_explanation_extract_node as _function_explanation_extract,
-)
-from agent.nodes.function_signature_extract import function_signature_extract_node as _function_signature_extract
-from agent.nodes.init_doc import init_doc_node as _init_doc
-from agent.nodes.optional_extract import optional_extract_node as _optional_extract
-from agent.nodes.param_attr_extract import param_attr_extract_node as _param_attr_extract
-from agent.nodes.param_desc_extract import param_desc_extract_node as _param_desc_extract
-from agent.nodes.param_relation_extract import create_param_relation_subgraph
-from agent.nodes.parse_params import parse_params_node as _parse_params
-from agent.nodes.product_support import product_support_node as _product_support
-from agent.nodes.return_code_extract import return_code_extract_node as _return_code_extract
-from agent.nodes.shape_extract import shape_extract_node as _shape_extract
-from agent.nodes.src_content_extract import src_content_extract_node as _src_content_extract
-from agent.nodes.state import PipelineState
+
+# -- Runtime tracing --
 from agent.runtime import traced_node
 
 logger = logging.getLogger(__name__)
@@ -84,6 +104,14 @@ class PipelineStage(str, Enum):
 #  Conditional routers
 # -------------------------------------------------------------------
 
+def _should_continue(state: dict) -> list[str]:
+    """Route after init_doc: fan out to three nodes, or END on error."""
+    status = state.get("status", "new")
+    if status in ("error",):
+        return END
+    return ["product_support", "function_signature_extract", "function_explanation_extract"]
+
+
 def _route_after_case_match(state: dict) -> str:
     return END if state.get("error") else "case_init_static"
 
@@ -101,57 +129,8 @@ def _route_after_exec_derivation(state: dict) -> str:
 
 
 # -------------------------------------------------------------------
-#  Node lists
+#  Stage constants
 # -------------------------------------------------------------------
-
-_PARALLEL_FAN_OUT = [
-    "product_support",
-    "parse_params",
-    "function_signature_extract",
-    "function_explanation_extract",
-]
-
-_EXTRACT_NODES = [
-    ("product_support", _product_support),
-    ("parse_params", _parse_params),
-    ("function_signature_extract", _function_signature_extract),
-    ("function_explanation_extract", _function_explanation_extract),
-    ("src_content_extract", _src_content_extract),
-    ("param_desc_extract", _param_desc_extract),
-    ("shape_extract", _shape_extract),
-    ("dtype_extract", _dtype_extract),
-    ("dformat_extract", _dformat_extract),
-    ("optional_extract", _optional_extract),
-    ("param_attr_extract", _param_attr_extract),
-    ("array_length_extract", _array_length_extract),
-    ("allowed_range_extract", _allowed_range_extract),
-    ("return_code_extract", _return_code_extract),
-    ("determinism_extract", _determinism_extract),
-    ("dtype_combo_extract", _dtype_combo_extract),
-    ("build_param_relations", _build_param_relations),
-    ("build_param_constraint", _build_param_constraint),
-    ("assemble_result", _assemble_result),
-]
-
-_GENERATE_NODES = [
-    ("case_match_model", _case_match_model),
-    ("case_init_static", _case_init_static),
-    ("case_solve_constraints", _case_solve_constraints),
-    ("case_generate", _case_generate),
-]
-
-_EXECUTE_NODES = [
-    ("exec_generate_atk", _exec_generate_atk),
-    ("exec_cpu_derivation", _exec_cpu_derivation),
-    ("exec_run_atk", _exec_run_atk),
-]
-
-_DETAIL_EXTRACTORS = [
-    "shape_extract", "dtype_extract", "dformat_extract",
-    "optional_extract", "param_attr_extract", "array_length_extract",
-    "allowed_range_extract", "return_code_extract", "determinism_extract",
-    "dtype_combo_extract", "param_relation_extract",
-]
 
 _STAGE_ORDER = [PipelineStage.EXTRACT, PipelineStage.GENERATE, PipelineStage.EXECUTE]
 
@@ -162,10 +141,17 @@ _STAGE_LAST_NODE = {
 }
 
 _STAGE_FIRST_NODE = {
-    PipelineStage.EXTRACT: None,
+    PipelineStage.EXTRACT: "init_doc",
     PipelineStage.GENERATE: "case_match_model",
     PipelineStage.EXECUTE: "exec_generate_atk",
 }
+
+_DETAIL_EXTRACTORS = [
+    "shape_extract", "dtype_extract", "dformat_extract",
+    "optional_extract", "array_length_extract",
+    "allowed_range_extract", "return_code_extract", "determinism_extract",
+    "dtype_combo_extract", "param_relation_extract",
+]
 
 
 # -------------------------------------------------------------------
@@ -173,21 +159,41 @@ _STAGE_FIRST_NODE = {
 # -------------------------------------------------------------------
 
 def _build_extract(graph: StateGraph, *, is_first: bool, is_last: bool) -> None:
-    for name, fn in _EXTRACT_NODES:
-        graph.add_node(name, traced_node(name)(fn))
+    """Build the EXTRACT stage using main new architecture."""
+    graph.add_node("init_doc", traced_node("init_doc")(_init_doc))
+    graph.add_node("product_support", traced_node("product_support")(_product_support))
+    graph.add_node("function_signature_extract", traced_node("function_signature_extract")(_function_signature_extract))
+    graph.add_node("function_explanation_extract", traced_node("function_explanation_extract")(_function_explanation_extract))
+    graph.add_node("table_column_extract", traced_node("table_column_extract")(_table_column_extract))
+    graph.add_node("implicit_param_extract", traced_node("implicit_param_extract")(_implicit_param_extract))
+    graph.add_node("llm_description_extract", create_description_extract_subgraph())
+    graph.add_node("shape_extract", traced_node("shape_extract")(_shape_extract))
+    graph.add_node("dtype_extract", traced_node("dtype_extract")(_dtype_extract))
+    graph.add_node("dformat_extract", traced_node("dformat_extract")(_dformat_extract))
+    graph.add_node("optional_extract", traced_node("optional_extract")(_optional_extract))
+    graph.add_node("array_length_extract", traced_node("array_length_extract")(_array_length_extract))
+    graph.add_node("allowed_range_extract", traced_node("allowed_range_extract")(_allowed_range_extract))
+    graph.add_node("return_code_extract", traced_node("return_code_extract")(_return_code_extract))
+    graph.add_node("determinism_extract", traced_node("determinism_extract")(_determinism_extract))
+    graph.add_node("dtype_combo_extract", traced_node("dtype_combo_extract")(_dtype_combo_extract))
     graph.add_node("param_relation_extract", create_param_relation_subgraph())
+    graph.add_node("build_param_relations", traced_node("build_param_relations")(_build_param_relations))
+    graph.add_node("build_single_param_constraint", traced_node("build_single_param_constraint")(_build_single_param_constraint))
+    graph.add_node("build_param_constraint", traced_node("build_param_constraint")(_build_param_constraint))
+    graph.add_node("assemble_result", traced_node("assemble_result")(_assemble_result))
 
     if is_first:
-        for n in _PARALLEL_FAN_OUT:
-            graph.add_edge(START, n)
+        graph.add_edge(START, "init_doc")
+        graph.add_conditional_edges("init_doc", _should_continue)
 
-    for n in _PARALLEL_FAN_OUT:
-        graph.add_edge(n, "src_content_extract")
-
-    graph.add_edge("src_content_extract", "param_desc_extract")
+    graph.add_edge("product_support", "table_column_extract")
+    graph.add_edge("function_signature_extract", "table_column_extract")
+    graph.add_edge("function_explanation_extract", "table_column_extract")
+    graph.add_edge("table_column_extract", "implicit_param_extract")
+    graph.add_edge("implicit_param_extract", "llm_description_extract")
 
     for n in _DETAIL_EXTRACTORS:
-        graph.add_edge("param_desc_extract", n)
+        graph.add_edge("llm_description_extract", n)
 
     for n in _DETAIL_EXTRACTORS:
         if n == "param_relation_extract":
@@ -195,7 +201,8 @@ def _build_extract(graph: StateGraph, *, is_first: bool, is_last: bool) -> None:
         else:
             graph.add_edge(n, "build_param_constraint")
 
-    graph.add_edge("build_param_relations", "build_param_constraint")
+    graph.add_edge("build_param_relations", "build_single_param_constraint")
+    graph.add_edge("build_single_param_constraint", "build_param_constraint")
     graph.add_edge("build_param_constraint", "assemble_result")
 
     if is_last:
@@ -203,22 +210,32 @@ def _build_extract(graph: StateGraph, *, is_first: bool, is_last: bool) -> None:
 
 
 def _build_generate(graph: StateGraph, *, is_first: bool, is_last: bool) -> None:
-    for name, fn in _GENERATE_NODES:
+    for name, fn in [
+        ("case_match_model", _case_match_model),
+        ("case_init_static", _case_init_static),
+        ("case_solve_constraints", _case_solve_constraints),
+        ("case_generate", _case_generate),
+    ]:
         graph.add_node(name, traced_node(name)(fn))
 
     if is_first:
         graph.add_edge(START, "case_match_model")
 
-    # Error short-circuits at match_model and init_static
     graph.add_conditional_edges("case_match_model", _route_after_case_match)
     graph.add_edge("case_init_static", "case_solve_constraints")
     graph.add_conditional_edges("case_init_static", _route_after_case_init)
-    # solve_constraints -> generate (unconditional; generate handles its own errors)
     graph.add_edge("case_solve_constraints", "case_generate")
+
+    if is_last:
+        graph.add_edge("case_generate", END)
 
 
 def _build_execute(graph: StateGraph, *, is_first: bool, is_last: bool) -> None:
-    for name, fn in _EXECUTE_NODES:
+    for name, fn in [
+        ("exec_generate_atk", _exec_generate_atk),
+        ("exec_cpu_derivation", _exec_cpu_derivation),
+        ("exec_run_atk", _exec_run_atk),
+    ]:
         graph.add_node(name, traced_node(name)(fn))
 
     if is_first:
@@ -241,19 +258,7 @@ _STAGE_BUILDERS = {
 
 
 def build_pipeline(stages: list[PipelineStage | str]) -> CompiledStateGraph:
-    """Build a pipeline graph from the requested stages.
-
-    Args:
-        stages: Ordered list of stages. Accepts PipelineStage values or
-            plain strings ("extract", "generate", "execute").
-            Must follow canonical order: extract -> generate -> execute.
-
-    Returns:
-        A compiled CompiledStateGraph ready for ainvoke.
-
-    Raises:
-        ValueError: If stages is empty or contains invalid values.
-    """
+    """Build a pipeline graph from the requested stages."""
     if not stages:
         raise ValueError("stages must not be empty")
 
@@ -300,3 +305,8 @@ def build_pipeline(stages: list[PipelineStage | str]) -> CompiledStateGraph:
 
     label = "+".join(s.value for s in unique)
     return graph.compile(name=f"pipeline-{label}")
+
+
+def create_pipeline_graph() -> CompiledStateGraph:
+    """Legacy entry point -- builds the full EXTRACT pipeline."""
+    return build_pipeline([PipelineStage.EXTRACT])

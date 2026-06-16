@@ -26,11 +26,47 @@ _STEP_LABEL = "数据格式提取"
 
 _JSON_BLOCK_RE = re.compile(r"```(?:json)?\s*([\s\S]*?)```", re.IGNORECASE)
 
+_VALID_DFORMATS = frozenset({
+    "ND", "NCHW", "NHWC", "HWCN", "NDHWC", "NCDHW", "NC", "NCL",
+    "NC1HWC0", "FRACTAL_Z", "NC1HWC0_C04", "FRACTAL_NZ",
+    "NDC1HWC0", "FRACTAL_Z_3D",
+})
+
+# Matches cross-reference patterns like "与self一致", "同input相同"
+_RELATIVE_REF_RE = re.compile(
+    r"^(?:与|同|和|跟)"
+    r".{1,20}"
+    r"(?:一致|相同|一样|保持一致|保持一致|同)$",
+)
+
+
+def _is_dformat_valid(dformat_desc: str) -> bool:
+    """Check whether an existing dformat_desc value is reasonable.
+
+    Returns False for values that should trigger re-extraction:
+    - Empty / whitespace-only strings
+    - Dash variants
+    - Cross-references to other params
+    - Tokens not in the approved dformat whitelist
+    """
+    s = dformat_desc.strip()
+    if not s:
+        return False
+    if s in ("-", "—", "–", "－"):
+        return False
+    cleaned = s.replace("`", "")
+    if _RELATIVE_REF_RE.match(cleaned):
+        return False
+    tokens = [t.strip().upper() for t in re.split(r"[,、，/]", s) if t.strip()]
+    if not tokens:
+        return False
+    return all(t in _VALID_DFORMATS for t in tokens)
+
 
 async def dformat_extract_node(state: PipelineState) -> dict[str, Any]:
     """Extract data format values from parameter descriptions and persist to DB.
 
-    Reads parameters from state (populated by param_desc_extract) instead of
+    Reads parameters from state (populated by llm_description_extract) instead of
     making a redundant MCP query. Each parameter gets its own LLM call
     for precise extraction, with controlled concurrency.
 
@@ -55,8 +91,12 @@ async def dformat_extract_node(state: PipelineState) -> dict[str, Any]:
             logger.info("DFormatExtract: no parameters in state for doc_id=%s, skipping", doc_id)
             return {"error": None}
 
-        described = [p for p in params if p.get("description")]
-        without_desc = [p for p in params if not p.get("description")]
+        described = [
+            p for p in params
+            if p.get("llm_description")
+            and (not p.get("dformat_desc") or not _is_dformat_valid(p.get("dformat_desc", "")))
+        ]
+        without_desc = [p for p in params if not p.get("llm_description")]
 
         ctx = get_context()
         if without_desc and ctx and ctx.manager:
@@ -79,10 +119,23 @@ async def dformat_extract_node(state: PipelineState) -> dict[str, Any]:
                     "message": f"参数 {pn} {_STEP_LABEL} 已跳过: 无描述内容",
                     "error": "无描述内容",
                 })
-
         if not described:
-            logger.info("DFormatExtract: no parameters with descriptions for doc_id=%s, skipping", doc_id)
+            logger.info("DFormatExtract: no parameters needing dformat extraction for doc_id=%s, skipping", doc_id)
             return {"error": None}
+
+        # Clear invalid dformat values before re-extraction so downstream
+        # nodes don't see stale bad data.
+        invalid_clears = [
+            {"function_name": p["function_name"], "param_name": p["param_name"], "dformat": ""}
+            for p in described
+            if p.get("dformat_desc") and not _is_dformat_valid(p.get("dformat_desc", ""))
+        ]
+        if invalid_clears:
+            await _mcp_client.update_param_dformat(doc_id, invalid_clears)
+            logger.info(
+                "DFormatExtract: cleared %d invalid dformat values (doc_id=%s)",
+                len(invalid_clears), doc_id,
+            )
 
         llm = _create_llm()
         sem = asyncio.Semaphore(_CONCURRENCY_LIMIT)
@@ -178,7 +231,7 @@ async def _extract_dformat(llm: ChatOpenAI, param: dict) -> dict | None:
     """Call LLM to extract data format for a single parameter."""
     param_name = param.get("param_name", "")
     function_name = param.get("function_name", "")
-    description = param.get("description", "")
+    description = param.get("llm_description", "")
 
     prompt = DFORMAT_EXTRACT_PROMPT.format(param_name=param_name, params_text=description)
     response = await llm.ainvoke(prompt)

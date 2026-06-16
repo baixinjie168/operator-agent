@@ -28,6 +28,18 @@ _JSON_BLOCK_RE = re.compile(r"```(?:json)?\s*([\s\S]*?)```", re.IGNORECASE)
 
 
 async def optional_extract_node(state: PipelineState) -> dict[str, Any]:
+    """Judge whether each parameter is optional from its description and persist to DB.
+
+    Reads parameters from state (populated by llm_description_extract) instead of
+    making a redundant MCP query. Each parameter gets its own LLM call
+    for precise判断, with controlled concurrency.
+
+    Flow:
+    1. Read parameters from state.parameters (no MCP query needed)
+    2. Filter to parameters with non-empty descriptions
+    3. Concurrent LLM call per parameter (Semaphore controlled)
+    4. Batch update is_optional field via MCP
+    """
     doc_id = state.get("doc_id", 0)
     operator_name = state.get("operator_name", "")
 
@@ -43,9 +55,10 @@ async def optional_extract_node(state: PipelineState) -> dict[str, Any]:
             logger.info("OptionalExtract: no parameters in state for doc_id=%s, skipping", doc_id)
             return {"error": None}
 
-        described = [p for p in params if p.get("description")]
-        undescribed = [p for p in params if not p.get("description")]
+        described = [p for p in params if p.get("llm_description")]
+        undescribed = [p for p in params if not p.get("llm_description")]
 
+        ctx = get_context()
         if undescribed and ctx and ctx.manager:
             for p in undescribed:
                 pn = p.get("param_name", "")
@@ -66,7 +79,6 @@ async def optional_extract_node(state: PipelineState) -> dict[str, Any]:
                     "message": f"参数 {pn} {_STEP_LABEL} 已跳过: 无参数描述",
                     "error": "无参数描述",
                 })
-
         if not described:
             logger.info("OptionalExtract: no parameters with descriptions for doc_id=%s, skipping", doc_id)
             return {"error": None}
@@ -160,7 +172,7 @@ async def _extract_optional(llm: ChatOpenAI, param: dict) -> dict | None:
     """Call LLM to judge optionality for a single parameter."""
     param_name = param.get("param_name", "")
     function_name = param.get("function_name", "")
-    description = param.get("description", "")
+    description = param.get("llm_description", "")
 
     name_has_optional = "optional" in param_name.lower()
 

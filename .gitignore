@@ -5,9 +5,19 @@ __pycache__/
 .env
 .idea/
 
+# Project directories
 .opencode
 .vscode
 .claude
-
 cases
 executors
+
+# Data files
+/uploads/
+/res/
+/data/operator_agent.db
+/data/operator_agent.db-shm
+/data/operator_agent.db-wal
+/data/operator_agent_backup_*.db
+/docs/res/
+/operators/checklist/
