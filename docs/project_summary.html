@@ -107,7 +107,7 @@
 <button class="sidebar-toggle" onclick="document.querySelector('.sidebar').classList.toggle('open')">&#9776;</button>
 <div class="layout">
 <nav class="sidebar" id="sidebar">
-  <div class="sidebar-title">Operator Agent<small>项目总览 v2026-06-12</small></div>
+  <div class="sidebar-title">Operator Agent<small>项目总览 v2026-06-15</small></div>
   <ul class="nav-list">
     <li><a class="nav-item" data-target="sec-overview"><span class="arrow empty">&rsaquo;</span>项目定位</a></li>
     <li><a class="nav-item" data-target="sec-techstack"><span class="arrow empty">&rsaquo;</span>技术栈</a></li>
@@ -170,10 +170,10 @@
 <div class="main" id="mainContent">
 <section class="content-section" id="sec-overview">
   <h1>Operator Agent 项目总览</h1>
-  <blockquote>生成日期: 2026-05-28 | 更新日期: 2026-06-12 (build_single_param_constraint 单参数约束提取节点实施: 两层防护——确定性正则匹配(~93%覆盖)+LLM长尾提取(~7%)，追加到param_relations表; Pipeline 21 个节点; 测试 450 个) | 基于代码实际状态</blockquote>
+  <blockquote>生成日期: 2026-05-28 | 更新日期: 2026-06-15 (single_param_prompt.py 模块创建: 补全缺失的 SINGLE_PARAM_EXTRACT_PROMPT + parse_response; 测试 520 个; 算子文档 936 篇) | 基于代码实际状态</blockquote>
   <h2>项目定位</h2>
   <p>基于 <strong>LangGraph + MCP</strong> 的 CANN 算子文档自动化处理系统。将华为昇腾平台的算子 Markdown 文档解析为结构化数据，经 LLM 提取参数、约束、产品支持信息，最终生成 Python 测试用例。</p>
-  <p><strong>当前完成度</strong>：约 93%，文档解析、数据库层、Pipeline 全部 21 个节点（含 table_column_extract 表格直提节点、implicit_param_extract 隐式维度变量识别节点（零 LLM，从原始 HTML 提取不在函数签名中的命名维度变量如 hidden_size）、llm_description_extract 子图（预过滤 + 属性校验 + verify_and_enhance 审核增强 + is_support_discontinuous 保护）、function_signature 提取（含参数列表生成 + 类型后处理规范化）、function_explanation 提取、shape/dtype/dformat/optional/array_length 提取（含表格直提跳过逻辑）、allowed_range 提取、return_code 提取、determinism 提取、dtype_combo 提取、参数关系提取子图（Agent 迭代循环：分块提取 + 双重覆盖率 + 针对性提取 + 自反思 + 隐式维度变量 prompt 增强）、build_param_relations 参数关系表达式构建节点（三层防护：AST校验 + Few-shot + 语义验证）、build_single_param_constraint 单参数约束提取节点（两层防护：确定性正则匹配 ~93% 覆盖 + LLM 长尾提取 ~7%，追加到 param_relations 表）、build_param_constraint 参数约束构建节点（含类型规范化 + dimensions rank 解析修复 + is_operator_param 隐式参数标记）、assemble_result 汇编节点 + json_constraints 写入）可运行。数据质量问题（dtype key 不匹配、const 限定符污染、符号维度解析错误）已修复。人工审核、测试用例生成尚未实现。</p>
+  <p><strong>当前完成度</strong>：约 93%，文档解析、数据库层、Pipeline 全部 21 个节点（含 table_column_extract 表格直提节点、implicit_param_extract 隐式维度变量识别节点（零 LLM，从原始 HTML 提取不在函数签名中的命名维度变量如 hidden_size）、llm_description_extract 子图（预过滤 + 属性校验 + verify_and_enhance 审核增强 + is_support_discontinuous 保护）、function_signature 提取（含参数列表生成 + 类型后处理规范化）、function_explanation 提取、shape/dtype/dformat/optional/array_length 提取（含表格直提跳过逻辑）、allowed_range 提取、return_code 提取、determinism 提取、dtype_combo 提取、参数关系提取子图（Agent 迭代循环：分块提取 + 双重覆盖率 + 针对性提取 + 自反思 + 隐式维度变量 prompt 增强）、build_param_relations 参数关系表达式构建节点（三层防护：AST校验 + Few-shot + 语义验证）、build_single_param_constraint 单参数约束提取节点（两层防护：确定性正则匹配 ~93% 覆盖 + LLM 长尾提取 ~7%，追加到 param_relations 表，配套 single_param_prompt.py 提供 Prompt 和解析器）、build_param_constraint 参数约束构建节点（含类型规范化 + dimensions rank 解析修复 + is_operator_param 隐式参数标记）、assemble_result 汇编节点 + json_constraints 写入）可运行。数据质量问题（dtype key 不匹配、const 限定符污染、符号维度解析错误）已修复。人工审核、测试用例生成尚未实现。</p>
 </section>
 <section class="content-section" id="sec-techstack">
 <h1>技术栈</h1>
@@ -215,13 +215,13 @@
 │   │       ├── __main__.py          # 入口：初始化 DB，调用 mcp.run()
 │   │       ├── db.py                # Database 类 + get_db() 单例，同步 SQLite + WAL
 │   │       ├── schema.sql           # 11 张表：operators, document_versions（含 json_constraints）, parameters（含 param_constraint JSON）, param_relations（含 relation_object JSON）, function_signatures, platform_support（含 deterministic_computing JSON）, return_codes, dtype_combinations, constraints_result（含 deterministic_computing/inputs/outputs/constraints_in_parameters/dtype_support_description）, tasks, task_items
-│   │       ├── server.py            # FastMCP 实例，注册 58 个 tool + 2 个 resource
+│   │       ├── server.py            # FastMCP 实例，注册 57 个 tool + 2 个 resource
 │   │       ├── parsers/
 │   │       │   ├── section_splitter.py  # 基于 markdown-it-py token 的章节分割
 │   │       │   └── document_parser.py   # 章节分类 + 产品支持表解析 + 函数签名提取
 │   │       └── tools/
-│   │           ├── document_tools.py    # 50 个 MCP tool 实现函数（纯同步）
-│   │           └── task_tools.py        # 10 个批量任务管理 tool 实现函数（纯同步）
+│   │           ├── document_tools.py    # 48 个 MCP tool 实现函数（纯同步）
+│   │           └── task_tools.py        # 11 个批量任务管理 tool 实现函数（纯同步）
 │   │
 │   └── agent/                       # 应用层（FastAPI + LangGraph Pipeline）
 │       └── src/agent/
@@ -259,7 +259,8 @@
 │           │   ├── determinism_extract.py # 节点4j（并行）：LLM提取确定性计算信息
 │           │   ├── dtype_combo_extract.py # 节点4k（并行）：LLM提取数据类型组合
 │           │   ├── build_param_relations.py # 节点5.5r（顺序）：LLM 提取参数关系表达式 + 按平台分组（platform 字段，空=全平台）
-│           │   ├── single_param_constraint.py # 节点5.5s（顺序）：两层防护——确定性正则匹配(5条SingleParamRule)+LLM长尾提取，追加到param_relations表（492行）
+│           │   ├── single_param_constraint.py # 节点5.5s（顺序）：两层防护——确定性正则匹配(5条SingleParamRule)+LLM长尾提取，追加到param_relations表（488行）
+│           │   ├── single_param_prompt.py # SINGLE_PARAM_EXTRACT_PROMPT + parse_response（Layer 2 LLM 长尾提取的 Prompt 和 JSON 解析器，132行）
 │           │   ├── build_param_constraint.py # 节点5.5（顺序）：LLM 构建参数约束JSON（shape→dimensions rank解析 + allowed_range_value + _normalize_type类型规范化）
 │           │   ├── assemble_result.py # 节点6（顺序）：汇编所有提取结果→constraints_result表（constraints_in_parameters 按 platform 分组）
 │           │   └── param_relation_extract/  # 节点4e（并行）：参数耦合关系提取子图
@@ -285,22 +286,23 @@
 │           ├── services/
 │           │   └── task_engine.py   # 批量任务后台执行引擎（run_task）
 │           ├── prompts/
-│           │   ├── __init__.py      # 20个Prompt: LLM_DESCRIPTION_EXTRACT, LLM_DESCRIPTION_VERIFY, PRODUCT_SUPPORT, SHAPE, DTYPE, DFORMAT, OPTIONAL, FUNCTION_SIGNATURE_EXTRACT, FUNCTION_EXPLANATION_EXTRACT, ARRAY_LENGTH_EXTRACT, ALLOWED_RANGE_EXTRACT, RETURN_CODE_EXTRACT, DETERMINISM_EXTRACT, DTYPE_COMBO_TABLE, DTYPE_CONSTRAINT_TEXT, SHAPE_TO_DIMENSIONS, ALLOWED_RANGE_VALUE_BUILD, RELATION_OBJECT_BUILD (SRC_CONTENT + PARAM_DESC 已废弃)
+│           │   ├── __init__.py      # 18个Prompt: LLM_DESCRIPTION_EXTRACT, LLM_DESCRIPTION_VERIFY, PRODUCT_SUPPORT, SHAPE, DTYPE, DFORMAT, OPTIONAL, FUNCTION_SIGNATURE_EXTRACT, FUNCTION_EXPLANATION_EXTRACT, ARRAY_LENGTH_EXTRACT, ALLOWED_RANGE_EXTRACT, RETURN_CODE_EXTRACT, DETERMINISM_EXTRACT, DTYPE_COMBO_TABLE, DTYPE_CONSTRAINT_TEXT, SHAPE_TO_DIMENSIONS, ALLOWED_RANGE_VALUE_BUILD, RELATION_OBJECT_BUILD
 │           │   └── system.py        # SYSTEM_PROMPT（未使用）
 │           │   # 另有 param_relation_extract/prompts.py: RELATION_EXTRACT_PROMPT（子图专用）
+│           │   # 另有 single_param_prompt.py: SINGLE_PARAM_EXTRACT_PROMPT + parse_response（Layer 2 LLM 长尾提取）
 │           ├── utils/
 │           │   ├── __init__.py
 │           │   ├── platform_utils.py  # 平台名称标准化、拆分、解析工具
-│           │   └── table_parser.py    # HTML 表格解析器：rowspan/colspan 展开 + 列检测 + 6 列直提（shape/dtype/dformat/discontin/param_desc/direction）+ 非连续Tensor 三值映射 + direction 归一化（stdlib html.parser，零外部依赖）
+│           │   └── table_parser.py    # HTML 表格解析器：rowspan/colspan 展开 + 列检测 + 6 列直提（shape/dtype/dformat/discontin/param_desc/direction）+ 非连续Tensor 三值映射 + direction 归一化（stdlib html.parser，零外部依赖，311行）
 │           ├── tools/
 │           │   ├── document_tools.py    # 5 个 @tool 装饰的 LangGraph 工具（节点未使用）
 │           │   └── section_tools.py     # 2 个存根工具
 │           └── static/
 │               └── index.html       # 单页测试管理 UI（文档解析 + 查询 + 参数表 + 约束 + 返回码 + 平台支持（含确定性计算））
 │
-├── operators/                       # ~90+ 个 CANN 算子 Markdown 源文档
-│   ├── (root)/, cv/, math/, nn/, trans/
-├── tests/                           # 测试（agent 416 个 + mcp_server 34 个 = 450 总计）
+├── operators/                       # 936 个 CANN 算子 Markdown 源文档
+│   ├── checklist/, cv/, math/, nn/, trans/
+├── tests/                           # 测试（agent 478 个 + mcp_server 42 个 = 520 总计）
 ├── docs/                            # 文档 + LLM 提取提示指南 + 提取结果
 │   ├── project_summary.html         # 项目总览 (HTML)
 │   ├── prompts/                     # 7 个提取阶段的提示模板
@@ -592,7 +594,7 @@ flowchart TD
        └─ llm_description_extract 保留已直提的 direction / is_support_discontinuous</div>
 <p><strong>输出状态</strong>：<code>parameters</code>（追加 shape/dtype_desc/dformat_desc/is_support_discontinuous/param_desc/direction）, <code>error</code></p>
 <p><strong>与 llm_description_extract 的协作</strong>：本节点先于 llm_description_extract 执行。表格形态参数的 is_support_discontinuous 和 direction 已由本节点直提，llm_description_extract 的 <code>_extract_one()</code> 检测到这两个字段已有值时保留原值不覆盖。下游 shape_extract / dtype_extract / dformat_extract 同样跳过已有值的参数。<code>param_desc</code> 在 <code>build_param_constraint</code> 中被用作 <code>constraint.description</code>，段落形态参数 fallback 到 <code>llm_description</code>。</p>
-<p><strong>工具模块</strong>：<code>utils/table_parser.py</code>（240 行）提供 HTML 表格解析、列检测、值提取等纯函数，无外部依赖（仅用 stdlib <code>html.parser</code>）。</p>
+<p><strong>工具模块</strong>：<code>utils/table_parser.py</code>（311 行）提供 HTML 表格解析、列检测、值提取等纯函数，无外部依赖（仅用 stdlib <code>html.parser</code>）。</p>
 
 
 </section>
@@ -1546,7 +1548,7 @@ expr="" (标记 _validation_error)  Phase 2b 触发判断
 </table>
 
 <h2>Layer 2: LLM 长尾提取（可选）</h2>
-<p>当 <code>ENABLE_SINGLE_PARAM_LLM=true</code> 时启用。对每个参数并发调用 LLM（<code>asyncio.Semaphore(5)</code>），使用 <code>SINGLE_PARAM_EXTRACT_PROMPT</code> 提取非模式化的单参数约束。LLM 调用从 <code>agent.nodes.single_param_prompt</code> 模块延迟导入 Prompt。默认关闭（<code>False</code>），因为 Layer 1 正则已覆盖 ~93% 的场景。</p>
+<p>当 <code>ENABLE_SINGLE_PARAM_LLM=true</code> 时启用。对每个参数并发调用 LLM（<code>asyncio.Semaphore(5)</code>），使用 <code>SINGLE_PARAM_EXTRACT_PROMPT</code>（定义在 <code>single_param_prompt.py</code>，132行）提取非模式化的单参数约束。<code>parse_response()</code> 负责从 LLM 返回的 JSON（支持裸数组和 <code>```json</code> 代码块两种格式）中解析出约束列表。LLM 调用从 <code>agent.nodes.single_param_prompt</code> 模块延迟导入 Prompt。默认关闭（<code>False</code>），因为 Layer 1 正则已覆盖 ~93% 的场景。</p>
 
 <h2>去重机制</h2>
 <p><code>_is_already_covered()</code> 在 Layer 1 匹配阶段和 Layer 2 提取阶段均检查：如果已有的 multi-param relations 中已包含等效约束（同 expr_type + 同 params），则跳过。最终 <code>_dedup()</code> 对 Layer 1 + Layer 2 结果内部去重。</p>
@@ -1998,7 +2000,7 @@ task_items (
 <tbody>
 <tr><td>GET</td><td><code>/</code></td><td>返回 static/index.html 测试页面</td><td>静态文件</td></tr>
 <tr><td>GET</td><td><code>/health</code></td><td>健康检查</td><td>直接返回 <code>{"status": "ok"}</code></td></tr>
-<tr><td>POST</td><td><code>/api/v1/upload</code></td><td>上传算子文档，触发完整 Pipeline</td><td>init_doc -> [product_support || function_signature_extract || function_explanation_extract] -> table_column_extract -> llm_description_extract -> [shape_extract || dtype_extract || dformat_extract || optional_extract || array_length_extract || allowed_range_extract || return_code_extract || determinism_extract || dtype_combo_extract || param_relation_extract] -> build_param_relations -> build_param_constraint -> assemble_result</td></tr>
+<tr><td>POST</td><td><code>/api/v1/upload</code></td><td>上传算子文档，触发完整 Pipeline</td><td>init_doc -> [product_support || function_signature_extract || function_explanation_extract] -> table_column_extract -> implicit_param_extract -> llm_description_extract -> [shape_extract || dtype_extract || dformat_extract || optional_extract || array_length_extract || allowed_range_extract || return_code_extract || determinism_extract || dtype_combo_extract || param_relation_extract] -> build_param_relations -> build_single_param_constraint -> build_param_constraint -> assemble_result</td></tr>
 <tr><td>GET</td><td><code>/api/v1/operators</code></td><td>列出所有已注册算子及最新版本</td><td>MCP: query_operators</td></tr>
 <tr><td>GET</td><td><code>/api/v1/operators/{name}</code></td><td>获取算子的完整解析数据</td><td>MCP: get_parsed(name, ?version)</td></tr>
 <tr><td>GET</td><td><code>/api/v1/parameters</code></td><td>查询参数列表（可选 ?operator_name 过滤）</td><td>MCP: query_params(operator_name?)</td></tr>
@@ -2030,6 +2032,7 @@ task_items (
 <tr><td><code>LLM_TEMPERATURE</code></td><td><code>0.7</code></td><td>LLM 温度（0.0-2.0，节点内覆盖为 0.1）</td></tr>
 <tr><td><code>EXPR_MAX_RETRIES</code></td><td><code>2</code></td><td>表达式 AST 校验失败后的增强重试次数（0-10，0=禁用重试）</td></tr>
 <tr><td><code>DIMENSIONS_MAX_RETRIES</code></td><td><code>2</code></td><td>dimensions 校验失败后的 LLM 重试次数（0-10，0=禁用重试）</td></tr>
+<tr><td><code>LLM_MAX_TOKENS</code></td><td><code>16384</code></td><td>LLM 响应最大 token 数（256-131072，防止大 JSON 输出被截断）</td></tr>
 <tr><td><code>ZAI_API_KEY</code></td><td>(空)</td><td>Z.AI GLM API Key</td></tr>
 <tr><td><code>ZAI_BASE_URL</code></td><td><code>https://api.z.ai/api/paas/v4/</code></td><td>Z.AI 端点</td></tr>
 <tr><td><code>ZAI_MODEL</code></td><td><code>glm-5.1</code></td><td>Z.AI 模型名</td></tr>
@@ -2089,7 +2092,7 @@ task_items (
 <h1>已知问题：测试</h1>
 
 <ol start="8">
-<li><strong>测试覆盖严重不足</strong>：<code>mcp_server/</code> 有 34 个测试（document_parser 18 + section_splitter 16），agent 包有 416 个测试（build_param_constraint 76 + table_column_extract 38 + build_param_relations 37 + platform_utils 28 + llm_description_extract 27 + context_utils 25 + single_param_constraint 24 + function_signature_extract 23 + allowed_range_extract 23 + chunked_extract 22 + assemble_result 21 + verify_and_enhance 18 + validate_results 17 + determinism_extract 11 + coverage 10 + agent_loop 8 + return_code_extract 8），其余节点仍无测试。总计 450 个</li>
+<li><strong>测试覆盖严重不足</strong>：<code>mcp_server/</code> 有 42 个测试（document_parser 18 + section_splitter 16 + task_tools 8），agent 包有 478 个测试（build_param_constraint 76 + table_column_extract 52 + extract_validations 42 + build_param_relations 37 + assemble_result 35 + platform_utils 28 + llm_description_extract 27 + context_utils 25 + single_param_constraint 24 + function_signature_extract 23 + allowed_range_extract 23 + chunked_extract 22 + verify_and_enhance 18 + validate_results 17 + determinism_extract 11 + coverage 10 + return_code_extract 8 + agent_loop 8），其余节点仍无测试。总计 520 个</li>
 <li><strong>无 CI/CD</strong>：没有 GitHub Actions、Dockerfile 或部署配置</li>
 </ol>
 
