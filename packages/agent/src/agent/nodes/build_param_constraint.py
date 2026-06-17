@@ -20,6 +20,8 @@ from agent.core.config import settings
 from agent.mcp_client import MCPClient
 from agent.nodes.state import PipelineState
 from agent.prompts import ALLOWED_RANGE_VALUE_BUILD_PROMPT, SHAPE_TO_DIMENSIONS_PROMPT
+from agent.runtime.context import get_context
+from agent.runtime.events import EventType
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +63,22 @@ async def build_param_constraint_node(state: PipelineState) -> dict[str, Any]:
             logger.info("BuildParamConstraint: no parameters, skipping")
             return {"error": None}
 
+        ctx = get_context()
+        _emit = lambda evt, data: (
+            ctx.manager.emit(evt, ctx.run_id, None, {
+                "agent_id": "constraint",
+                "node_id": "build_param_constraint",
+                **data,
+            }) if ctx and ctx.manager else None
+        )
+
+        _emit(EventType.NODE_PROGRESS, {
+            "message": f"已加载 {len(params)} 个参数, {len(sigs)} 个函数签名, {len(dtype_combos)} 组dtype组合",
+            "phase": "data_ready",
+            "params_count": len(params),
+            "signatures_count": len(sigs),
+        })
+
         # Step 2: Build indexes
         sig_type_map: dict[tuple[str, str], str] = {}
         operator_params: set[str] = set()
@@ -98,12 +116,24 @@ async def build_param_constraint_node(state: PipelineState) -> dict[str, Any]:
         # Step 3: LLM batch parse shape → dimensions
         shape_map = await _batch_parse_dimensions(params)
 
+        _emit(EventType.NODE_PROGRESS, {
+            "message": f"维度解析完成: {len(shape_map)} 个参数已提取 dimensions",
+            "phase": "dimensions_done",
+            "dimensions_count": len(shape_map),
+        })
+
         # Step 4: LLM batch extract allowed_range_value for all params
         constraints_section = await _mcp_client.get_section(doc_id, "constraints")
         constraints_text = (constraints_section or {}).get("content", "") or ""
         ar_map = await _batch_extract_allowed_range(
             params, constraints_text
         )
+
+        _emit(EventType.NODE_PROGRESS, {
+            "message": f"取值范围提取完成: {len(ar_map)} 个参数已提取 allowed_range",
+            "phase": "range_done",
+            "range_count": len(ar_map),
+        })
 
         # Step 4b: Narrow bool allowed_range_value using existing constraints
         #

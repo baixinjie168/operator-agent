@@ -21,6 +21,8 @@ from agent.core.config import settings
 from agent.mcp_client import MCPClient
 from agent.nodes.state import PipelineState
 from agent.prompts import RELATION_OBJECT_BUILD_PROMPT
+from agent.runtime.context import get_context
+from agent.runtime.events import EventType
 
 logger = logging.getLogger(__name__)
 
@@ -588,14 +590,44 @@ async def build_param_relations_node(state: PipelineState) -> dict[str, Any]:
             logger.info("BuildParamRelations: no relations, skipping")
             return {"error": None}
 
+        ctx = get_context()
+        _emit = lambda evt, data: (
+            ctx.manager.emit(evt, ctx.run_id, None, {
+                "agent_id": "constraint",
+                "node_id": "build_param_relations",
+                **data,
+            }) if ctx and ctx.manager else None
+        )
+
+        _emit(EventType.NODE_PROGRESS, {
+            "message": f"已查询到 {len(relations)} 条参数关系，开始提取表达式",
+            "phase": "data_ready",
+            "relations_count": len(relations),
+        })
+
         # Step 2: Build signature context (enriched with shape info)
         signatures_text = _format_signatures(sigs, params or [])
         param_shapes_text = _build_param_shapes_text(params or [])
 
-        # Step 3: LLM batch extract expr_type + expr
+        # Step 3: LLM batch extract expr_type + expr (three-layer protection)
         llm_results = await _batch_extract_relation_objects(
             relations, signatures_text, param_shapes_text,
         )
+
+        # Compute validation stats for progress reporting
+        valid_count = sum(1 for r in llm_results if r.get("expr"))
+        corrected_count = sum(1 for r in llm_results if r.get("_corrected"))
+        error_count = sum(1 for r in llm_results if r.get("_validation_error"))
+
+        _emit(EventType.NODE_PROGRESS, {
+            "message": f"表达式提取完成: {valid_count}/{len(relations)} 有效, "
+                       f"{corrected_count} 已修正, {error_count} 有校验错误",
+            "phase": "extract_done",
+            "relations_count": len(relations),
+            "valid_count": valid_count,
+            "corrected_count": corrected_count,
+            "error_count": error_count,
+        })
 
         # Step 4: Assemble relation_object and persist
         updates: list[dict] = []
@@ -647,6 +679,13 @@ async def build_param_relations_node(state: PipelineState) -> dict[str, Any]:
             "BuildParamRelations: grouped into %d platforms (doc_id=%s)",
             len(grouped), doc_id,
         )
+
+        _emit(EventType.NODE_PROGRESS, {
+            "message": f"已按平台分组: {len(grouped)} 个平台, {len(relations)} 条关系",
+            "phase": "complete",
+            "platforms_count": len(grouped),
+            "relations_count": len(relations),
+        })
 
         return {"error": None, "relations_count": len(relations), "platforms_count": len(grouped)}
 

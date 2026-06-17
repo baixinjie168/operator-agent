@@ -24,6 +24,8 @@ from langchain_openai import ChatOpenAI
 from agent.core.config import settings
 from agent.mcp_client import MCPClient
 from agent.nodes.state import PipelineState
+from agent.runtime.context import get_context
+from agent.runtime.events import EventType
 
 logger = logging.getLogger(__name__)
 
@@ -417,6 +419,22 @@ async def build_single_param_constraint_node(
             logger.info("SingleParamConstraint: no parameters, skipping")
             return {"error": None}
 
+        ctx = get_context()
+        _emit = lambda evt, data: (
+            ctx.manager.emit(evt, ctx.run_id, None, {
+                "agent_id": "constraint",
+                "node_id": "build_single_param_constraint",
+                **data,
+            }) if ctx and ctx.manager else None
+        )
+
+        _emit(EventType.NODE_PROGRESS, {
+            "message": f"已加载 {len(params)} 个参数, {len(existing)} 条已有多参数关系",
+            "phase": "data_ready",
+            "params_count": len(params),
+            "existing_count": len(existing),
+        })
+
         # Step 2: Layer 1 — Deterministic regex
         layer1_results: list[dict] = []
         for param in params:
@@ -426,6 +444,12 @@ async def build_single_param_constraint_node(
             "SingleParamConstraint: Layer 1 matched %d constraints",
             len(layer1_results),
         )
+
+        _emit(EventType.NODE_PROGRESS, {
+            "message": f"Layer 1 正则匹配: 命中 {len(layer1_results)} 条单参数约束",
+            "phase": "layer1_done",
+            "layer1_count": len(layer1_results),
+        })
 
         # Step 3: Layer 2 — LLM long-tail (optional, controlled by config)
         layer2_results: list[dict] = []
@@ -461,6 +485,14 @@ async def build_single_param_constraint_node(
 
         # Step 4: Merge and deduplicate
         all_new = _dedup(layer1_results + layer2_results)
+
+        _emit(EventType.NODE_PROGRESS, {
+            "message": f"合并去重: Layer1({len(layer1_results)}) + Layer2({len(layer2_results)}) → {len(all_new)} 条新约束",
+            "phase": "merge_done",
+            "layer1_count": len(layer1_results),
+            "layer2_count": len(layer2_results),
+            "new_count": len(all_new),
+        })
 
         # Step 5: Append to param_relations
         if all_new:
