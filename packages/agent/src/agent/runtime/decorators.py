@@ -16,33 +16,41 @@ from agent.runtime.events import EventType, SpanStatus, SpanType
 logger = logging.getLogger(__name__)
 
 # Agent IDs for backward-compatible SSE events
+# DocProcessorAgent: document parsing + parameter-level extraction
+# ExtractorAgent: constraint building + assembly
 _AGENT_MAP: dict[str, str] = {
+    # ── DocProcessorAgent ──
     "init_doc": "doc",
-    "parse_params": "doc",
     "product_support": "doc",
     "function_explanation_extract": "doc",
     "function_signature_extract": "doc",
-    "src_content_extract": "doc",
-    "param_desc_extract": "doc",
+    "table_column_extract": "doc",
+    "implicit_param_extract": "doc",
+    # Parameter-level extraction
+    "llm_description_extract": "doc",
     "shape_extract": "doc",
     "dtype_extract": "doc",
     "optional_extract": "doc",
     "dformat_extract": "doc",
-    "param_attr_extract": "doc",
     "array_length_extract": "doc",
     "allowed_range_extract": "doc",
-    "determinism_extract": "doc",
+    # Operator-level extraction
     "return_code_extract": "doc",
+    "determinism_extract": "doc",
     "dtype_combo_extract": "doc",
     "param_relation_extract": "doc",
+    # ── ExtractorAgent ──
     "build_param_relations": "constraint",
+    "build_single_param_constraint": "constraint",
     "build_param_constraint": "constraint",
     "assemble_result": "constraint",
+    # ── GeneratorAgent ──
     "generate_cases": "case",
     "case_match_model": "case",
     "case_init_static": "case",
     "case_solve_constraints": "case",
     "case_generate": "case",
+    # ── ExecuterAgent ──
     "exec_generate_atk": "execute",
     "exec_cpu_derivation": "execute",
     "exec_run_atk": "execute",
