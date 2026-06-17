@@ -11,3 +11,8 @@ __pycache__/
 
 cases
 executors
+exported_constraints
+uploads
+data
+batch_results
+operators
