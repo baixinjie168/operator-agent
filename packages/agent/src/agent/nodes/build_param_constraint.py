@@ -47,6 +47,7 @@ async def build_param_constraint_node(state: PipelineState) -> dict[str, Any]:
     operator_name = state.get("operator_name", "")
 
     logger.info("BuildParamConstraint: doc_id=%s for %s", doc_id, operator_name)
+    print(f"[Backend][BuildParamConstraint][START] doc_id={doc_id} operator={operator_name}")
 
     if not doc_id:
         logger.warning("BuildParamConstraint: no doc_id, skipping")
@@ -59,8 +60,13 @@ async def build_param_constraint_node(state: PipelineState) -> dict[str, Any]:
         platforms = await _mcp_client.query_platform_support_by_doc_id(doc_id)
         dtype_combos = await _mcp_client.query_dtype_combos_by_doc_id(doc_id)
 
+        print(f"[Backend][BuildParamConstraint][QUERY] params={len(params) if params else 0} "
+              f"sigs={len(sigs) if sigs else 0} platforms={len(platforms) if platforms else 0} "
+              f"dtype_combos={len(dtype_combos) if dtype_combos else 0}")
+
         if not params:
             logger.info("BuildParamConstraint: no parameters, skipping")
+            print(f"[Backend][BuildParamConstraint][END] no parameters, skipping")
             return {"error": None}
 
         ctx = get_context()
@@ -117,6 +123,24 @@ async def build_param_constraint_node(state: PipelineState) -> dict[str, Any]:
         # Step 3: LLM batch parse shape → dimensions
         shape_map = await _batch_parse_dimensions(params)
 
+        print(f"[Backend][BuildParamConstraint] ========== DIMENSIONS PARSING RESULTS ==========")
+        print(f"[Backend][BuildParamConstraint][DIMENSIONS] total_parsed={len(shape_map)}")
+        for _i, ((_fn, _pn), _dims) in enumerate(shape_map.items()):
+            _shape_raw = ""
+            for _p in params:
+                if _p.get("function_name") == _fn and _p.get("param_name") == _pn:
+                    _shape_raw = _p.get("shape", "")
+                    break
+            _is_valid, _val_err = _validate_dimensions_structure(_dims)
+            print(f"[Backend][BuildParamConstraint][DIM_{_i}]:")
+            print(f"  function_name={_fn}")
+            print(f"  param_name={_pn}")
+            print(f"  shape_raw={_shape_raw}")
+            print(f"  → parsed_dimensions={json.dumps(_dims, ensure_ascii=False, default=str)}")
+            print(f"  → structure_valid={_is_valid}")
+            print(f"  → validation_error={_val_err}")
+        print(f"[Backend][BuildParamConstraint] ========== END DIMENSIONS ==========")
+
         _emit(EventType.NODE_PROGRESS, {
             "message": f"维度解析完成: {len(shape_map)} 个参数已提取 dimensions",
             "phase": "dimensions_done",
@@ -129,6 +153,24 @@ async def build_param_constraint_node(state: PipelineState) -> dict[str, Any]:
         ar_map = await _batch_extract_allowed_range(
             params, constraints_text
         )
+
+        print(f"[Backend][BuildParamConstraint] ========== ALLOWED_RANGE EXTRACTION RESULTS ==========")
+        print(f"[Backend][BuildParamConstraint][ALLOWED_RANGE] total_extracted={len(ar_map)}")
+        for _i, ((_fn, _pn), _ar) in enumerate(ar_map.items()):
+            _param_type = ""
+            for _p in params:
+                if _p.get("function_name") == _fn and _p.get("param_name") == _pn:
+                    _param_type = _p.get("param_type", "")
+                    break
+            _is_valid, _val_err = _validate_range_structure(_ar, _param_type)
+            print(f"[Backend][BuildParamConstraint][RANGE_{_i}]:")
+            print(f"  function_name={_fn}")
+            print(f"  param_name={_pn}")
+            print(f"  param_type={_param_type}")
+            print(f"  → allowed_range_value={json.dumps(_ar, ensure_ascii=False, default=str)}")
+            print(f"  → structure_valid={_is_valid}")
+            print(f"  → validation_error={_val_err}")
+        print(f"[Backend][BuildParamConstraint] ========== END ALLOWED_RANGE ==========")
 
         _emit(EventType.NODE_PROGRESS, {
             "message": f"取值范围提取完成: {len(ar_map)} 个参数已提取 allowed_range",
@@ -156,6 +198,11 @@ async def build_param_constraint_node(state: PipelineState) -> dict[str, Any]:
                         "based on existing constraints",
                         narrowed,
                     )
+                    print(f"[Backend][BuildParamConstraint][BOOL_NARROW] narrowed={narrowed} bool_params={len(bool_params)}")
+                    for _bp in bool_params:
+                        _key = (_bp.get("function_name", ""), _bp.get("param_name", ""))
+                        _val = ar_map.get(_key)
+                        print(f"  {_key[0]}.{_key[1]}: allowed_range={json.dumps(_val, ensure_ascii=False, default=str)}")
             except Exception:
                 logger.warning(
                     "BuildParamConstraint: failed to narrow bool ranges from relations",
@@ -247,6 +294,14 @@ async def build_param_constraint_node(state: PipelineState) -> dict[str, Any]:
                 "BuildParamConstraint: updated %d/%d params (doc_id=%s)",
                 updated_count, len(updates), doc_id,
             )
+            print(f"[Backend][BuildParamConstraint][COMPLETE] updated={updated_count} total_updates={len(updates)}")
+            print(f"[Backend][BuildParamConstraint] ========== ASSEMBLED PARAM_CONSTRAINT ==========")
+            for _i, _u in enumerate(updates):
+                print(f"[Backend][BuildParamConstraint][CONSTRAINT_{_i}]:")
+                print(f"  function_name={_u.get('function_name', '')}")
+                print(f"  param_name={_u.get('param_name', '')}")
+                print(f"  param_constraint={_u.get('param_constraint', '')}")
+            print(f"[Backend][BuildParamConstraint] ========== END PARAM_CONSTRAINT ==========")
 
         return {"error": None, "params_count": len(updates), "updated": updated_count}
 
@@ -628,6 +683,9 @@ async def _batch_parse_dimensions(params: list[dict]) -> dict[tuple[str, str], l
             "BuildParamConstraint: deterministic preprocessing handled %d/%d shapes",
             deterministic_count, len(shape_entries),
         )
+        print(f"[Backend][BuildParamConstraint][DIM_DETERMINISTIC] handled={deterministic_count}/{len(shape_entries)} llm_needed={len(llm_needed)}")
+        for _k, _v in result.items():
+            print(f"  deterministic: {_k[0]}.{_k[1]} → {json.dumps(_v, ensure_ascii=False, default=str)}")
 
     if not llm_needed:
         return result
@@ -684,6 +742,8 @@ async def _batch_parse_dimensions(params: list[dict]) -> dict[tuple[str, str], l
 
     # Phase 3: Alignment validation
     is_aligned, error = _validate_dimensions_alignment(len(llm_needed), parsed)
+
+    print(f"[Backend][BuildParamConstraint][DIM_ALIGNMENT] expected={len(llm_needed)} got={len(parsed) if isinstance(parsed, list) else '?'} is_aligned={is_aligned} error={error}")
 
     if not is_aligned:
         logger.warning(
@@ -790,6 +850,10 @@ async def _batch_extract_allowed_range(
             "BuildParamConstraint: deterministic range extraction handled %d/%d params",
             deterministic_count, len(remaining_params),
         )
+        print(f"[Backend][BuildParamConstraint][RANGE_DETERMINISTIC] handled={deterministic_count}/{len(remaining_params)} bool_shortcircuit={len(bool_params)} llm_needed={len(llm_needed)}")
+        for _k, _v in result.items():
+            if _v and _v != [True, False]:
+                print(f"  deterministic: {_k[0]}.{_k[1]} → {json.dumps(_v, ensure_ascii=False, default=str)}")
 
     if not llm_needed:
         return result

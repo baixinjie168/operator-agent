@@ -405,6 +405,7 @@ async def build_single_param_constraint_node(
     logger.info(
         "SingleParamConstraint: doc_id=%s for %s", doc_id, operator_name,
     )
+    print(f"[Backend][SingleParamConstraint] state_input:", repr({"doc_id": doc_id, "operator_name": operator_name}))
 
     if not doc_id:
         logger.warning("SingleParamConstraint: no doc_id, skipping")
@@ -414,6 +415,11 @@ async def build_single_param_constraint_node(
         # Step 1: Load data
         params = await _mcp_client.query_params_by_doc_id(doc_id)
         existing = await _mcp_client.query_param_relations(doc_id)
+
+        # 原始 dump: 不拼装，直接输出字段
+        print(f"[Backend][SingleParamConstraint] params_count={len(params) if params else 0}")
+        print(f"[Backend][SingleParamConstraint] existing_relations_count={len(existing) if existing else 0}")
+        print(f"[Backend][SingleParamConstraint] params_raw={json.dumps(params, ensure_ascii=False, default=str)[:2000]}")
 
         if not params:
             logger.info("SingleParamConstraint: no parameters, skipping")
@@ -445,6 +451,21 @@ async def build_single_param_constraint_node(
             "SingleParamConstraint: Layer 1 matched %d constraints",
             len(layer1_results),
         )
+        print(f"[Backend][SingleParamConstraint] ========== LAYER 1 DETERMINISTIC RESULTS ==========")
+        print(f"[Backend][SingleParamConstraint][LAYER1] matched={len(layer1_results)}")
+        for _i, _c in enumerate(layer1_results):
+            _obj = _c.get("relation_object", {})
+            print(f"[Backend][SingleParamConstraint][L1_{_i}]:")
+            print(f"  function_name={_c.get('function_name', '')}")
+            print(f"  params={json.dumps(_c.get('params', []), ensure_ascii=False)}")
+            print(f"  relation_type={_c.get('relation_type', '')}")
+            print(f"  description={_c.get('description', '')}")
+            print(f"  source_citation={_c.get('source_citation', '')}")
+            print(f"  → expr_type={_obj.get('expr_type', '')}")
+            print(f"  → expr={_obj.get('expr', '')}")
+            print(f"  → src_text={_obj.get('src_text', '')}")
+            print(f"  _source={_c.get('_source', '')}")
+        print(f"[Backend][SingleParamConstraint] ========== END LAYER 1 ==========")
 
         _emit(EventType.NODE_PROGRESS, {
             "message": f"Layer 1 正则匹配: 命中 {len(layer1_results)} 条单参数约束",
@@ -483,9 +504,35 @@ async def build_single_param_constraint_node(
                     "SingleParamConstraint: Layer 2 extracted %d constraints",
                     len(layer2_results),
                 )
+                print(f"[Backend][SingleParamConstraint] ========== LAYER 2 LLM RESULTS ==========")
+                print(f"[Backend][SingleParamConstraint][LAYER2] extracted={len(layer2_results)}")
+                for _i, _c in enumerate(layer2_results):
+                    _obj = _c.get("relation_object", {})
+                    print(f"[Backend][SingleParamConstraint][L2_{_i}]:")
+                    print(f"  function_name={_c.get('function_name', '')}")
+                    print(f"  params={json.dumps(_c.get('params', []), ensure_ascii=False)}")
+                    print(f"  relation_type={_c.get('relation_type', '')}")
+                    print(f"  description={_c.get('description', '')}")
+                    print(f"  source_citation={_c.get('source_citation', '')}")
+                    print(f"  → expr_type={_obj.get('expr_type', '')}")
+                    print(f"  → expr={_obj.get('expr', '')}")
+                    print(f"  _source={_c.get('_source', '')}")
+                print(f"[Backend][SingleParamConstraint] ========== END LAYER 2 ==========")
 
         # Step 4: Merge and deduplicate
         all_new = _dedup(layer1_results + layer2_results)
+
+        print(f"[Backend][SingleParamConstraint] ========== DEDUP RESULTS ==========")
+        print(f"[Backend][SingleParamConstraint] before_dedup={len(layer1_results) + len(layer2_results)} after_dedup={len(all_new)}")
+        for _i, _c in enumerate(all_new):
+            _obj = _c.get("relation_object", {})
+            print(f"[Backend][SingleParamConstraint][DEDUP_{_i}]:")
+            print(f"  function_name={_c.get('function_name', '')}")
+            print(f"  params={json.dumps(_c.get('params', []), ensure_ascii=False)}")
+            print(f"  → expr_type={_obj.get('expr_type', '')}")
+            print(f"  → expr={_obj.get('expr', '')}")
+            print(f"  _source={_c.get('_source', '')}")
+        print(f"[Backend][SingleParamConstraint] ========== END DEDUP ==========")
 
         _emit(EventType.NODE_PROGRESS, {
             "message": f"合并去重: Layer1({len(layer1_results)}) + Layer2({len(layer2_results)}) → {len(all_new)} 条新约束",
@@ -511,6 +558,19 @@ async def build_single_param_constraint_node(
 
         # Step 6: Coverage report
         _log_coverage(params, all_new, len(layer1_results), len(layer2_results))
+
+        # Print coverage details
+        covered_params: set[str] = set()
+        for _r in all_new:
+            for _p in _r.get("params", []):
+                covered_params.add(_p)
+        tensor_params = [p for p in params if "aclTensor" in p.get("param_type", "")]
+        uncovered = [p["param_name"] for p in tensor_params if p["param_name"] not in covered_params]
+        print(f"[Backend][SingleParamConstraint] ========== COVERAGE REPORT ==========")
+        print(f"[Backend][SingleParamConstraint] tensor_params_total={len(tensor_params)} covered={len(covered_params)} uncovered={len(uncovered)}")
+        print(f"[Backend][SingleParamConstraint] covered_params={json.dumps(sorted(covered_params), ensure_ascii=False)}")
+        print(f"[Backend][SingleParamConstraint] uncovered_params={json.dumps(uncovered[:20], ensure_ascii=False)}")
+        print(f"[Backend][SingleParamConstraint] ========== END COVERAGE ==========")
 
         return {
             "single_param_constraints": all_new,

@@ -219,12 +219,16 @@ def _validate_expr_syntax(expr: str) -> tuple[bool, str]:
         (is_valid, error_message)
     """
     if not expr:
+        logger.error("[ValidateExprSyntax] PASS (empty expr, skipped)")
         return True, ""  # Empty expression is allowed
     try:
         ast.parse(expr, mode="eval")
+        logger.error("[ValidateExprSyntax] PASS — expr='%s' — AST语法校验通过", expr)
         return True, ""
     except SyntaxError as e:
-        return False, f"SyntaxError at line {e.lineno}: {e.msg}"
+        err = f"SyntaxError at line {e.lineno}: {e.msg}"
+        logger.error("[ValidateExprSyntax] FAIL — expr='%s' — %s", expr, err)
+        return False, err
 
 
 def _validate_expr_refs(expr: str, params: list[str]) -> tuple[bool, str]:
@@ -236,10 +240,12 @@ def _validate_expr_refs(expr: str, params: list[str]) -> tuple[bool, str]:
     3. Comprehension variables (e.g., 'd' in 'all(d > 0 for d in x.shape)') are allowed
     """
     if not expr:
+        logger.error("[ValidateExprRefs] PASS (empty expr, skipped) params=%s", params)
         return True, ""
     try:
         tree = ast.parse(expr, mode="eval")
     except SyntaxError:
+        logger.error("[ValidateExprRefs] FAIL — expr='%s' — Invalid syntax (AST parse failed)", expr)
         return False, "Invalid syntax"
 
     param_set = set(params)
@@ -256,6 +262,15 @@ def _validate_expr_refs(expr: str, params: list[str]) -> tuple[bool, str]:
                         if isinstance(elt, ast.Name):
                             comprehension_vars.add(elt.id)
 
+    # Collect all referenced names and attributes for logging
+    ref_names: list[str] = []
+    ref_attrs: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name):
+            ref_names.append(node.id)
+        if isinstance(node, ast.Attribute):
+            ref_attrs.append(node.attr)
+
     for node in ast.walk(tree):
         if isinstance(node, ast.Name):
             if (
@@ -263,10 +278,18 @@ def _validate_expr_refs(expr: str, params: list[str]) -> tuple[bool, str]:
                 and node.id not in _BUILTIN_NAMES
                 and node.id not in comprehension_vars
             ):
-                return False, f"Unknown parameter: '{node.id}'"
+                err = f"Unknown parameter: '{node.id}'"
+                logger.error("[ValidateExprRefs] FAIL — expr='%s' params=%s — %s | ref_names=%s ref_attrs=%s comprehension_vars=%s",
+                             expr, params, err, ref_names, ref_attrs, comprehension_vars)
+                return False, err
         if isinstance(node, ast.Attribute):
             if node.attr not in _ALLOWED_ATTRS:
-                return False, f"Unknown attribute: '.{node.attr}'"
+                err = f"Unknown attribute: '.{node.attr}'"
+                logger.error("[ValidateExprRefs] FAIL — expr='%s' params=%s — %s | ref_names=%s ref_attrs=%s allowed_attrs=%s",
+                             expr, params, err, ref_names, ref_attrs, _ALLOWED_ATTRS)
+                return False, err
+    logger.error("[ValidateExprRefs] PASS — expr='%s' params=%s — 参数名和属性均合法 | ref_names=%s ref_attrs=%s comprehension_vars=%s",
+                 expr, params, ref_names, ref_attrs, comprehension_vars)
     return True, ""
 
 
@@ -419,6 +442,14 @@ async def _call_verify_llm(
     sem: asyncio.Semaphore,
 ) -> dict:
     """Phase 2b: Call verification LLM to check semantic correctness."""
+    rel_id = rel.get("id", "?")
+    logger.error("[Phase2b][VerifyLLM] ===== START relation_id=%s =====", rel_id)
+    logger.error("  input_expr_type=%s", expr_result.get('expr_type', ''))
+    logger.error("  input_expr=%s", expr_result.get('expr', ''))
+    logger.error("  input_description=%s", (rel.get('description', '') or '')[:200])
+    logger.error("  input_source_citation=%s", (rel.get('source_citation', '') or '')[:200])
+    logger.error("  input_params=%s", json.dumps(rel.get('params', []), ensure_ascii=False))
+
     async with sem:
         prompt = EXPR_VERIFY_PROMPT.format(
             description=rel.get("description", ""),
@@ -430,6 +461,8 @@ async def _call_verify_llm(
         )
         response = await llm.ainvoke(prompt)
         text = response.content if hasattr(response, "content") else str(response)
+        logger.error("[Phase2b][VerifyLLM] relation_id=%s raw_response=%s", rel_id, text[:500])
+
         # Parse JSON response
         match = _JSON_BLOCK_RE.search(text)
         if match:
@@ -438,6 +471,10 @@ async def _call_verify_llm(
         try:
             data = json.loads(text)
             if isinstance(data, dict):
+                logger.error("[Phase2b][VerifyLLM] relation_id=%s parsed_result=%s", rel_id, json.dumps(data, ensure_ascii=False))
+                logger.error("  is_correct=%s reason=%s", data.get('is_correct'), data.get('reason', ''))
+                logger.error("  corrected_expr=%s", data.get('corrected_expr', ''))
+                logger.error("[Phase2b][VerifyLLM] ===== END relation_id=%s =====", rel_id)
                 return data
         except json.JSONDecodeError:
             pass
@@ -446,10 +483,16 @@ async def _call_verify_llm(
             try:
                 data = json.loads(obj_match.group(0))
                 if isinstance(data, dict):
+                    logger.error("[Phase2b][VerifyLLM] relation_id=%s parsed_result(regex)=%s", rel_id, json.dumps(data, ensure_ascii=False))
+                    logger.error("  is_correct=%s reason=%s", data.get('is_correct'), data.get('reason', ''))
+                    logger.error("  corrected_expr=%s", data.get('corrected_expr', ''))
+                    logger.error("[Phase2b][VerifyLLM] ===== END relation_id=%s =====", rel_id)
                     return data
             except json.JSONDecodeError:
                 pass
         logger.warning("BuildParamRelations: failed to parse verify response: %s", text[:200])
+        logger.error("[Phase2b][VerifyLLM] relation_id=%s PARSE_FAILED, accepting original", rel_id)
+        logger.error("[Phase2b][VerifyLLM] ===== END relation_id=%s =====", rel_id)
         return {"is_correct": True, "reason": "parse_failed, accepting original"}
 
 
@@ -464,6 +507,11 @@ async def _verify_and_fix(
 
     If verification LLM returns corrected_expr, it must pass Phase 0 again.
     """
+    rel_id = rel.get("id", "?")
+    logger.error("[Phase2b][VerifyAndFix] ===== START relation_id=%s =====", rel_id)
+    logger.error("  original_expr=%s", expr_result.get('expr', ''))
+    logger.error("  original_expr_type=%s", expr_result.get('expr_type', ''))
+
     try:
         verify_result = await _call_verify_llm(llm, rel, expr_result, param_shapes_text, sem)
     except Exception:
@@ -471,22 +519,37 @@ async def _verify_and_fix(
             "BuildParamRelations: semantic verification failed for relation id=%s",
             rel.get("id", "?"),
         )
+        logger.error("[Phase2b][VerifyAndFix] relation_id=%s LLM_CALL_FAILED, accepting original", rel_id)
+        logger.error("[Phase2b][VerifyAndFix] ===== END relation_id=%s =====", rel_id)
         return expr_result  # Accept original on verification failure
 
-    if verify_result.get("is_correct", True):
+    is_correct = verify_result.get("is_correct", True)
+    reason = verify_result.get("reason", "")
+    corrected = verify_result.get("corrected_expr", "")
+
+    logger.error("[Phase2b][VerifyAndFix] relation_id=%s verify_result:", rel_id)
+    logger.error("  is_correct=%s", is_correct)
+    logger.error("  reason=%s", reason)
+    logger.error("  corrected_expr=%s", corrected)
+
+    if is_correct:
+        logger.error("[Phase2b][VerifyAndFix] relation_id=%s → ACCEPT ORIGINAL (semantically correct)", rel_id)
+        logger.error("[Phase2b][VerifyAndFix] ===== END relation_id=%s =====", rel_id)
         return expr_result
 
     # Verification failed, use corrected_expr
-    corrected = verify_result.get("corrected_expr", "")
     if not corrected:
         logger.warning(
             "BuildParamRelations: verification failed but no corrected_expr "
             "for relation id=%s",
             rel.get("id", "?"),
         )
+        logger.error("[Phase2b][VerifyAndFix] relation_id=%s → ACCEPT ORIGINAL (no corrected_expr provided)", rel_id)
+        logger.error("[Phase2b][VerifyAndFix] ===== END relation_id=%s =====", rel_id)
         return expr_result  # Accept original if no correction
 
     # Critical: corrected_expr must pass Phase 0 validation
+    logger.error("[Phase2b][VerifyAndFix] relation_id=%s LOOP-BACK: validating corrected_expr with Phase 0...", rel_id)
     is_valid, error = _validate_expr(corrected, rel.get("params", []))
     if not is_valid:
         logger.warning(
@@ -494,12 +557,20 @@ async def _verify_and_fix(
             "relation id=%s: %s — accepting original",
             rel.get("id", "?"), error,
         )
+        logger.error("[Phase2b][VerifyAndFix] relation_id=%s → ACCEPT ORIGINAL (corrected_expr failed Phase 0: %s)", rel_id, error)
+        logger.error("[Phase2b][VerifyAndFix] ===== END relation_id=%s =====", rel_id)
         return expr_result  # Accept original if correction is invalid
 
     logger.info(
         "BuildParamRelations: corrected expr for relation id=%s: %s",
         rel.get("id", "?"), verify_result.get("reason", ""),
     )
+    logger.error("[Phase2b][VerifyAndFix] relation_id=%s → ACCEPT CORRECTED", rel_id)
+    logger.error("  original_expr=%s", expr_result.get('expr', ''))
+    logger.error("  corrected_expr=%s", corrected)
+    logger.error("  correction_reason=%s", reason)
+    logger.error("  corrected_expr passed Phase 0 validation")
+    logger.error("[Phase2b][VerifyAndFix] ===== END relation_id=%s =====", rel_id)
     return {
         "expr_type": expr_result.get("expr_type", ""),
         "expr": corrected,
@@ -547,9 +618,25 @@ async def _batch_extract_relation_objects(
 
         # Check if semantic verification is needed (Phase 2b)
         confidence = result.get("confidence", "high")
+        rel_id = rel.get("id", "?")
+        
+        # Phase 2b: Semantic verification
+        # Trigger conditions:
+        # 1. confidence == "low" and has expr (original logic)
+        # 2. settings.force_phase2b == True (for analysis/debugging)
+        force_phase2b = getattr(settings, "force_phase2b", False)
+        
         if confidence == "low" and result.get("expr"):
             # Force semantic verification for low confidence
+            logger.error("[Phase2b] relation_id=%s — confidence=low, triggering semantic verification", rel_id)
             result = await _verify_and_fix(llm, rel, result, param_shapes_text, sem)
+        elif force_phase2b and result.get("expr"):
+            # Force Phase2b for all relations (for analysis)
+            logger.error("[Phase2b] relation_id=%s — force_phase2b=True, confidence=%s, triggering semantic verification", rel_id, confidence)
+            result = await _verify_and_fix(llm, rel, result, param_shapes_text, sem)
+        else:
+            # Phase2b skipped
+            logger.error("[Phase2b] relation_id=%s — SKIPPED (confidence=%s, force_phase2b=%s)", rel_id, confidence, force_phase2b)
         # For medium confidence, verification is optional (disabled by default)
         # Uncomment below to enable:
         # elif confidence == "medium" and result.get("expr"):
@@ -574,6 +661,7 @@ async def build_param_relations_node(state: PipelineState) -> dict[str, Any]:
     operator_name = state.get("operator_name", "")
 
     logger.info("BuildParamRelations: doc_id=%s for %s", doc_id, operator_name)
+    print(f"[Backend][BuildParamRelations] state_input:", repr({"doc_id": doc_id, "operator_name": operator_name}))
 
     if not doc_id:
         logger.warning("BuildParamRelations: no doc_id, skipping")
@@ -585,6 +673,13 @@ async def build_param_relations_node(state: PipelineState) -> dict[str, Any]:
         sigs = await _mcp_client.query_function_signatures_by_doc_id(doc_id)
         platforms = await _mcp_client.query_platform_support_by_doc_id(doc_id)
         params = await _mcp_client.query_params_by_doc_id(doc_id)
+
+        # 原始 dump: 不要拼装，按字段直接输出
+        print(f"[Backend][BuildParamRelations] query_results: relations.count={len(relations) if relations else 0}")
+        print(f"[Backend][BuildParamRelations] relations_raw={json.dumps(relations, ensure_ascii=False, default=str)[:2000]}")
+        print(f"[Backend][BuildParamRelations] signatures_count={len(sigs) if sigs else 0}")
+        print(f"[Backend][BuildParamRelations] platforms_count={len(platforms) if platforms else 0}")
+        print(f"[Backend][BuildParamRelations] params_count={len(params) if params else 0}")
 
         if not relations:
             logger.info("BuildParamRelations: no relations, skipping")
@@ -619,6 +714,25 @@ async def build_param_relations_node(state: PipelineState) -> dict[str, Any]:
         valid_count = sum(1 for r in llm_results if r.get("expr"))
         corrected_count = sum(1 for r in llm_results if r.get("_corrected"))
         error_count = sum(1 for r in llm_results if r.get("_validation_error"))
+
+        # 原始 dump: 把每条 LLM 提取结果完整输出（不做拼装）
+        print(f"[Backend][BuildParamRelations] ========== LLM EXTRACTION RESULTS ==========")
+        print(f"[Backend][BuildParamRelations] total_relations={len(relations)} valid_expr={valid_count} corrected={corrected_count} validation_errors={error_count}")
+        for _i, (_rel, _r) in enumerate(zip(relations, llm_results)):
+            print(f"[Backend][BuildParamRelations] llm_result[{_i}]:")
+            print(f"  relation_id={_rel.get('id', '?')}")
+            print(f"  relation_type={_rel.get('relation_type', '')}")
+            print(f"  params={json.dumps(_rel.get('params', []), ensure_ascii=False)}")
+            print(f"  description={(_rel.get('description', '') or '')[:200]}")
+            print(f"  source_citation={(_rel.get('source_citation', '') or '')[:200]}")
+            print(f"  → expr_type={_r.get('expr_type', '')}")
+            print(f"  → expr={_r.get('expr', '')}")
+            print(f"  → confidence={_r.get('confidence', '')}")
+            print(f"  → uncertainty_reason={_r.get('uncertainty_reason', '')}")
+            print(f"  → _validation_error={_r.get('_validation_error', '')}")
+            print(f"  → _corrected={_r.get('_corrected', False)}")
+            print(f"  → _correction_reason={_r.get('_correction_reason', '')}")
+        print(f"[Backend][BuildParamRelations] ========== END LLM RESULTS ==========")
 
         _emit(EventType.NODE_PROGRESS, {
             "message": f"表达式提取完成: {valid_count}/{len(relations)} 有效, "
@@ -661,6 +775,17 @@ async def build_param_relations_node(state: PipelineState) -> dict[str, Any]:
             result.get("updated", 0), len(updates), doc_id,
         )
 
+        print(f"[Backend][BuildParamRelations] ========== ASSEMBLED RELATION_OBJECTS ==========")
+        for _i, (_rel, _upd) in enumerate(zip(relations, updates)):
+            _obj = json.loads(_upd["relation_object"])
+            print(f"[Backend][BuildParamRelations] relation_object[{_i}]:")
+            print(f"  id={_upd['id']} platform={_rel.get('platform', '')}")
+            print(f"  expr_type={_obj.get('expr_type', '')}")
+            print(f"  expr={_obj.get('expr', '')}")
+            print(f"  relation_params={json.dumps(_obj.get('relation_params', []), ensure_ascii=False)}")
+            print(f"  src_text={(_obj.get('src_text', '') or '')[:150]}")
+        print(f"[Backend][BuildParamRelations] ========== END RELATION_OBJECTS ==========")
+
         # Step 5: Group by platform
         from agent.utils.platform_utils import resolve_target_platforms
 
@@ -681,6 +806,13 @@ async def build_param_relations_node(state: PipelineState) -> dict[str, Any]:
             len(grouped), doc_id,
         )
 
+        print(f"[Backend][BuildParamRelations] ========== GROUPED BY PLATFORM ==========")
+        for _plat, _objs in grouped.items():
+            print(f"[Backend][BuildParamRelations] platform='{_plat}' count={len(_objs)}")
+            for _j, _o in enumerate(_objs):
+                print(f"  [{_j}] expr_type={_o.get('expr_type','')} expr={_o.get('expr','')} params={json.dumps(_o.get('relation_params',[]), ensure_ascii=False)}")
+        print(f"[Backend][BuildParamRelations] ========== END GROUPED ==========")
+
         _emit(EventType.NODE_PROGRESS, {
             "message": f"已按平台分组: {len(grouped)} 个平台, {len(relations)} 条关系",
             "phase": "complete",
@@ -688,7 +820,27 @@ async def build_param_relations_node(state: PipelineState) -> dict[str, Any]:
             "relations_count": len(relations),
         })
 
-        return {"error": None, "relations_count": len(relations), "platforms_count": len(grouped)}
+        validation_results = []
+        for rel, llm_out in zip(relations, llm_results):
+            validation_results.append({
+                "relation_id": rel.get("id"),
+                "relation_type": rel.get("relation_type", ""),
+                "params": rel.get("params", []),
+                "expr_type": llm_out.get("expr_type", ""),
+                "expr": llm_out.get("expr", ""),
+                "confidence": llm_out.get("confidence", ""),
+                "syntax_valid": not bool(llm_out.get("_validation_error")) and bool(llm_out.get("expr")),
+                "validation_error": llm_out.get("_validation_error", ""),
+                "corrected": bool(llm_out.get("_corrected")),
+                "correction_reason": llm_out.get("_correction_reason", ""),
+            })
+
+        return {
+            "error": None,
+            "relations_count": len(relations),
+            "platforms_count": len(grouped),
+            "validation_results": validation_results,
+        }
 
     except Exception as e:
         logger.exception("BuildParamRelations failed for %s", operator_name)
