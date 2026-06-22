@@ -8,6 +8,7 @@ import logging
 from datetime import datetime, timezone
 from pathlib import Path
 
+from agent.core.config import settings
 from agent.graph import create_pipeline_graph
 from agent.mcp_client import MCPClient
 
@@ -22,21 +23,108 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-async def run_task(task_id: int) -> None:
-    """Execute all pending items in a task sequentially.
+async def _process_item(
+    item: dict,
+    graph,
+    mcp: MCPClient,
+) -> None:
+    """Process a single task item: read file, run pipeline, update status.
+
+    This function is designed to be called concurrently via asyncio.gather
+    with a Semaphore controlling the maximum parallelism.
+    """
+    item_id = item["id"]
+    file_path = item["file_path"]
+    operator_name = item["operator_name"]
+
+    # Set item to running
+    await mcp.update_task_item_status(
+        item_id, "running", started_at=_now_iso()
+    )
+
+    try:
+        # Read file content
+        content = Path(file_path).read_text(encoding="utf-8")
+        content_hash = hashlib.sha256(
+            content.encode("utf-8")
+        ).hexdigest()
+
+        # Execute pipeline
+        result = await graph.ainvoke(
+            {
+                "operator_name": operator_name,
+                "content": content,
+                "content_hash": content_hash,
+            }
+        )
+
+        pipeline_error = result.get("error")
+        if pipeline_error:
+            await mcp.update_task_item_status(
+                item_id,
+                "failed",
+                error=pipeline_error,
+                doc_id=result.get("doc_id"),
+                finished_at=_now_iso(),
+            )
+        else:
+            await mcp.update_task_item_status(
+                item_id,
+                "completed",
+                doc_id=result.get("doc_id"),
+                finished_at=_now_iso(),
+            )
+
+    except Exception as e:
+        logger.exception("Task item %s failed: %s", item_id, e)
+        await mcp.update_task_item_status(
+            item_id,
+            "failed",
+            error=str(e),
+            finished_at=_now_iso(),
+        )
+
+
+async def _get_failed_items(
+    mcp: MCPClient, task_id: int,
+) -> list[dict]:
+    """Fetch failed items from a task after a processing pass."""
+    task_detail = await mcp.get_task_with_items(task_id)
+    if task_detail is None:
+        return []
+    return [
+        item for item in task_detail.get("items", [])
+        if item["status"] == "failed"
+    ]
+
+
+async def _reset_items_to_pending(
+    mcp: MCPClient, items: list[dict],
+) -> None:
+    """Reset failed items back to 'pending' status for retry."""
+    for item in items:
+        await mcp.update_task_item_status(item["id"], "pending")
+
+
+async def run_task(task_id: int, max_workers: int | None = None) -> None:
+    """Execute all pending items in a task with controlled parallelism.
 
     Acquires a global lock to ensure only one task runs at a time.
-    For each pending item:
-    1. Set item status to 'running'
-    2. Read file content and compute hash
-    3. Invoke the pipeline graph
-    4. Set item status to 'completed' or 'failed'
-    5. Refresh task progress
-    After all items, set task status to 'completed' or 'failed'.
+    Within the task, items are processed in parallel using a Semaphore
+    (controlled by max_workers or settings.task_max_workers, default 3).
+
+    After the first pass, failed items are automatically retried up to
+    settings.task_max_retries times (default 1).
+
+    Args:
+        task_id: The task to execute.
+        max_workers: Override for parallelism (None = use settings.task_max_workers).
     """
     async with _run_lock:
         mcp = MCPClient()
         graph = create_pipeline_graph()
+        workers = max_workers if max_workers is not None else settings.task_max_workers
+        max_retries = settings.task_max_retries
 
         # Set task to running
         await mcp.update_task_status(task_id, "running")
@@ -44,60 +132,44 @@ async def run_task(task_id: int) -> None:
         # Get all pending items
         items = await mcp.get_pending_task_items(task_id)
 
-        for item in items:
-            item_id = item["id"]
-            file_path = item["file_path"]
-            operator_name = item["operator_name"]
+        logger.info(
+            "Task %s: processing %d items with max_workers=%d, max_retries=%d",
+            task_id, len(items), workers, max_retries,
+        )
 
-            # Set item to running
-            await mcp.update_task_item_status(
-                item_id, "running", started_at=_now_iso()
+        # Process items in parallel with Semaphore-controlled concurrency
+        sem = asyncio.Semaphore(workers)
+
+        async def _process_with_sem(item: dict) -> None:
+            async with sem:
+                await _process_item(item, graph, mcp)
+                # Refresh task progress after each item completes
+                await mcp.refresh_task_progress(task_id)
+
+        await asyncio.gather(*[_process_with_sem(item) for item in items])
+
+        # Retry loop: re-process failed items
+        for retry_round in range(1, max_retries + 1):
+            failed_items = await _get_failed_items(mcp, task_id)
+            if not failed_items:
+                logger.info(
+                    "Task %s: no failed items after pass, skipping retry",
+                    task_id,
+                )
+                break
+
+            logger.info(
+                "Task %s: retry round %d/%d — %d failed items",
+                task_id, retry_round, max_retries, len(failed_items),
             )
 
-            try:
-                # Read file content
-                content = Path(file_path).read_text(encoding="utf-8")
-                content_hash = hashlib.sha256(
-                    content.encode("utf-8")
-                ).hexdigest()
+            # Reset failed items to pending for re-processing
+            await _reset_items_to_pending(mcp, failed_items)
 
-                # Execute pipeline
-                result = await graph.ainvoke(
-                    {
-                        "operator_name": operator_name,
-                        "content": content,
-                        "content_hash": content_hash,
-                    }
-                )
-
-                pipeline_error = result.get("error")
-                if pipeline_error:
-                    await mcp.update_task_item_status(
-                        item_id,
-                        "failed",
-                        error=pipeline_error,
-                        doc_id=result.get("doc_id"),
-                        finished_at=_now_iso(),
-                    )
-                else:
-                    await mcp.update_task_item_status(
-                        item_id,
-                        "completed",
-                        doc_id=result.get("doc_id"),
-                        finished_at=_now_iso(),
-                    )
-
-            except Exception as e:
-                logger.exception("Task item %s failed: %s", item_id, e)
-                await mcp.update_task_item_status(
-                    item_id,
-                    "failed",
-                    error=str(e),
-                    finished_at=_now_iso(),
-                )
-
-            # Refresh task progress
-            await mcp.refresh_task_progress(task_id)
+            # Re-process failed items in parallel
+            await asyncio.gather(
+                *[_process_with_sem(item) for item in failed_items]
+            )
 
         # Set final task status
         task = await mcp.get_task(task_id)
@@ -178,8 +250,8 @@ async def retry_failed_task(task_id: int) -> dict:
     new_task_id = result["task_id"]
     await mcp.create_task_items(new_task_id, items)
 
-    # Kick off background execution
-    asyncio.create_task(run_task(new_task_id))
+    # Kick off background execution with concurrency=1 for retry safety
+    asyncio.create_task(run_task(new_task_id, max_workers=1))
 
     logger.info(
         "Created retry task %s (name=%s) for %d failed items from task %s",

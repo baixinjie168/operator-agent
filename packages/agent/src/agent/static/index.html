@@ -29,6 +29,8 @@
   .main button:disabled { background: #a5a5a5; cursor: not-allowed; }
   .main button.secondary { background: #6b7280; }
   .main button.secondary:hover { background: #4b5563; }
+  .main button.danger { background: #dc2626; }
+  .main button.danger:hover { background: #b91c1c; }
 
   /* Split panel layout */
   .split-panel { display: flex; gap: 20px; flex: 1; min-height: 0; }
@@ -2140,8 +2142,14 @@ async function loadTaskDetail(taskId) {
         : `▶ 继续执行 (${pendingCount} 个待处理)`;
       actionsHtml += `<button onclick="resumeTask(${t.id})">${resumeLabel}</button>`;
     }
+    if (t.failed_count > 0 && (t.status === 'failed' || t.status === 'completed')) {
+      actionsHtml += `<button onclick="retryFailedTask(${t.id})">🔄 重试失败 (${t.failed_count})</button>`;
+    }
     if (t.completed_count > 0) {
       actionsHtml += `<button class="secondary" onclick="downloadTaskResults(${t.id}, '${escapeHtml(t.name)}')">⬇ 下载结果 (${t.completed_count})</button>`;
+    }
+    if (t.status !== 'running') {
+      actionsHtml += `<button class="danger" onclick="deleteTask(${t.id}, '${escapeHtml(t.name)}')">🗑 删除任务</button>`;
     }
     actionsEl.innerHTML = actionsHtml;
 
@@ -2208,6 +2216,45 @@ async function resumeTask(taskId) {
     }
   } catch (err) {
     alert('恢复失败: ' + err.message);
+  }
+}
+
+/* -- Retry failed operators -- */
+async function retryFailedTask(taskId) {
+  try {
+    const res = await fetch('/api/v1/tasks/' + taskId + '/retry-failed', { method: 'POST' });
+    const data = await res.json();
+    if (data.success) {
+      // Navigate to the new retry task detail
+      loadTaskDetail(data.new_task_id);
+      _startTaskDetailPoll(data.new_task_id);
+      // Refresh task list to show the new task
+      loadTaskList();
+    } else {
+      alert('重试失败: ' + (data.error || '未知错误'));
+    }
+  } catch (err) {
+    alert('重试失败: ' + err.message);
+  }
+}
+
+/* -- Delete task -- */
+async function deleteTask(taskId, taskName) {
+  if (!confirm(`确认删除任务 "${taskName}" 及其所有算子解析数据？\n\n此操作不可恢复。`)) {
+    return;
+  }
+  try {
+    const res = await fetch('/api/v1/tasks/' + taskId, { method: 'DELETE' });
+    const data = await res.json();
+    if (data.success) {
+      // Go back to task list
+      showTaskSubView('taskListView');
+      loadTaskList();
+    } else {
+      alert('删除失败: ' + (data.error || '未知错误'));
+    }
+  } catch (err) {
+    alert('删除失败: ' + err.message);
   }
 }
 

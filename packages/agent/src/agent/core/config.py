@@ -43,6 +43,11 @@ class Settings(BaseSettings):
     expr_max_retries: int = Field(default=2, ge=0, le=10)
     dimensions_max_retries: int = Field(default=2, ge=0, le=10)
 
+    # Parallel execution: how many operators to parse concurrently within a task
+    task_max_workers: int = Field(default=3, ge=1, le=20)
+    task_max_retries: int = Field(default=1, ge=0, le=5)
+    task_config_file: str = "config/task_config.yaml"
+
     # Max tokens for LLM responses (prevents truncation of large JSON outputs)
     llm_max_tokens: int = Field(default=16384, ge=256, le=131072)
 

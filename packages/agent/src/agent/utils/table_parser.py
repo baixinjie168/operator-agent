@@ -35,16 +35,21 @@ _NOT_SUPPORTED_RE = re.compile(r"[×✗]|不支持")
 
 class _Cell:
     """Accumulates text content inside a <td> / <th>."""
-    __slots__ = ("text", "rowspan", "colspan", "is_header")
+    __slots__ = ("text", "rowspan", "colspan", "is_header", "raw_parts")
 
     def __init__(self, is_header: bool = False, rowspan: int = 1, colspan: int = 1) -> None:
         self.text: list[str] = []
         self.rowspan = rowspan
         self.colspan = colspan
         self.is_header = is_header
+        self.raw_parts: list[str] = []  # raw HTML fragments for platform-tag extraction
 
     def value(self) -> str:
         return " ".join("".join(self.text).split()).strip()
+
+    def raw_html(self) -> str:
+        """Return the raw HTML content accumulated inside this cell."""
+        return "".join(self.raw_parts)
 
 
 class _HTMLTableParser(HTMLParser):
@@ -53,10 +58,12 @@ class _HTMLTableParser(HTMLParser):
     def __init__(self) -> None:
         super().__init__()
         self.tables: list[list[list[str]]] = []
+        self.raw_tables: list[list[list[str]]] = []  # parallel: raw HTML per cell
         self._current_table: list[list[_Cell]] = []
         self._current_row: list[_Cell] = []
         self._current_cell: _Cell | None = None
         self._in_table = False
+        self._in_cell = False  # track whether we're inside td/th
         self._header_row: list[str] = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
@@ -74,9 +81,17 @@ class _HTMLTableParser(HTMLParser):
             self._current_cell = _Cell(
                 is_header=(tag == "th"), rowspan=rowspan, colspan=colspan
             )
+            self._in_cell = True
+        # Track raw HTML for cell content
+        if self._in_cell and self._current_cell is not None:
+            raw = self.get_starttag_text() or f"<{tag}>"
+            self._current_cell.raw_parts.append(raw)
 
     def handle_endtag(self, tag: str) -> None:
         tag = tag.lower()
+        # Track raw HTML for cell content (before closing td/th)
+        if self._in_cell and self._current_cell is not None:
+            self._current_cell.raw_parts.append(f"</{tag}>")
         if tag in ("th", "td") and self._in_table and self._current_cell is not None:
             for _ in range(self._current_cell.colspan):
                 self._current_row.append(self._current_cell)
@@ -84,13 +99,16 @@ class _HTMLTableParser(HTMLParser):
                 for _ in range(self._current_cell.colspan):
                     self._header_row.append(self._current_cell.value())
             self._current_cell = None
+            self._in_cell = False
         elif tag == "tr" and self._in_table:
             self._current_table.append(self._current_row)
             self._current_row = []
         elif tag == "table" and self._in_table:
             grid = self._expand_rowspan(self._current_table)
             str_grid = [[cell.value() for cell in row] for row in grid]
+            raw_grid = [[cell.raw_html() for cell in row] for row in grid]
             self.tables.append(str_grid)
+            self.raw_tables.append(raw_grid)
             self._in_table = False
 
     def handle_data(self, data: str) -> None:
@@ -129,6 +147,22 @@ def parse_html_tables(content: str) -> list[list[list[str]]]:
     except Exception:
         return []
     return parser.tables
+
+
+def parse_html_tables_with_raw(
+    content: str,
+) -> tuple[list[list[list[str]]], list[list[list[str]]]]:
+    """Parse all html tables, returning (text_grids, raw_html_grids).
+
+    text_grids: list of tables, each a list of rows, each a list of cell text.
+    raw_html_grids: parallel structure with raw HTML per cell.
+    """
+    parser = _HTMLTableParser()
+    try:
+        parser.feed(content)
+    except Exception:
+        return [], []
+    return parser.tables, parser.raw_tables
 
 
 def _normalise(text: str) -> str:
@@ -309,3 +343,74 @@ def find_param_name_column(header_row: list[str]) -> int:
             if _normalise(nh) == norm or _normalise(nh) in norm:
                 return idx
     return 0
+
+
+# ---------------------------------------------------------------------------
+# Platform-tagged cell extraction
+# ---------------------------------------------------------------------------
+# Some operator docs use <li><term>PLATFORM</term>: VALUE</li> patterns
+# inside table cells to specify per-platform dtype/shape/format.
+# extract_platform_tagged_values() parses these patterns from raw HTML.
+
+_PLATFORM_LI_RE = re.compile(
+    r"<li[^>]*>\s*<term>([^<]+)</term>\s*[：:]\s*(.+?)\s*</li>",
+    re.DOTALL | re.IGNORECASE,
+)
+
+
+def extract_platform_tagged_values(raw_html_cell: str) -> dict[str, str] | None:
+    """Parse platform-tagged <li><term>PLATFORM</term>: VALUE</li> patterns.
+
+    Returns:
+        {platform_name: value_text} if platform tags found.
+        None if no platform tags (universal value — applies to all platforms).
+    """
+    if not raw_html_cell:
+        return None
+    matches = _PLATFORM_LI_RE.findall(raw_html_cell)
+    if not matches:
+        return None
+    return {platform.strip(): value.strip() for platform, value in matches}
+
+
+def extract_platform_attributes_from_table(
+    raw_grid: list[list[str]],
+    col_map: dict[str, int],
+    param_name: str,
+    name_col_idx: int = 0,
+) -> dict[str, dict[str, str]]:
+    """Extract platform-tagged values for dtype/shape/format columns.
+
+    Returns a dict like:
+        {"dtype": {"Atlas A2...": "FLOAT16,BFLOAT16", "Atlas 推理...": "FLOAT16"},
+         "shape": {"Atlas A2...": "[M, K1]"}}
+
+    Only includes columns where platform tags were found.
+    Returns {} if no platform-tagged columns exist for this param.
+    """
+    result: dict[str, dict[str, str]] = {}
+    target_row: list[str] | None = None
+
+    for row in raw_grid:
+        if name_col_idx < len(row):
+            # Strip HTML tags to get plain text param name
+            cell_text = re.sub(r"<[^>]+>", "", row[name_col_idx]).strip()
+            if cell_text == param_name or cell_text.replace("*", "").strip() == param_name:
+                target_row = row
+                break
+
+    if target_row is None:
+        return result
+
+    # Check each column that supports platform tagging
+    _PLATFORM_AWARE_FIELDS = {"dtype_desc", "shape", "dformat_desc"}
+    for field in _PLATFORM_AWARE_FIELDS:
+        if field not in col_map:
+            continue
+        idx = col_map[field]
+        if idx < len(target_row):
+            tagged = extract_platform_tagged_values(target_row[idx])
+            if tagged:
+                result[field] = tagged
+
+    return result

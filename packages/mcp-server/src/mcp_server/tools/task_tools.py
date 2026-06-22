@@ -317,3 +317,83 @@ def reset_stuck_task_items(task_id: int) -> dict:
     conn.commit()
 
     return {"reset_count": stuck_count}
+
+
+# ---------------------------------------------------------------------------
+# Tables that reference document_versions(doc_id) — must be cleaned up
+# before deleting the document_versions row itself.
+# ---------------------------------------------------------------------------
+_DOC_ID_CHILD_TABLES = [
+    "parameters",
+    "param_relations",
+    "function_signatures",
+    "platform_support",
+    "return_codes",
+    "dtype_combinations",
+    "constraints_result",
+    "shape_dim_mappings",
+    "platform_constants",
+]
+
+
+def delete_task(task_id: int) -> dict:
+    """Delete a task and all associated operator data.
+
+    Cascade deletion order:
+    1. Collect all doc_ids from task_items
+    2. For each doc_id: delete from all child tables, then document_versions
+    3. Delete task_items
+    4. Delete the task record
+
+    Only allows deletion of finished tasks (completed, failed, pending).
+    Refuses to delete running tasks.
+
+    Args:
+        task_id: Task ID.
+
+    Returns:
+        dict with deleted_task_id, deleted_docs count, deleted_items count.
+
+    Raises:
+        ValueError: If task not found or still running.
+    """
+    db = get_db()
+    conn = db.conn
+
+    # Verify task exists and is not running
+    task = conn.execute(
+        "SELECT id, status FROM tasks WHERE id = ?", (task_id,)
+    ).fetchone()
+    if task is None:
+        raise ValueError(f"Task {task_id} not found")
+    if task[1] == "running":
+        raise ValueError("Cannot delete a task that is still running")
+
+    # Collect doc_ids from task items (only completed items have doc_id)
+    rows = conn.execute(
+        "SELECT doc_id FROM task_items WHERE task_id = ? AND doc_id IS NOT NULL",
+        (task_id,),
+    ).fetchall()
+    doc_ids = [r[0] for r in rows if r[0]]
+
+    # Delete child table rows for each doc_id
+    deleted_docs = 0
+    for doc_id in doc_ids:
+        for table in _DOC_ID_CHILD_TABLES:
+            conn.execute(f"DELETE FROM {table} WHERE doc_id = ?", (doc_id,))
+        conn.execute("DELETE FROM document_versions WHERE id = ?", (doc_id,))
+        deleted_docs += 1
+
+    # Delete task items
+    conn.execute("DELETE FROM task_items WHERE task_id = ?", (task_id,))
+
+    # Delete the task record
+    conn.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
+
+    conn.commit()
+
+    return {
+        "deleted_task_id": task_id,
+        "deleted_docs": deleted_docs,
+        "deleted_items": len(rows),
+    }
