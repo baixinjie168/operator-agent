@@ -474,6 +474,33 @@ class Database:
             )
         except sqlite3.OperationalError:
             pass
+        # 迁移：v36 — 新增 platform_constants 表
+        try:
+            self._conn.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS platform_constants (
+                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    doc_id          INTEGER NOT NULL REFERENCES document_versions(id),
+                    const_name      TEXT NOT NULL,
+                    description     TEXT NOT NULL DEFAULT '',
+                    platform_values TEXT NOT NULL DEFAULT '[]',
+                    source_citation TEXT NOT NULL DEFAULT '',
+                    created_at      TEXT DEFAULT (datetime('now'))
+                );
+                CREATE INDEX IF NOT EXISTS idx_platform_constants_doc_id
+                    ON platform_constants(doc_id);
+                """
+            )
+        except sqlite3.OperationalError:
+            pass
+        # 迁移：v37 — parameters 新增 platform_attributes 列
+        try:
+            self._conn.execute(
+                "ALTER TABLE parameters ADD COLUMN platform_attributes "
+                "TEXT NOT NULL DEFAULT '{}'"
+            )
+        except sqlite3.OperationalError:
+            pass
         self._conn.commit()
 
     @property

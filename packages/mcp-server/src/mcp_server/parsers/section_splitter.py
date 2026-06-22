@@ -189,13 +189,20 @@ def _find_h3_splits(lines: list[str], parent_type: SectionType) -> list[dict]:
 
     CANN docs use bold list items like '- **参数说明**' and '- **返回值**'
     as pseudo-H3 sub-headings within H2 sections.
+
+    Some documents contain zero-width spaces (\\u200b) or other invisible
+    Unicode characters around formatting markers.  These must be stripped
+    before regex matching to avoid silent failures.
     """
     H3_MARKER = re.compile(r"^-\s+\*\*(.+?)\*\*")
+    # Strip zero-width and other invisible Unicode formatting characters
+    _INVISIBLE_RE = re.compile(r"[​‌‍﻿]")
     splits: list[dict] = []
     for i, line in enumerate(lines):
-        m = H3_MARKER.match(line.strip())
+        cleaned = _INVISIBLE_RE.sub("", line.strip())
+        m = H3_MARKER.match(cleaned)
         if m:
-            heading_text = m.group(1).strip()
+            heading_text = _INVISIBLE_RE.sub("", m.group(1)).strip()
             section_type = _classify_h3(heading_text, parent_type)
             if section_type != SectionType.UNKNOWN:
                 splits.append({"index": i, "heading": heading_text, "section_type": section_type})

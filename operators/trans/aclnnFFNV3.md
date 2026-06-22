@@ -13,7 +13,7 @@
 
 ## 功能说明
 
-- 接口功能：该FFN算子提供MoeFFN和FFN的计算功能。在没有专家分组（expertTokens为空）时是FFN，有专家分组时是MoeFFN，统称为FFN，属于Moe结构。MoE（Mixture-of-Experts，混合专家系统）是一种用于训练万亿参数量级模型的技术。MoE将预测建模任务分解为若干子任务，在每个子任务上训练一个专家模型（Expert Model），开发一个门控模型（Gating Model），该模型会根据输入数据分配一个或多个专家，最终综合多个专家计算结果作为预测结果。Mixture-of-Experts结构的模型是将输入数据分配给最相关的一个或者多个专家，综合涉及的所有专家的计算结果来确定最终结果。相较于[FFNV2](./aclnnFFNV2.mdFFNV2.md)接口，**此接口中expertTokens由数组改为Tensor输入。** 相较于[FFN](./aclnnFFN.mdFFN.md)接口，**此接口新增支持expertTokens索引输入，用tokensIndexFlag区分。expertTokens由数组改为Tensor输入。**
+- 接口功能：该FFN算子提供MoeFFN和FFN的计算功能。在没有专家分组（expertTokensOptional为空）时是FFN，有专家分组时是MoeFFN，统称为FFN，属于Moe结构。MoE（Mixture-of-Experts，混合专家系统）是一种用于训练万亿参数量级模型的技术。MoE将预测建模任务分解为若干子任务，在每个子任务上训练一个专家模型（Expert Model），开发一个门控模型（Gating Model），该模型会根据输入数据分配一个或多个专家，最终综合多个专家计算结果作为预测结果。Mixture-of-Experts结构的模型是将输入数据分配给最相关的一个或者多个专家，综合涉及的所有专家的计算结果来确定最终结果。相较于[FFNV2](./aclnnFFNV2.mdFFNV2.md)接口，**此接口中expertTokensOptional由数组改为Tensor输入。** 相较于[FFN](./aclnnFFN.mdFFN.md)接口，**此接口新增支持expertTokensOptional索引输入，用tokensIndexFlag区分。expertTokensOptional由数组改为Tensor输入。**
 - 计算公式：
 
   - **非量化场景：**
@@ -141,10 +141,10 @@ aclnnStatus aclnnFFNV3(
       - innerPrecise为1时，代表高性能模式。
       - <term>Atlas A2 训练系列产品/Atlas A2 推理系列产品</term>：该参数仅在非量化场景下必选参数都为FLOAT16时生效，其余场景不区分高精度和高性能。
       - <term>Atlas 推理系列加速卡产品</term>：只支持传1。
-  - tokensIndexFlag（bool，计算输入）：可选参数，Host侧的bool，指示expertTokens是否为索引值，数据类型支持bool。
+  - tokensIndexFlag（bool，计算输入）：可选参数，Host侧的bool，指示expertTokensOptional是否为索引值，数据类型支持bool。
 
-    - tokensIndexFlag为true时，表示expertTokens为索引值。
-    - tokensIndexFlag为false时，表示expertTokens为各专家的token数。
+    - tokensIndexFlag为true时，表示expertTokensOptional为索引值。
+    - tokensIndexFlag为false时，表示expertTokensOptional为各专家的token数。
   - y（aclTensor\*，计算输出）：Device侧的aclTensor，公式中的输出y，[数据格式](../common/数据格式.md)支持ND，输出维度与x一致。
       - <term>Atlas A2 训练系列产品/Atlas A2 推理系列产品</term>：数据类型支持FLOAT16、BFLOAT16。
       - <term>Atlas 推理系列加速卡产品</term>：数据类型支持FLOAT16。
@@ -250,7 +250,7 @@ aclnnStatus aclnnFFNV3(
   - 当weight1/weight2的数据类型为INT4时，其shape最后一维必须为偶数。
   - 伪量化场景，per-group下，antiquantScale1Optional和antiquantOffset1Optional中的组数G要能被K1整除，antiquantScale2Optional和antiquantOffset2Optional中的组数G要能被K2整除。
   - innerPrecise参数在BFLOAT16非量化场景，只能配置为0；FLOAT16非量化场景，可以配置为0或者1；量化或者伪量化场景，0和1都可配置，但是配置后不生效。
-  - tokensIndexFlag为true且有专家（expertTokens不为空）时，expertTokens中的数值必须满足：如果i和j都是expertTokens中有效的数组索引，且j大于i，那么expertTokens中第j个元素的数值大于或者等于expertTokens中第i个元素的数值。
+  - tokensIndexFlag为true且有专家（expertTokensOptional不为空）时，expertTokensOptional中的数值必须满足：如果i和j都是expertTokensOptional中有效的数组索引，且j大于i，那么expertTokensOptional中第j个元素的数值大于或者等于expertTokensOptional中第i个元素的数值。
 
 - <term>Atlas 推理系列加速卡产品</term>：
   - 只支持无专家场景。

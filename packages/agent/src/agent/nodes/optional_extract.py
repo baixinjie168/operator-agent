@@ -1,25 +1,19 @@
 """OptionalExtract node: judge whether each parameter is optional via LLM."""
 
 import asyncio
-import json
 import logging
-import re
 from typing import Any
 
 from langchain_openai import ChatOpenAI
 
-from agent.core.config import settings
 from agent.mcp_client import MCPClient
 from agent.nodes.state import PipelineState
 from agent.prompts import OPTIONAL_EXTRACT_PROMPT
+from agent.utils.llm_common import CONCURRENCY_LIMIT, create_llm, parse_json_response
 
 logger = logging.getLogger(__name__)
 
 _mcp_client = MCPClient()
-
-_CONCURRENCY_LIMIT = 5
-
-_JSON_BLOCK_RE = re.compile(r"```(?:json)?\s*([\s\S]*?)```", re.IGNORECASE)
 
 
 async def optional_extract_node(state: PipelineState) -> dict[str, Any]:
@@ -55,8 +49,8 @@ async def optional_extract_node(state: PipelineState) -> dict[str, Any]:
             logger.info("OptionalExtract: no parameters with descriptions for doc_id=%s, skipping", doc_id)
             return {"error": None}
 
-        llm = _create_llm()
-        sem = asyncio.Semaphore(_CONCURRENCY_LIMIT)
+        llm = create_llm()
+        sem = asyncio.Semaphore(CONCURRENCY_LIMIT)
 
         async def _extract_one(param: dict) -> dict | None:
             async with sem:
@@ -80,11 +74,6 @@ async def optional_extract_node(state: PipelineState) -> dict[str, Any]:
         return {"error": str(e)}
 
 
-def _create_llm() -> ChatOpenAI:
-    from agent.core.llm import create_llm
-    return create_llm()
-
-
 async def _extract_optional(llm: ChatOpenAI, param: dict) -> dict | None:
     """Call LLM to judge optionality for a single parameter."""
     param_name = param.get("param_name", "")
@@ -101,36 +90,9 @@ async def _extract_optional(llm: ChatOpenAI, param: dict) -> dict | None:
     response = await llm.ainvoke(prompt)
     text = response.content if hasattr(response, "content") else str(response)
 
-    result = _parse_optional_response(text)
+    result = parse_json_response(text, dict)
     if result:
         result["function_name"] = function_name
         val = result.get("is_optional")
         result["is_optional"] = 1 if val is True or val == "true" else 0
     return result
-
-
-def _parse_optional_response(text: str) -> dict | None:
-    """Parse LLM JSON response into {param_name, is_optional} dict."""
-    match = _JSON_BLOCK_RE.search(text)
-    if match:
-        text = match.group(1)
-    text = text.strip()
-
-    try:
-        data = json.loads(text)
-        if isinstance(data, dict):
-            return data
-    except json.JSONDecodeError:
-        pass
-
-    obj_match = re.search(r"\{[^{}]*\}", text)
-    if obj_match:
-        try:
-            data = json.loads(obj_match.group(0))
-            if isinstance(data, dict):
-                return data
-        except json.JSONDecodeError:
-            pass
-
-    logger.warning("OptionalExtract: failed to parse LLM response as JSON: %s", text[:200])
-    return None

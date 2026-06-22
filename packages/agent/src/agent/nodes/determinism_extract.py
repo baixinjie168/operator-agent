@@ -8,19 +8,14 @@ from typing import Any
 
 from langchain_openai import ChatOpenAI
 
-from agent.core.config import settings
 from agent.mcp_client import MCPClient
 from agent.nodes.state import PipelineState
 from agent.prompts import DETERMINISM_EXTRACT_PROMPT
+from agent.utils.llm_common import create_llm, parse_json_response
 
 logger = logging.getLogger(__name__)
 
 _mcp_client = MCPClient()
-
-
-def _create_llm() -> ChatOpenAI:
-    from agent.core.llm import create_llm
-    return create_llm()
 
 
 async def determinism_extract_node(state: PipelineState) -> dict[str, Any]:
@@ -55,7 +50,7 @@ async def determinism_extract_node(state: PipelineState) -> dict[str, Any]:
         platform_list = "\n".join(f"- {p}" for p in supported_platforms) if supported_platforms else "(无已知平台)"
 
         # Call LLM
-        llm = _create_llm()
+        llm = create_llm()
         prompt = DETERMINISM_EXTRACT_PROMPT.format(
             platform_list=platform_list,
             section_content=section_content,

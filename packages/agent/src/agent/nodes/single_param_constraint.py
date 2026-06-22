@@ -25,12 +25,12 @@ from agent.core.config import settings
 from agent.mcp_client import MCPClient
 from agent.nodes.state import PipelineState
 from agent.core.llm import create_llm
+from agent.utils.llm_common import CONCURRENCY_LIMIT
+from agent.utils.semantic_rules import get_expr_for_tensor, load_rules, build_prompt_context
 
 logger = logging.getLogger(__name__)
 
 _mcp_client = MCPClient()
-
-_CONCURRENCY_LIMIT = 5
 
 
 # ---------------------------------------------------------------------------
@@ -277,6 +277,7 @@ async def _extract_long_tail(
                 param_name=pname,
                 param_type=ptype,
                 param_text=combined,
+                semantic_rules_context=build_prompt_context(),
             )
             response = await llm.ainvoke(prompt)
             text = response.content if hasattr(response, "content") else str(response)
@@ -383,6 +384,69 @@ def _log_coverage(
 
 
 # ---------------------------------------------------------------------------
+# Layer 0: YAML semantic rules (zero LLM cost, zero regex)
+# ---------------------------------------------------------------------------
+
+
+def _match_yaml_rules(
+    param: dict,
+    existing_relations: list[dict],
+) -> list[dict]:
+    """Apply YAML semantic rules to a single Tensor parameter.
+
+    Matches parameter description against ``semantic_value_rules.yaml``
+    keywords. If a rule matches and the parameter is a Tensor type,
+    generates a ``self_value_range`` constraint.
+
+    Returns a list of relation dicts (empty if no match or not a Tensor).
+    """
+    ptype: str = param.get("param_type", "")
+    if "aclTensor" not in ptype:
+        return []
+
+    pname: str = param["param_name"]
+    fn: str = param.get("function_name", "")
+    combined = _get_param_text(param)
+    if not combined.strip():
+        return []
+
+    # Check if already covered by existing relations
+    for r in existing_relations:
+        if pname not in r.get("params", []):
+            continue
+        obj = r.get("relation_object", {})
+        if obj.get("expr_type") == "self_value_range":
+            return []  # Already has a self_value_range constraint
+
+    result = get_expr_for_tensor(combined, pname)
+    if result is None:
+        return []
+
+    # Only use high-confidence rules deterministically
+    if result.get("confidence") != "high":
+        return []
+
+    return [
+        {
+            "function_name": fn,
+            "relation_type": "self_constraint",
+            "platform": "",
+            "description": result.get("description", ""),
+            "params": [pname],
+            "param_optional": {pname: False},
+            "source_citation": "semantic_value_rules.yaml",
+            "relation_object": {
+                "expr_type": result.get("expr_type", "self_value_range"),
+                "expr": result.get("expr", ""),
+                "relation_params": [pname],
+                "src_text": "semantic_value_rules.yaml",
+            },
+            "_source": "yaml_semantic",
+        }
+    ]
+
+
+# ---------------------------------------------------------------------------
 # Main node entry point
 # ---------------------------------------------------------------------------
 
@@ -418,10 +482,21 @@ async def build_single_param_constraint_node(
             logger.info("SingleParamConstraint: no parameters, skipping")
             return {"error": None}
 
-        # Step 2: Layer 1 — Deterministic regex
+        # Step 2: Layer 0 — YAML semantic rules (Tensor element-level constraints)
+        layer0_results: list[dict] = []
+        for param in params:
+            layer0_results.extend(_match_yaml_rules(param, existing))
+
+        if layer0_results:
+            logger.info(
+                "SingleParamConstraint: Layer 0 (YAML) matched %d constraints",
+                len(layer0_results),
+            )
+
+        # Step 3: Layer 1 — Deterministic regex
         layer1_results: list[dict] = []
         for param in params:
-            layer1_results.extend(_match_rules(param, existing))
+            layer1_results.extend(_match_rules(param, existing + layer0_results))
 
         logger.info(
             "SingleParamConstraint: Layer 1 matched %d constraints",
@@ -441,7 +516,7 @@ async def build_single_param_constraint_node(
                 llm = None
 
             if llm is not None:
-                sem = asyncio.Semaphore(_CONCURRENCY_LIMIT)
+                sem = asyncio.Semaphore(CONCURRENCY_LIMIT)
                 tasks = [
                     _extract_long_tail(p, existing, llm, sem)
                     for p in params
@@ -455,25 +530,28 @@ async def build_single_param_constraint_node(
                     len(layer2_results),
                 )
 
-        # Step 4: Merge and deduplicate
-        all_new = _dedup(layer1_results + layer2_results)
+        # Step 5: Merge and deduplicate
+        all_new = _dedup(layer0_results + layer1_results + layer2_results)
 
-        # Step 5: Append to param_relations
+        # Step 6: Append to param_relations
         if all_new:
             merged = existing + all_new
             result = await _mcp_client.save_param_relations(doc_id, merged)
             logger.info(
                 "SingleParamConstraint: saved %d total relations "
-                "(%d existing + %d new)",
+                "(%d existing + %d new [%d yaml + %d regex + %d llm])",
                 result.get("saved", 0),
                 len(existing),
                 len(all_new),
+                len(layer0_results),
+                len(layer1_results),
+                len(layer2_results),
             )
         else:
             logger.info("SingleParamConstraint: no new constraints found")
 
-        # Step 6: Coverage report
-        _log_coverage(params, all_new, len(layer1_results), len(layer2_results))
+        # Step 7: Coverage report
+        _log_coverage(params, all_new, len(layer0_results) + len(layer1_results), len(layer2_results))
 
         return {
             "single_param_constraints": all_new,

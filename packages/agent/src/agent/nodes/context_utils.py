@@ -3,7 +3,6 @@
 Provides zero-LLM-cost pre-filtering tools:
 - extract_param_context: slice section text to relevant parameter context
 - parse_param_table: parse Markdown/HTML tables into structured rows
-- _is_ws_function: detect GetWorkspaceSize function names
 
 Used by llm_description_extract, allowed_range_extract, and other per-param nodes.
 """
@@ -12,6 +11,8 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+
+from agent.utils.param_validators import is_ws_function as _is_ws_function  # noqa: F401 re-export
 
 
 # ---------------------------------------------------------------------------
@@ -69,6 +70,18 @@ def extract_param_context(sections_text: str, param_name: str) -> str:
             table_started = True
         elif not is_table_row:
             table_started = False
+
+    # Phase 2.1: preserve HTML <thead> rows so the LLM can see column
+    # headers (e.g. "数据格式", "数据类型") and map them to <td> values.
+    in_thead = False
+    for i, line in enumerate(lines):
+        lower = line.lower()
+        if "<thead" in lower:
+            in_thead = True
+        if in_thead:
+            relevant.add(i)
+        if "</thead" in lower:
+            in_thead = False
 
     # Phase 2.5 (v3): resolve cross-parameter references
     # When a parameter's row contains "与xxx一致" / "与`xxx`一致" /
@@ -207,6 +220,4 @@ def format_param_context(row: ParamRow, extra_paragraphs: list[str]) -> str:
 # Function-type helpers
 # ---------------------------------------------------------------------------
 
-def _is_ws_function(function_name: str) -> bool:
-    """Return True if *function_name* is a GetWorkspaceSize variant."""
-    return "GetWorkspaceSize" in function_name
+# _is_ws_function is re-exported from agent.utils.param_validators above

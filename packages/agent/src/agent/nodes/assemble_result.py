@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any
 
 from agent.mcp_client import MCPClient
@@ -88,8 +89,17 @@ async def assemble_result_node(state: PipelineState) -> dict[str, Any]:
         # Step 3e: Build new fields
         det_computing = _build_deterministic_computing(platform_support_data)
         inputs_dict, outputs_dict = _build_inputs_outputs(params)
-        constraints_ip = _build_constraints_in_parameters(relations, product_support_list, params)
+        constraints_ip = _build_constraints_in_parameters(
+            relations, product_support_list, params, signatures,
+        )
         dtype_support = _build_dtype_support(dtype_combos)
+
+        # Step 3f: Inject platform_constants into constraints_in_parameters
+        platform_consts_data = await _mcp_client.query_platform_constants_by_doc_id(doc_id)
+        if platform_consts_data and platform_consts_data.get("constants"):
+            _inject_platform_constants(
+                constraints_ip, platform_consts_data["constants"],
+            )
 
         # Step 4: Save to constraints_result table
         await _mcp_client.save_constraints_result(
@@ -270,10 +280,48 @@ def _build_inputs_outputs(
     return inputs, outputs
 
 
+def _inject_platform_constants(
+    constraints_ip: dict[str, list[dict]],
+    platform_constants: list[dict],
+) -> None:
+    """Inject platform_constants into constraints_in_parameters per product.
+
+    Modifies constraints_ip in place: adds a "platform_constants" key
+    to each platform's constraint list (as a special metadata entry).
+
+    Args:
+        constraints_ip: {platform_name: [relation_object]} dict.
+        platform_constants: List of platform constant dicts from DB.
+    """
+    if not platform_constants:
+        return
+
+    # Build {platform: [constant_info]} mapping
+    const_by_platform: dict[str, list[dict]] = {}
+    for pc in platform_constants:
+        for pv in pc.get("platform_values", []):
+            plat = pv["platform"]
+            const_by_platform.setdefault(plat, []).append({
+                "name": pc["const_name"],
+                "description": pc.get("description", ""),
+                "values": pv["values"],
+            })
+
+    # Inject into each platform's constraint list
+    for plat, consts in const_by_platform.items():
+        if plat in constraints_ip:
+            # Prepend platform_constants as metadata entry
+            constraints_ip[plat].insert(0, {
+                "_type": "platform_constants",
+                "platform_constants": consts,
+            })
+
+
 def _build_constraints_in_parameters(
     relations: list[dict],
     supported_platforms: list[str],
     params: list[dict],
+    signatures: list[dict] | None = None,
 ) -> dict[str, list[dict]]:
     """Build constraints_in_parameters: {platform: [relation_object]}.
 
@@ -281,10 +329,15 @@ def _build_constraints_in_parameters(
     parameter already has a non-empty allowed_range_value in inputs/outputs
     (the structured range is the canonical representation).
 
+    Also filters named dimension variables (BS, H, N, etc.) from
+    relation_params, keeping only function signature parameters and
+    platform external constants.
+
     Args:
         relations: List of param_relation dicts with 'platform' and 'relation_object' fields.
         supported_platforms: List of platform names where is_supported=1.
         params: List of parameter dicts (used to build allowed_range_value lookup).
+        signatures: Function signatures (used to identify valid param names).
 
     Returns:
         Dict mapping platform name to list of relation_object dicts.
@@ -293,6 +346,19 @@ def _build_constraints_in_parameters(
         that are also in supported_platforms.
     """
     from agent.utils.platform_utils import resolve_target_platforms
+
+    # Build set of valid function signature parameter names for filtering
+    sig_param_names: set[str] = set()
+    if signatures:
+        from agent.nodes.param_relation_extract.shape_dim_mapping_extract import (
+            _camel_to_snake,
+        )
+        for sig in signatures:
+            for p in sig.get("parameters", []):
+                name = p.get("name", "")
+                if name:
+                    sig_param_names.add(name)
+                    sig_param_names.add(_camel_to_snake(name))
 
     # Build {param_name: allowed_range_value} lookup from param_constraint JSON
     ar_lookup: dict[str, list] = {}
@@ -336,6 +402,24 @@ def _build_constraints_in_parameters(
 
         platform_str = r.get("platform", "")
         targets = resolve_target_platforms(platform_str, supported_platforms)
+
+        # Safety net: filter named dimension variables from relation_params
+        # (catches leaks from both build_param_relations and single_param_constraint)
+        if sig_param_names and rel_params:
+            clean_params = [p for p in rel_params if p in sig_param_names]
+            if clean_params != rel_params:
+                obj = dict(obj)  # shallow copy to avoid mutating shared dict
+                obj["relation_params"] = clean_params
+
+        # Safety net: clear expr if it contains unsubstituted named variables
+        expr = obj.get("expr", "")
+        if expr and sig_param_names:
+            remaining = re.findall(r'\b([A-Za-z]\w*)\.range_value', expr)
+            unsubstituted = [v for v in remaining if v not in sig_param_names]
+            if unsubstituted:
+                obj = dict(obj) if not isinstance(obj, dict) or obj is r.get("relation_object") else obj
+                obj["expr"] = ""
+
         for plat in targets:
             grouped.setdefault(plat, []).append(obj)
 

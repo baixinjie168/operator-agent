@@ -1,39 +1,21 @@
 """DtypeExtract node: extract data types from parameter descriptions via LLM."""
 
 import asyncio
-import json
 import logging
 import re
 from typing import Any
 
 from langchain_openai import ChatOpenAI
 
-from agent.core.config import settings
 from agent.mcp_client import MCPClient
 from agent.nodes.state import PipelineState
 from agent.prompts import DTYPE_EXTRACT_PROMPT
+from agent.utils.llm_common import CONCURRENCY_LIMIT, create_llm, parse_json_response
+from agent.utils.param_validators import VALID_DTYPES, is_cross_reference, is_dash
 
 logger = logging.getLogger(__name__)
 
 _mcp_client = MCPClient()
-
-_CONCURRENCY_LIMIT = 5
-
-_JSON_BLOCK_RE = re.compile(r"```(?:json)?\s*([\s\S]*?)```", re.IGNORECASE)
-
-_VALID_DTYPES = frozenset({
-    "FLOAT", "FLOAT32", "FLOAT16", "INT8", "INT32", "UINT8",
-    "INT16", "UINT16", "UINT32", "INT64", "UINT64", "DOUBLE",
-    "FLOAT64", "BOOL", "STRING", "COMPLEX64", "COMPLEX128",
-    "BF16", "BFLOAT16", "INT", "UINT1", "COMPLEX32",
-})
-
-# Matches cross-reference patterns like "与self一致", "同input相同"
-_RELATIVE_REF_RE = re.compile(
-    r"^(?:与|同|和|跟)"
-    r".{1,20}"
-    r"(?:一致|相同|一样|保持一致|保持一致|同)$",
-)
 
 
 def _is_dtype_valid(dtype_desc: str) -> bool:
@@ -48,15 +30,15 @@ def _is_dtype_valid(dtype_desc: str) -> bool:
     s = dtype_desc.strip()
     if not s:
         return False
-    if s in ("-", "—", "–", "－"):
+    if is_dash(s):
         return False
     cleaned = s.replace("`", "")
-    if _RELATIVE_REF_RE.match(cleaned):
+    if is_cross_reference(cleaned):
         return False
     tokens = [t.strip().upper() for t in re.split(r"[,、，/]", s) if t.strip()]
     if not tokens:
         return False
-    return all(t in _VALID_DTYPES for t in tokens)
+    return all(t in VALID_DTYPES for t in tokens)
 
 
 async def dtype_extract_node(state: PipelineState) -> dict[str, Any]:
@@ -110,8 +92,8 @@ async def dtype_extract_node(state: PipelineState) -> dict[str, Any]:
                 len(invalid_clears), doc_id,
             )
 
-        llm = _create_llm()
-        sem = asyncio.Semaphore(_CONCURRENCY_LIMIT)
+        llm = create_llm()
+        sem = asyncio.Semaphore(CONCURRENCY_LIMIT)
 
         async def _extract_one(param: dict) -> dict | None:
             async with sem:
@@ -138,11 +120,6 @@ async def dtype_extract_node(state: PipelineState) -> dict[str, Any]:
         return {"error": str(e)}
 
 
-def _create_llm() -> ChatOpenAI:
-    from agent.core.llm import create_llm
-    return create_llm()
-
-
 async def _extract_dtype(llm: ChatOpenAI, param: dict) -> dict | None:
     """Call LLM to extract data type for a single parameter."""
     param_name = param.get("param_name", "")
@@ -153,36 +130,9 @@ async def _extract_dtype(llm: ChatOpenAI, param: dict) -> dict | None:
     response = await llm.ainvoke(prompt)
     text = response.content if hasattr(response, "content") else str(response)
 
-    result = _parse_dtype_response(text)
+    result = parse_json_response(text, dict)
     if result:
         result["function_name"] = function_name
         if result.get("dtype"):
             result["dtype"] = result["dtype"].upper()
     return result
-
-
-def _parse_dtype_response(text: str) -> dict | None:
-    """Parse LLM JSON response into {param_name, dtype} dict."""
-    match = _JSON_BLOCK_RE.search(text)
-    if match:
-        text = match.group(1)
-    text = text.strip()
-
-    try:
-        data = json.loads(text)
-        if isinstance(data, dict):
-            return data
-    except json.JSONDecodeError:
-        pass
-
-    obj_match = re.search(r"\{[^{}]*\}", text)
-    if obj_match:
-        try:
-            data = json.loads(obj_match.group(0))
-            if isinstance(data, dict):
-                return data
-        except json.JSONDecodeError:
-            pass
-
-    logger.warning("DtypeExtract: failed to parse LLM response as JSON: %s", text[:200])
-    return None

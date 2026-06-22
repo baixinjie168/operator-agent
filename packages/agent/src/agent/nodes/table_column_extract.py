@@ -20,9 +20,11 @@ from agent.nodes.state import PipelineState
 from agent.utils.table_parser import (
     detect_table_columns,
     extract_4_columns_from_table,
+    extract_platform_attributes_from_table,
     find_param_name_column,
     is_table_form,
     parse_html_tables,
+    parse_html_tables_with_raw,
 )
 
 logger = logging.getLogger(__name__)
@@ -55,15 +57,15 @@ def _extract_from_sections(
 
     Returns a list of dicts, one per successfully extracted parameter,
     with keys: function_name, param_name, shape, dtype_desc, dformat_desc,
-    is_support_discontinuous.
+    is_support_discontinuous, platform_attributes.
     """
-    tables = parse_html_tables(sections_text)
+    tables, raw_tables = parse_html_tables_with_raw(sections_text)
     if not tables:
         return []
 
     # Pre-compute column mappings for each table
-    table_info: list[tuple[list[list[str]], dict[str, int], int]] = []
-    for grid in tables:
+    table_info: list[tuple[list[list[str]], list[list[str]], dict[str, int], int]] = []
+    for i, grid in enumerate(tables):
         if not grid:
             continue
         header = grid[0]
@@ -71,7 +73,8 @@ def _extract_from_sections(
         if not is_table_form(header):
             continue
         name_idx = find_param_name_column(header)
-        table_info.append((grid, col_map, name_idx))
+        raw_grid = raw_tables[i] if i < len(raw_tables) else []
+        table_info.append((grid, raw_grid, col_map, name_idx))
 
     if not table_info:
         return []
@@ -87,11 +90,17 @@ def _extract_from_sections(
 
         # Try each table until we find a match
         extracted: dict[str, str] = {}
-        for grid, col_map, name_idx in table_info:
+        platform_attrs: dict[str, dict[str, str]] = {}
+        for grid, raw_grid, col_map, name_idx in table_info:
             extracted = extract_4_columns_from_table(
                 grid, col_map, param_name, param_type, name_idx
             )
             if extracted:
+                # Also extract platform-tagged values from raw HTML
+                if raw_grid:
+                    platform_attrs = extract_platform_attributes_from_table(
+                        raw_grid, col_map, param_name, name_idx
+                    )
                 break
 
         if not extracted:
@@ -115,6 +124,10 @@ def _extract_from_sections(
             record["param_desc"] = extracted["param_desc"]
         if extracted.get("direction"):
             record["direction"] = extracted["direction"]
+
+        # Include platform_attributes if any platform-tagged values found
+        if platform_attrs:
+            record["platform_attributes"] = platform_attrs
 
         # Only add if at least one field was extracted
         if len(record) > 2:
@@ -164,6 +177,14 @@ async def _persist_to_db(doc_id: int, results: list[dict]) -> None:
         {"function_name": r["function_name"], "param_name": r["param_name"], "direction": r["direction"]}
         for r in results if r.get("direction")
     ]
+    plat_attrs_updates = [
+        {
+            "function_name": r["function_name"],
+            "param_name": r["param_name"],
+            "platform_attributes": json.dumps(r["platform_attributes"], ensure_ascii=False),
+        }
+        for r in results if r.get("platform_attributes")
+    ]
 
     if shape_updates:
         res = await _mcp_client.update_param_shape(doc_id, shape_updates)
@@ -189,6 +210,10 @@ async def _persist_to_db(doc_id: int, results: list[dict]) -> None:
         res = await _mcp_client.update_param_direction(doc_id, direction_updates)
         logger.info("TableColumnExtract: updated direction for %d params", _updated_count(res))
 
+    if plat_attrs_updates:
+        res = await _mcp_client.update_param_platform_attributes(doc_id, plat_attrs_updates)
+        logger.info("TableColumnExtract: updated platform_attributes for %d params", _updated_count(res))
+
 
 def _merge_into_params(
     original_params: list[dict],
@@ -213,14 +238,26 @@ def _merge_into_params(
                 merged["shape"] = update["shape"]
             if update.get("dtype_desc"):
                 merged["dtype_desc"] = update["dtype_desc"]
+                # Also set under the MCP API key so downstream nodes
+                # (e.g. build_param_constraint) that read "data_type"
+                # can find the value.
+                merged["data_type"] = update["dtype_desc"]
             if update.get("dformat_desc"):
                 merged["dformat_desc"] = update["dformat_desc"]
+                # Also set under the MCP API key so downstream nodes
+                # (e.g. build_param_constraint) that read "data_format"
+                # can find the value.
+                merged["data_format"] = update["dformat_desc"]
             if update.get("is_support_discontinuous"):
                 merged["is_support_discontinuous"] = update["is_support_discontinuous"]
             if update.get("param_desc"):
                 merged["param_desc"] = update["param_desc"]
             if update.get("direction"):
                 merged["direction"] = update["direction"]
+            if update.get("platform_attributes"):
+                merged["platform_attributes"] = json.dumps(
+                    update["platform_attributes"], ensure_ascii=False,
+                )
             enriched.append(merged)
         else:
             enriched.append(p)

@@ -15,7 +15,8 @@
                 "8000"
             ],
             "env": {
-                "PYTHONUNBUFFERED": "1"
+                "PYTHONUNBUFFERED": "1",
+                "PYTHONPATH": "${workspaceFolder}/packages/shared/src;${workspaceFolder}/packages/mcp-server/src;${workspaceFolder}/packages/agent/src"
             },
             "envFile": "${workspaceFolder}/.env",
             "jinja": true,
@@ -36,7 +37,8 @@
                 "8000"
             ],
             "env": {
-                "PYTHONUNBUFFERED": "1"
+                "PYTHONUNBUFFERED": "1",
+                "PYTHONPATH": "${workspaceFolder}/packages/shared/src;${workspaceFolder}/packages/mcp-server/src;${workspaceFolder}/packages/agent/src"
             },
             "envFile": "${workspaceFolder}/.env",
             "jinja": true,
@@ -47,6 +49,9 @@
             "type": "debugpy",
             "request": "launch",
             "program": "${file}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/packages/shared/src;${workspaceFolder}/packages/mcp-server/src;${workspaceFolder}/packages/agent/src"
+            },
             "envFile": "${workspaceFolder}/.env",
             "justMyCode": false
         },
@@ -59,6 +64,9 @@
                 "${file}",
                 "-v"
             ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/packages/shared/src;${workspaceFolder}/packages/mcp-server/src;${workspaceFolder}/packages/agent/src"
+            },
             "envFile": "${workspaceFolder}/.env",
             "justMyCode": false
         },
@@ -71,6 +79,9 @@
                 "tests/",
                 "-v"
             ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/packages/shared/src;${workspaceFolder}/packages/mcp-server/src;${workspaceFolder}/packages/agent/src"
+            },
             "envFile": "${workspaceFolder}/.env",
             "justMyCode": false
         }

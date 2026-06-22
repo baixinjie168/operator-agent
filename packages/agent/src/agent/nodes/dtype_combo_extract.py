@@ -10,16 +10,14 @@ from typing import Any
 
 from langchain_openai import ChatOpenAI
 
-from agent.core.config import settings
 from agent.mcp_client import MCPClient
 from agent.nodes.state import PipelineState
 from agent.prompts import DTYPE_COMBO_TABLE_PROMPT, DTYPE_CONSTRAINT_TEXT_PROMPT
+from agent.utils.llm_common import JSON_BLOCK_RE, create_llm, parse_json_response
 
 logger = logging.getLogger(__name__)
 
 _mcp_client = MCPClient()
-
-_JSON_BLOCK_RE = re.compile(r"```(?:json)?\s*([\s\S]*?)```", re.IGNORECASE)
 
 _MD_DTYPE_TABLE_RE = re.compile(
     r"^\s*\|[^\n]*数据类型[^\n|]*\|[^\n]*数据类型[^\n|]*\|",
@@ -48,9 +46,53 @@ PLATFORM_NAMES = [
 ]
 
 
-def _create_llm() -> ChatOpenAI:
-    from agent.core.llm import create_llm
-    return create_llm()
+def _get_supported_platforms(state: PipelineState) -> list[str]:
+    """Return list of supported platform names from state, falling back to MCP query."""
+    products = state.get("product_support", [])
+    if products:
+        return [
+            p.get("product", "")
+            for p in products
+            if p.get("support", False) and p.get("product", "")
+        ]
+    return []
+
+
+def _build_platform_context(supported_platforms: list[str]) -> str:
+    """Build platform context string to inject into LLM prompts."""
+    if not supported_platforms:
+        return ""
+    platform_list = "\n".join(f"- {p}" for p in supported_platforms)
+    return (
+        "适用平台（本算子实际支持的产品列表）：\n"
+        f"{platform_list}\n"
+        "对于未明确标注平台的约束，platform 字段必须使用上述列表中的名称，不要设为\"通用\"。\n\n"
+    )
+
+
+def _expand_generic_platform(
+    combos: list[dict], supported_platforms: list[str]
+) -> list[dict]:
+    """Expand combos with platform='通用' into one record per supported platform.
+
+    Post-processing safety net: if the LLM still returns '通用' after being
+    given the platform context, replace it with the actual supported platforms
+    so that downstream code never sees '通用' as a key when specific platforms
+    are known.
+    """
+    if not supported_platforms:
+        return combos
+
+    expanded: list[dict] = []
+    for combo in combos:
+        if combo.get("platform") == "通用":
+            for platform in supported_platforms:
+                new_combo = dict(combo)
+                new_combo["platform"] = platform
+                expanded.append(new_combo)
+        else:
+            expanded.append(combo)
+    return expanded
 
 
 async def dtype_combo_extract_node(state: PipelineState) -> dict[str, Any]:
@@ -75,6 +117,23 @@ async def dtype_combo_extract_node(state: PipelineState) -> dict[str, Any]:
             logger.info("dtype_combo_extract: no parameters for doc_id=%s, skipping", doc_id)
             return {"error": None}
 
+        supported_platforms = _get_supported_platforms(state)
+        if not supported_platforms:
+            # Fall back to MCP query if state doesn't have product_support
+            try:
+                platform_records = await _mcp_client.query_platform_support_by_doc_id(doc_id)
+                supported_platforms = [
+                    r.get("platform_name", "")
+                    for r in platform_records
+                    if r.get("is_supported") and r.get("platform_name", "")
+                ]
+            except Exception:
+                logger.warning(
+                    "dtype_combo_extract: could not fetch platform support for doc_id=%s",
+                    doc_id,
+                )
+        platform_context = _build_platform_context(supported_platforms)
+
         section = await _mcp_client.get_section(doc_id, "constraints")
         if not section or not section.get("content"):
             logger.info("dtype_combo_extract: no constraints section for doc_id=%s, skipping", doc_id)
@@ -83,12 +142,21 @@ async def dtype_combo_extract_node(state: PipelineState) -> dict[str, Any]:
         constraints_content = section["content"]
         params_text = _build_params_text(params)
         has_combo_table = _has_dtype_combo_table(constraints_content)
-        llm = _create_llm()
+        llm = create_llm()
 
         if has_combo_table:
-            combos = await _extract_from_table(llm, params, params_text, constraints_content)
+            combos = await _extract_from_table(
+                llm, params, params_text, constraints_content,
+                supported_platforms, platform_context,
+            )
         else:
-            combos = await _extract_from_text(llm, params, params_text, constraints_content)
+            combos = await _extract_from_text(
+                llm, params, params_text, constraints_content,
+                supported_platforms, platform_context,
+            )
+
+        # Post-process: expand "通用" into actual supported platforms
+        combos = _expand_generic_platform(combos, supported_platforms)
 
         if not combos:
             logger.info("dtype_combo_extract: no combos extracted for %s", operator_name)
@@ -135,11 +203,14 @@ async def _extract_from_table(
     params: list[dict],
     params_text: str,
     constraints_content: str,
+    supported_platforms: list[str],
+    platform_context: str,
 ) -> list[dict]:
     """Extract combos from a structured dtype combo table (Source A)."""
     prompt = DTYPE_COMBO_TABLE_PROMPT.format(
         params_text=params_text,
         table_text=constraints_content,
+        platform_context=platform_context,
     )
     response = await llm.ainvoke(prompt)
     raw_text = response.content if hasattr(response, "content") else str(response)
@@ -295,11 +366,14 @@ async def _extract_from_text(
     params: list[dict],
     params_text: str,
     constraints_content: str,
+    supported_platforms: list[str],
+    platform_context: str,
 ) -> list[dict]:
     """Extract combos from text-based dtype constraints (Source B)."""
     prompt = DTYPE_CONSTRAINT_TEXT_PROMPT.format(
         params_text=params_text,
         constraints_text=constraints_content,
+        platform_context=platform_context,
     )
     response = await llm.ainvoke(prompt)
     raw_text = response.content if hasattr(response, "content") else str(response)
@@ -350,7 +424,7 @@ def _normalize_platform(platform: str) -> str:
 def _parse_json_array(text: str) -> list[dict]:
     """Extract JSON array from LLM response."""
     text = text.strip()
-    match = _JSON_BLOCK_RE.search(text)
+    match = JSON_BLOCK_RE.search(text)
     if match:
         text = match.group(1).strip()
 

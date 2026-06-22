@@ -8,15 +8,12 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 from typing import Any
 
-logger = logging.getLogger(__name__)
+from agent.utils.llm_common import JSON_BLOCK_RE
+from agent.utils.semantic_rules import build_prompt_context
 
-# ---------------------------------------------------------------------------
-# Regex for extracting JSON blocks from LLM responses
-# ---------------------------------------------------------------------------
-_JSON_BLOCK_RE = re.compile(r"```(?:json)?\s*([\s\S]*?)```", re.IGNORECASE)
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -76,6 +73,8 @@ SINGLE_PARAM_EXTRACT_PROMPT = """\
 ]
 
 如果没有提取到任何约束，返回空数组 []
+
+{semantic_rules_context}
 """
 
 
@@ -100,7 +99,7 @@ def parse_response(text: str) -> list[dict[str, Any]]:
         return []
 
     # Try to extract JSON from code fences first
-    m = _JSON_BLOCK_RE.search(text)
+    m = JSON_BLOCK_RE.search(text)
     if m:
         text = m.group(1).strip()
 

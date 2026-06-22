@@ -21,14 +21,16 @@ from agent.mcp_client import MCPClient
 from agent.nodes.state import PipelineState
 from agent.prompts import ALLOWED_RANGE_VALUE_BUILD_PROMPT, SHAPE_TO_DIMENSIONS_PROMPT
 from agent.core.llm import create_llm
+from agent.utils.llm_common import CONCURRENCY_LIMIT, JSON_BLOCK_RE, parse_json_response
+from agent.utils.param_validators import is_bool_type, is_tensor_type
+from agent.utils.semantic_rules import (
+    get_allowed_range_for_scalar,
+    build_prompt_context,
+)
 
 logger = logging.getLogger(__name__)
 
 _mcp_client = MCPClient()
-
-_JSON_BLOCK_RE = re.compile(r"```(?:json)?\s*([\s\S]*?)```", re.IGNORECASE)
-
-_CONCURRENCY_LIMIT = 5
 
 
 async def build_param_constraint_node(state: PipelineState) -> dict[str, Any]:
@@ -114,7 +116,7 @@ async def build_param_constraint_node(state: PipelineState) -> dict[str, Any]:
         # single constrained value (e.g. [False]).
         bool_params = [
             p for p in params
-            if _is_bool_type(p.get("param_type", ""))
+            if is_bool_type(p.get("param_type", ""))
         ]
         if bool_params:
             try:
@@ -139,32 +141,71 @@ async def build_param_constraint_node(state: PipelineState) -> dict[str, Any]:
             fn_name = param["function_name"]
             constraint: dict[str, Any] = {}
 
+            # Parse platform_attributes (per-platform dtype/shape/format)
+            plat_attrs_raw = param.get("platform_attributes", "") or ""
+            try:
+                plat_attrs = json.loads(plat_attrs_raw) if plat_attrs_raw else {}
+            except (json.JSONDecodeError, TypeError):
+                plat_attrs = {}
+
             for plat in supported_platforms:
                 ptype = sig_type_map.get((fn_name, pname), param.get("param_type", ""))
                 # Strip const and pointer modifiers (defensive normalization)
                 ptype = _normalize_type(ptype)
 
-                # dtype: platform-specific → "通用" → dtype_desc fallback
-                dtypes = sorted(
-                    dtype_by_platform.get(plat, {}).get(pname, set())
-                )
-                if not dtypes:
+                # dtype: platform_attributes → dtype_by_platform → dtype_desc
+                plat_dtype_map = plat_attrs.get("dtype")
+                if plat_dtype_map and plat in plat_dtype_map:
+                    # Priority 1: platform-specific value from <term> tags
+                    dtypes = sorted({
+                        d.strip()
+                        for d in re.split(r"[、，,/]", plat_dtype_map[plat])
+                        if d.strip()
+                    })
+                elif plat_dtype_map is None:
+                    # Priority 3: no <term> tags → use flat field (universal)
                     dtypes = sorted(
-                        dtype_by_platform.get("通用", {}).get(pname, set())
+                        dtype_by_platform.get(plat, {}).get(pname, set())
                     )
-                if not dtypes:
-                    # Fallback: parse dtype_desc (e.g. "FLOAT32,FLOAT16,BFLOAT16")
-                    dtype_desc = param.get("data_type", "") or ""
-                    if dtype_desc:
-                        dtypes = sorted({
-                            d.strip() for d in re.split(r"[、，,/]", dtype_desc)
-                            if d.strip()
-                        })
+                    if not dtypes:
+                        dtypes = sorted(
+                            dtype_by_platform.get("通用", {}).get(pname, set())
+                        )
+                    if not dtypes:
+                        dtype_desc = param.get("data_type", "") or ""
+                        if dtype_desc:
+                            dtypes = sorted({
+                                d.strip() for d in re.split(r"[、，,/]", dtype_desc)
+                                if d.strip()
+                            })
+                else:
+                    # Priority 2: platform mapping exists but not for this platform
+                    dtypes = sorted(
+                        dtype_by_platform.get(plat, {}).get(pname, set())
+                    )
+                    if not dtypes:
+                        dtypes = sorted(
+                            dtype_by_platform.get("通用", {}).get(pname, set())
+                        )
+                    if not dtypes:
+                        dtype_desc = param.get("data_type", "") or ""
+                        if dtype_desc:
+                            dtypes = sorted({
+                                d.strip() for d in re.split(r"[、，,/]", dtype_desc)
+                                if d.strip()
+                            })
 
-                # format: non-Tensor → "N/A", Tensor → array (split by 、，,/)
+                # format: platform_attributes → data_format field
+                plat_fmt_map = plat_attrs.get("dformat_desc")
                 is_tensor = "aclTensor" in ptype
                 if not is_tensor:
                     fmt: list | str = "N/A"
+                elif plat_fmt_map and plat in plat_fmt_map:
+                    fmt = sorted({
+                        f.strip()
+                        for f in re.split(r"[、，,/]", plat_fmt_map[plat])
+                        if f.strip()
+                    })
                 else:
                     fmt_str = param.get("data_format", "") or ""
                     fmt = sorted({
@@ -179,8 +220,12 @@ async def build_param_constraint_node(state: PipelineState) -> dict[str, Any]:
                 except json.JSONDecodeError:
                     disc = {"value": disc_raw, "src_text": ""}
 
-                # dimensions: from LLM result
-                shape_raw = param.get("shape", "") or ""
+                # dimensions: platform_attributes → shape field
+                plat_shape_map = plat_attrs.get("shape")
+                if plat_shape_map and plat in plat_shape_map:
+                    shape_raw = plat_shape_map[plat]
+                else:
+                    shape_raw = param.get("shape", "") or ""
                 dimensions_value = shape_map.get((fn_name, pname), [])
 
                 # allowed_range_value: from LLM extraction (all param types)
@@ -221,11 +266,6 @@ async def build_param_constraint_node(state: PipelineState) -> dict[str, Any]:
     except Exception as e:
         logger.exception("BuildParamConstraint failed for %s", operator_name)
         return {"error": str(e)}
-
-
-def _is_bool_type(param_type: str) -> bool:
-    """Check if parameter type is bool."""
-    return param_type.lower() == "bool"
 
 
 def _normalize_type(ptype: str) -> str:
@@ -654,7 +694,7 @@ async def _batch_parse_dimensions(params: list[dict]) -> dict[tuple[str, str], l
             error,
         )
         # Fallback: per-item LLM calls
-        sem = asyncio.Semaphore(_CONCURRENCY_LIMIT)
+        sem = asyncio.Semaphore(CONCURRENCY_LIMIT)
 
         async def _process_one(entry: dict) -> tuple[tuple[str, str], list]:
             async with sem:
@@ -709,14 +749,18 @@ async def _batch_extract_allowed_range(
         return {}
 
     result: dict[tuple[str, str], list] = {}
-    sem = asyncio.Semaphore(_CONCURRENCY_LIMIT)
+    sem = asyncio.Semaphore(CONCURRENCY_LIMIT)
 
-    # Phase 0: Separate bool params (short-circuit)
+    # Phase 0: Separate bool params (short-circuit) and Tensor params (no value range)
     bool_params: list[dict] = []
+    tensor_params: list[dict] = []
     remaining_params: list[dict] = []
     for p in params:
-        if _is_bool_type(p.get("param_type", "")):
+        ptype = p.get("param_type", "")
+        if is_bool_type(ptype):
             bool_params.append(p)
+        elif is_tensor_type(ptype):
+            tensor_params.append(p)
         else:
             remaining_params.append(p)
 
@@ -724,9 +768,55 @@ async def _batch_extract_allowed_range(
         key = (p["function_name"], p["param_name"])
         result[key] = [True, False]
 
+    # Tensor types have no scalar value range — dimensions describe shape rank,
+    # not value bounds.  Skip all extraction phases to prevent the deterministic
+    # regex from mis-matching dimension text (e.g. "2-8") as a value range.
+    for p in tensor_params:
+        key = (p["function_name"], p["param_name"])
+        result[key] = []
+
+    # Phase 0.5: Reuse allowed_range_value already extracted by node 4h
+    # for string-type parameters (char*, const char*).  Node 4h's prompt
+    # explicitly handles enumeration constraints ("枚举值限制"), while this
+    # node's ALLOWED_RANGE_VALUE_BUILD_PROMPT only extracts numeric ranges.
+    # Without this pass-through, string enum values are silently dropped.
+    string_ar_count = 0
+    still_remaining: list[dict] = []
+    for p in remaining_params:
+        ptype = _normalize_type(p.get("param_type", ""))
+        ar_raw = p.get("allowed_range_value", "") or ""
+        if ptype in ("char", "const char") and ar_raw.strip() and ar_raw.strip() != "[]":
+            key = (p["function_name"], p["param_name"])
+            try:
+                ar_list = json.loads(ar_raw) if isinstance(ar_raw, str) else ar_raw
+            except (json.JSONDecodeError, TypeError):
+                ar_list = []
+            if ar_list:
+                # Store the raw text descriptions (not numeric ranges)
+                # Format: list of {"platform": ..., "allowed_range_value": ...}
+                # Convert to a flat list of range text strings for the constraint JSON
+                texts = [
+                    item.get("allowed_range_value", "")
+                    for item in ar_list
+                    if isinstance(item, dict) and item.get("allowed_range_value")
+                ]
+                result[key] = texts if texts else []
+                string_ar_count += 1
+                continue
+        still_remaining.append(p)
+
+    if string_ar_count > 0:
+        logger.info(
+            "BuildParamConstraint: reused %d string-type allowed_range values from node 4h",
+            string_ar_count,
+        )
+
+    remaining_params = still_remaining
+
     # Phase 1: Deterministic preprocessing
     llm_needed: list[dict] = []
     deterministic_count = 0
+    yaml_count = 0
 
     for p in remaining_params:
         llm_desc = p.get("llm_description", "") or ""
@@ -746,12 +836,31 @@ async def _batch_extract_allowed_range(
             result[key] = deterministic if is_valid else []
             deterministic_count += 1
         else:
+            # Phase 1b: YAML semantic rules fallback for scalar params
+            ptype = p.get("param_type", "")
+            is_tensor = "aclTensor" in ptype
+            if not is_tensor:
+                # Combine llm_desc + param_desc for broader keyword coverage
+                param_desc = p.get("param_desc", "") or ""
+                yaml_search_text = f"{llm_desc}\n{param_desc}"
+                yaml_ar = get_allowed_range_for_scalar(
+                    yaml_search_text, p.get("param_name", "")
+                )
+                if yaml_ar:
+                    key = (p["function_name"], p["param_name"])
+                    is_valid, _ = _validate_range_structure(yaml_ar, ptype)
+                    result[key] = yaml_ar if is_valid else []
+                    yaml_count += 1
+                    continue
+
             llm_needed.append(p)
 
-    if deterministic_count > 0:
+    if deterministic_count > 0 or yaml_count > 0:
         logger.info(
-            "BuildParamConstraint: deterministic range extraction handled %d/%d params",
-            deterministic_count, len(remaining_params),
+            "BuildParamConstraint: deterministic range extraction handled %d/%d params "
+            "(%d regex, %d yaml semantic rules)",
+            deterministic_count + yaml_count, len(remaining_params),
+            deterministic_count, yaml_count,
         )
 
     if not llm_needed:
@@ -778,6 +887,11 @@ async def _batch_extract_allowed_range(
                 context_parts.append(f"## 约束说明\n{constraints_text}")
             if llm_desc:
                 context_parts.append(f"## 参数使用说明\n{llm_desc}")
+
+            # Inject semantic rules context for LLM reference
+            semantic_ctx = build_prompt_context()
+            if semantic_ctx:
+                context_parts.append(semantic_ctx)
 
             context_text = "\n\n".join(context_parts) if context_parts else ""
             if not context_text.strip():
@@ -840,15 +954,16 @@ async def _batch_extract_allowed_range(
     extracted = sum(1 for v in result.values() if v)
     logger.info(
         "BuildParamConstraint: extracted allowed_range for %d/%d params "
-        "(%d bool short-circuited, %d deterministic, %d LLM)",
-        extracted, len(params), len(bool_params), deterministic_count, len(llm_needed),
+        "(%d bool short-circuited, %d tensor skipped, %d deterministic, %d LLM)",
+        extracted, len(params), len(bool_params), len(tensor_params),
+        deterministic_count, len(llm_needed),
     )
     return result
 
 
 def _parse_dimensions_response(text: str) -> list[list] | list[int]:
     """Parse LLM response: either rank spec [N, N] or per-dimension [[min,max], ...]."""
-    match = _JSON_BLOCK_RE.search(text)
+    match = JSON_BLOCK_RE.search(text)
     if match:
         text = match.group(1)
     text = text.strip()
@@ -884,7 +999,7 @@ def _parse_dimensions_response(text: str) -> list[list] | list[int]:
 
 def _parse_allowed_range_response(text: str) -> list:
     """Parse LLM response: [[min,max], ...] array."""
-    match = _JSON_BLOCK_RE.search(text)
+    match = JSON_BLOCK_RE.search(text)
     if match:
         text = match.group(1)
     text = text.strip()

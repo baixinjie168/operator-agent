@@ -1,23 +1,17 @@
 """FunctionExplanationExtract node: extracts function explanation summary via LLM."""
 
-import json
 import logging
-import re
 from typing import Any
 
-from langchain_openai import ChatOpenAI
-
-from agent.core.config import settings
 from agent.mcp_client import MCPClient
 from agent.nodes.state import PipelineState
 from agent.prompts import FUNCTION_EXPLANATION_EXTRACT_PROMPT
 from agent.core.llm import create_llm
+from agent.utils.llm_common import parse_json_response
 
 logger = logging.getLogger(__name__)
 
 _mcp_client = MCPClient()
-
-_JSON_BLOCK_RE = re.compile(r"```(?:json)?\s*([\s\S]*?)```", re.IGNORECASE)
 
 
 async def function_explanation_extract_node(
@@ -88,27 +82,4 @@ async def _extract_via_llm(content: str, op: str) -> dict:
     )
     response = await llm.ainvoke(prompt)
     text = response.content if hasattr(response, "content") else str(response)
-    return _parse_json(text)
-
-
-def _parse_json(text: str) -> dict:
-    """Extract JSON object from LLM response."""
-    m = _JSON_BLOCK_RE.search(text)
-    if m:
-        text = m.group(1)
-    text = text.strip()
-    try:
-        d = json.loads(text)
-        if isinstance(d, dict):
-            return d
-    except json.JSONDecodeError:
-        pass
-    obj = re.search(r"\{[\s\S]*\}", text)
-    if obj:
-        try:
-            d = json.loads(obj.group(0))
-            if isinstance(d, dict):
-                return d
-        except json.JSONDecodeError:
-            pass
-    return {}
+    return parse_json_response(text, dict) or {}

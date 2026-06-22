@@ -19,15 +19,13 @@ from typing import Any
 from langchain_openai import ChatOpenAI
 
 from agent.nodes.llm_description_extract.extract_ws import (
-    _create_llm,
     _parse_llm_response,
 )
 from agent.nodes.llm_description_extract.state import DescriptionExtractState
 from agent.prompts import LLM_DESCRIPTION_VERIFY_PROMPT
+from agent.utils.llm_common import CONCURRENCY_LIMIT, create_llm
 
 logger = logging.getLogger(__name__)
-
-_CONCURRENCY_LIMIT = 5
 
 
 # ---------------------------------------------------------------------------
@@ -248,8 +246,8 @@ async def verify_and_enhance_node(
         }
 
     try:
-        llm = _create_llm()
-        sem = asyncio.Semaphore(_CONCURRENCY_LIMIT)
+        llm = create_llm()
+        sem = asyncio.Semaphore(CONCURRENCY_LIMIT)
 
         async def _task(r: dict) -> dict:
             async with sem:

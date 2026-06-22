@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import json
 
-from agent.nodes.return_code_extract import _parse_json_response
+from agent.utils.llm_common import parse_json_response as _raw_parse
+
+def _parse_json_response(text):
+    return _raw_parse(text, list)
 
 
 class TestParseJsonResponse:

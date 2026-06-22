@@ -22,7 +22,6 @@ import logging
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
-from agent.nodes.implicit_param_extract import implicit_param_extract_node
 from agent.nodes.llm_description_extract import create_description_extract_subgraph
 from agent.nodes.allowed_range_extract import allowed_range_extract_node
 from agent.nodes.array_length_extract import array_length_extract_node
@@ -84,7 +83,6 @@ def create_pipeline_graph() -> CompiledStateGraph:
     graph.add_node("init_doc", init_doc_node)
     graph.add_node("product_support", product_support_node)
     graph.add_node("table_column_extract", table_column_extract_node)
-    graph.add_node("implicit_param_extract", implicit_param_extract_node)
     description_subgraph = create_description_extract_subgraph()
     graph.add_node("llm_description_extract", description_subgraph)
     graph.add_node("function_signature_extract", function_signature_extract_node)
@@ -114,8 +112,7 @@ def create_pipeline_graph() -> CompiledStateGraph:
     graph.add_edge("product_support", "table_column_extract")
     graph.add_edge("function_signature_extract", "table_column_extract")
     graph.add_edge("function_explanation_extract", "table_column_extract")
-    graph.add_edge("table_column_extract", "implicit_param_extract")
-    graph.add_edge("implicit_param_extract", "llm_description_extract")
+    graph.add_edge("table_column_extract", "llm_description_extract")
     graph.add_edge("llm_description_extract", "shape_extract")
     graph.add_edge("llm_description_extract", "dtype_extract")
     graph.add_edge("llm_description_extract", "dformat_extract")

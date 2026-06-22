@@ -1,25 +1,19 @@
 """ReturnCodeExtract node: extract return value error codes from document sections via LLM."""
 
 import asyncio
-import json
 import logging
-import re
 from typing import Any
 
 from langchain_openai import ChatOpenAI
 
-from agent.core.config import settings
 from agent.mcp_client import MCPClient
 from agent.nodes.state import PipelineState
 from agent.prompts import RETURN_CODE_EXTRACT_PROMPT
+from agent.utils.llm_common import CONCURRENCY_LIMIT, create_llm, parse_json_response
 
 logger = logging.getLogger(__name__)
 
 _mcp_client = MCPClient()
-
-_CONCURRENCY_LIMIT = 5
-
-_JSON_BLOCK_RE = re.compile(r"```(?:json)?\s*([\s\S]*?)```", re.IGNORECASE)
 
 
 async def return_code_extract_node(state: PipelineState) -> dict[str, Any]:
@@ -48,8 +42,8 @@ async def return_code_extract_node(state: PipelineState) -> dict[str, Any]:
             logger.info("ReturnCodeExtract: no return_codes sections for doc_id=%s, skipping", doc_id)
             return {"error": None}
 
-        llm = _create_llm()
-        sem = asyncio.Semaphore(_CONCURRENCY_LIMIT)
+        llm = create_llm()
+        sem = asyncio.Semaphore(CONCURRENCY_LIMIT)
 
         tasks = []
         if ws_content.strip():
@@ -90,42 +84,10 @@ async def _extract_one(
         prompt = RETURN_CODE_EXTRACT_PROMPT.format(section_content=section_content)
         response = await llm.ainvoke(prompt)
         text = response.content if hasattr(response, "content") else str(response)
-        parsed = _parse_json_response(text)
+        parsed = parse_json_response(text, list)
         if parsed is None:
             return []
         for item in parsed:
             item["function_name"] = function_name
             item["source_citation"] = section_content[:200]
         return parsed
-
-
-def _parse_json_response(text: str) -> list[dict] | None:
-    """Parse LLM JSON response, handling ```json``` blocks and bare JSON."""
-    match = _JSON_BLOCK_RE.search(text)
-    if match:
-        text = match.group(1)
-    text = text.strip()
-
-    try:
-        data = json.loads(text)
-        if isinstance(data, list):
-            return data
-    except json.JSONDecodeError:
-        pass
-
-    arr_match = re.search(r"\[[\s\S]*\]", text)
-    if arr_match:
-        try:
-            data = json.loads(arr_match.group(0))
-            if isinstance(data, list):
-                return data
-        except json.JSONDecodeError:
-            pass
-
-    logger.warning("ReturnCodeExtract: failed to parse LLM response: %s", text[:200])
-    return None
-
-
-def _create_llm() -> ChatOpenAI:
-    from agent.core.llm import create_llm
-    return create_llm()

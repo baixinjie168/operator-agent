@@ -1,23 +1,19 @@
 """ArrayLengthExtract node: extract array length constraints from parameter descriptions via LLM."""
 
 import asyncio
-import json
 import logging
-import re
 from typing import Any
 
 from langchain_openai import ChatOpenAI
 
-from agent.core.config import settings
 from agent.mcp_client import MCPClient
 from agent.nodes.state import PipelineState
 from agent.prompts import ARRAY_LENGTH_EXTRACT_PROMPT
+from agent.utils.llm_common import CONCURRENCY_LIMIT, create_llm, parse_json_response
 
 logger = logging.getLogger(__name__)
 
 _mcp_client = MCPClient()
-
-_CONCURRENCY_LIMIT = 5
 
 _ARRAY_TYPES = [
     "aclIntArray",
@@ -26,8 +22,6 @@ _ARRAY_TYPES = [
     "aclTensorList",
     "aclScalarList",
 ]
-
-_JSON_BLOCK_RE = re.compile(r"```(?:json)?\s*([\s\S]*?)```", re.IGNORECASE)
 
 
 async def array_length_extract_node(state: PipelineState) -> dict[str, Any]:
@@ -80,8 +74,8 @@ async def array_length_extract_node(state: PipelineState) -> dict[str, Any]:
 
         # 数组类型: LLM 提取
         if array_params:
-            llm = _create_llm()
-            sem = asyncio.Semaphore(_CONCURRENCY_LIMIT)
+            llm = create_llm()
+            sem = asyncio.Semaphore(CONCURRENCY_LIMIT)
 
             async def _extract_one(param: dict) -> dict | None:
                 async with sem:
@@ -105,11 +99,6 @@ async def array_length_extract_node(state: PipelineState) -> dict[str, Any]:
         return {"error": str(e)}
 
 
-def _create_llm() -> ChatOpenAI:
-    from agent.core.llm import create_llm
-    return create_llm()
-
-
 async def _extract_array_length(llm: ChatOpenAI, param: dict) -> dict | None:
     """Call LLM to extract array length for a single parameter."""
     param_name = param.get("param_name", "")
@@ -122,35 +111,8 @@ async def _extract_array_length(llm: ChatOpenAI, param: dict) -> dict | None:
     response = await llm.ainvoke(prompt)
     text = response.content if hasattr(response, "content") else str(response)
 
-    result = _parse_array_length_response(text)
+    result = parse_json_response(text, dict)
     if result:
         result["param_name"] = param_name
         result["function_name"] = function_name
     return result
-
-
-def _parse_array_length_response(text: str) -> dict | None:
-    """Parse LLM JSON response into {array_length} dict."""
-    match = _JSON_BLOCK_RE.search(text)
-    if match:
-        text = match.group(1)
-    text = text.strip()
-
-    try:
-        data = json.loads(text)
-        if isinstance(data, dict):
-            return data
-    except json.JSONDecodeError:
-        pass
-
-    obj_match = re.search(r"\{[^{}]*\}", text)
-    if obj_match:
-        try:
-            data = json.loads(obj_match.group(0))
-            if isinstance(data, dict):
-                return data
-        except json.JSONDecodeError:
-            pass
-
-    logger.warning("ArrayLengthExtract: failed to parse LLM response as JSON: %s", text[:200])
-    return None

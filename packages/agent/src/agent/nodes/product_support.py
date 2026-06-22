@@ -1,23 +1,17 @@
 """ProductSupport node: extracts product support info via LLM and persists to DB."""
 
-import json
 import logging
-import re
 from typing import Any
 
-from langchain_openai import ChatOpenAI
-
-from agent.core.config import settings
 from agent.mcp_client import MCPClient
 from agent.nodes.state import PipelineState
 from agent.prompts import PRODUCT_SUPPORT_EXTRACT_PROMPT
 from agent.core.llm import create_llm
+from agent.utils.llm_common import parse_json_response
 
 logger = logging.getLogger(__name__)
 
 _mcp_client = MCPClient()
-
-_JSON_BLOCK_RE = re.compile(r"```(?:json)?\s*([\s\S]*?)```", re.IGNORECASE)
 
 
 async def product_support_node(state: PipelineState) -> dict[str, Any]:
@@ -93,31 +87,4 @@ async def _extract_via_llm(content: str) -> list[dict]:
     response = await llm.ainvoke(prompt)
     text = response.content if hasattr(response, "content") else str(response)
 
-    return _parse_json_response(text)
-
-
-def _parse_json_response(text: str) -> list[dict]:
-    """Extract JSON array from LLM response, handling markdown code blocks."""
-    match = _JSON_BLOCK_RE.search(text)
-    if match:
-        text = match.group(1)
-
-    text = text.strip()
-
-    try:
-        data = json.loads(text)
-        if isinstance(data, list):
-            return data
-    except json.JSONDecodeError:
-        pass
-
-    array_match = re.search(r"\[[\s\S]*\]", text)
-    if array_match:
-        try:
-            data = json.loads(array_match.group(0))
-            if isinstance(data, list):
-                return data
-        except json.JSONDecodeError:
-            pass
-
-    return []
+    return parse_json_response(text, list) or []

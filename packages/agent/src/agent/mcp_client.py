@@ -132,6 +132,29 @@ class MCPClient:
             "updates": json.dumps(updates, ensure_ascii=False),
         })
 
+    async def update_param_platform_attributes(
+        self, doc_id: int, updates: list[dict]
+    ) -> dict:
+        """Batch update the platform_attributes field of parameters."""
+        return await self._call_tool("update_param_platform_attributes", {
+            "doc_id": doc_id,
+            "updates": json.dumps(updates, ensure_ascii=False),
+        })
+
+    async def batch_update_params(self, doc_id: int, field: str, updates: list[dict]) -> dict:
+        """Generic batch update for any parameter field.
+
+        Args:
+            doc_id: Document version ID.
+            field: Target field name (shape, dtype, dformat, is_optional, etc.).
+            updates: List of dicts with function_name, param_name, and value.
+        """
+        return await self._call_tool("batch_update_params", {
+            "doc_id": doc_id,
+            "field": field,
+            "updates": json.dumps(updates, ensure_ascii=False),
+        })
+
     async def update_param_dtype(self, doc_id: int, updates: list[dict]) -> dict:
         """Batch update only the dtype_desc field of parameters."""
         return await self._call_tool("update_param_dtype", {
@@ -373,6 +396,39 @@ class MCPClient:
             "operator_name": operator_name,
         })
 
+    async def save_shape_dim_mappings(
+        self, doc_id: int, mappings_json: str, rendered_text: str
+    ) -> dict:
+        """Persist shape dimension mappings for traceability."""
+        return await self._call_tool("save_shape_dim_mappings", {
+            "doc_id": doc_id,
+            "mappings_json": mappings_json,
+            "rendered_text": rendered_text,
+        })
+
+    async def query_shape_dim_mappings_by_doc_id(self, doc_id: int) -> dict | None:
+        """Query shape dimension mappings for a document version by doc_id."""
+        return await self._call_tool("query_shape_dim_mappings_by_doc_id", {
+            "doc_id": doc_id,
+        })
+
+    async def save_platform_constants(
+        self, doc_id: int, constants_json: str
+    ) -> dict:
+        """Persist platform constants (external constants like rankSize)."""
+        return await self._call_tool("save_platform_constants", {
+            "doc_id": doc_id,
+            "constants_json": constants_json,
+        })
+
+    async def query_platform_constants_by_doc_id(
+        self, doc_id: int
+    ) -> dict | None:
+        """Query platform constants for a document version by doc_id."""
+        return await self._call_tool("query_platform_constants_by_doc_id", {
+            "doc_id": doc_id,
+        })
+
     async def query_constraints_result(self, operator_name: str | None = None) -> list[dict]:
         """Query constraints results, optionally filtered by operator name."""
         args: dict[str, Any] = {}
@@ -448,3 +504,7 @@ class MCPClient:
     async def reset_stuck_task_items(self, task_id: int) -> dict:
         """Reset task items stuck in 'running' back to 'pending'."""
         return await self._call_tool("reset_stuck_task_items", {"task_id": task_id})
+
+    async def delete_task(self, task_id: int) -> dict:
+        """Delete a task and all associated operator data."""
+        return await self._call_tool("delete_task", {"task_id": task_id})

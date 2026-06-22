@@ -16,12 +16,11 @@ from agent.core.config import settings
 from agent.mcp_client import MCPClient
 from agent.nodes.state import PipelineState
 from agent.prompts import FUNCTION_SIGNATURE_EXTRACT_PROMPT
+from agent.utils.llm_common import create_llm, parse_json_response
 
 logger = logging.getLogger(__name__)
 
 _mcp_client = MCPClient()
-
-_JSON_BLOCK_RE = re.compile(r"```(?:json)?\s*([\s\S]*?)```", re.IGNORECASE)
 
 
 async def function_signature_extract_node(state: PipelineState) -> dict[str, Any]:
@@ -93,18 +92,13 @@ async def function_signature_extract_node(state: PipelineState) -> dict[str, Any
         return {"parameters": [], "error": str(e)}
 
 
-def _create_llm() -> ChatOpenAI:
-    from agent.core.llm import create_llm
-    return create_llm()
-
-
 async def _extract_signatures_via_llm(content: str) -> list[dict]:
     """Call LLM to extract function signatures from content."""
-    llm = _create_llm()
+    llm = create_llm()
     prompt = FUNCTION_SIGNATURE_EXTRACT_PROMPT.format(content=content)
     response = await llm.ainvoke(prompt)
     text = response.content if hasattr(response, "content") else str(response)
-    return _parse_json_response(text)
+    return parse_json_response(text, list) or []
 
 
 def _normalize_param_types(signatures: list[dict]) -> list[dict]:
@@ -121,33 +115,6 @@ def _normalize_param_types(signatures: list[dict]) -> list[dict]:
             ptype = ptype.replace('*', '').replace('&', '').strip()
             param["type"] = ptype
     return signatures
-
-
-def _parse_json_response(text: str) -> list[dict]:
-    """Extract JSON array from LLM response, handling markdown code blocks."""
-    match = _JSON_BLOCK_RE.search(text)
-    if match:
-        text = match.group(1)
-
-    text = text.strip()
-
-    try:
-        data = json.loads(text)
-        if isinstance(data, list):
-            return data
-    except json.JSONDecodeError:
-        pass
-
-    array_match = re.search(r"\[[\s\S]*\]", text)
-    if array_match:
-        try:
-            data = json.loads(array_match.group(0))
-            if isinstance(data, list):
-                return data
-        except json.JSONDecodeError:
-            pass
-
-    return []
 
 
 def _signatures_to_parameters(signatures: list[dict]) -> list[dict]:

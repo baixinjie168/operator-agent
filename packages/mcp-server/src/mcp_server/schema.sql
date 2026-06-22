@@ -165,3 +165,14 @@ CREATE TABLE IF NOT EXISTS task_items (
 
 CREATE INDEX IF NOT EXISTS idx_task_items_task_id
     ON task_items(task_id);
+
+CREATE TABLE IF NOT EXISTS shape_dim_mappings (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    doc_id          INTEGER NOT NULL REFERENCES document_versions(id),
+    mappings_json   TEXT NOT NULL DEFAULT '[]',
+    rendered_text   TEXT NOT NULL DEFAULT '',
+    created_at      TEXT DEFAULT (datetime('now'))
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_shape_dim_mappings_doc_id
+    ON shape_dim_mappings(doc_id);
