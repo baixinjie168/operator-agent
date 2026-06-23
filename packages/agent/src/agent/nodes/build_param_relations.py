@@ -233,11 +233,12 @@ def _validate_expr_refs(
     expr: str,
     params: list[str],
     external_constants: set[str] | None = None,
+    implicit_param_names: set[str] | None = None,
 ) -> tuple[bool, str]:
     """Phase 0b: Validate parameter names and attributes in expr.
 
     Checks:
-    1. All Name nodes must be in params, Python builtins, or external_constants
+    1. All Name nodes must be in params, Python builtins, external_constants, or implicit_param_names
     2. All Attribute nodes must be in _ALLOWED_ATTRS
     3. Comprehension variables (e.g., 'd' in 'all(d > 0 for d in x.shape)') are allowed
     """
@@ -250,6 +251,7 @@ def _validate_expr_refs(
 
     param_set = set(params)
     ext_set = external_constants or set()
+    implicit_set = implicit_param_names or set()
 
     # Collect all comprehension variables (bound by for loops in comprehensions)
     comprehension_vars: set[str] = set()
@@ -270,6 +272,7 @@ def _validate_expr_refs(
                 and node.id not in _BUILTIN_NAMES
                 and node.id not in comprehension_vars
                 and node.id not in ext_set
+                and node.id not in implicit_set
             ):
                 return False, f"Unknown parameter: '{node.id}'"
         if isinstance(node, ast.Attribute):
@@ -282,12 +285,13 @@ def _validate_expr(
     expr: str,
     params: list[str],
     external_constants: set[str] | None = None,
+    implicit_param_names: set[str] | None = None,
 ) -> tuple[bool, str]:
     """Phase 0: Comprehensive validation (syntax + references)."""
     is_valid, error = _validate_expr_syntax(expr)
     if not is_valid:
         return False, error
-    is_valid, error = _validate_expr_refs(expr, params, external_constants)
+    is_valid, error = _validate_expr_refs(expr, params, external_constants, implicit_param_names)
     if not is_valid:
         return False, error
     return True, ""
@@ -331,13 +335,13 @@ async def _extract_one_with_hint(
     signatures_text: str,
     param_shapes_text: str,
     example_hint: str,
-    shape_dim_mappings_text: str = "",
+    implicit_params_text: str = "",
 ) -> dict[str, str]:
     """Extract with Few-shot example hint for retry."""
     prompt = RELATION_OBJECT_BUILD_PROMPT.format(
         signatures_text=signatures_text,
         param_shapes_text=param_shapes_text,
-        shape_dim_mappings_text=shape_dim_mappings_text,
+        implicit_params_text=implicit_params_text,
         relation_type=rel.get("relation_type", ""),
         params=json.dumps(rel.get("params", []), ensure_ascii=False),
         description=rel.get("description", ""),
@@ -355,8 +359,9 @@ async def _extract_with_retry(
     signatures_text: str,
     param_shapes_text: str,
     sem: asyncio.Semaphore,
-    shape_dim_mappings_text: str = "",
+    implicit_params_text: str = "",
     external_constants: set[str] | None = None,
+    implicit_param_names: set[str] | None = None,
 ) -> dict[str, str]:
     """Phase 2a: Extract with enhanced retry (max 2 attempts).
 
@@ -372,7 +377,7 @@ async def _extract_with_retry(
                     prompt = RELATION_OBJECT_BUILD_PROMPT.format(
                         signatures_text=signatures_text,
                         param_shapes_text=param_shapes_text,
-                        shape_dim_mappings_text=shape_dim_mappings_text,
+                        implicit_params_text=implicit_params_text,
                         relation_type=rel.get("relation_type", ""),
                         params=json.dumps(rel.get("params", []), ensure_ascii=False),
                         description=rel.get("description", ""),
@@ -385,7 +390,7 @@ async def _extract_with_retry(
                     example_hint = _select_relevant_example(last_error, last_expr)
                     result = await _extract_one_with_hint(
                         llm, rel, signatures_text, param_shapes_text, example_hint,
-                        shape_dim_mappings_text=shape_dim_mappings_text,
+                        implicit_params_text=implicit_params_text,
                     )
 
                 expr = result.get("expr", "")
@@ -393,7 +398,7 @@ async def _extract_with_retry(
 
                 # Phase 0 validation
                 is_valid, error = _validate_expr(
-                    expr, params, external_constants,
+                    expr, params, external_constants, implicit_param_names,
                 )
                 if is_valid:
                     return result
@@ -534,8 +539,9 @@ async def _batch_extract_relation_objects(
     relations: list[dict],
     signatures_text: str,
     param_shapes_text: str,
-    shape_dim_mappings_text: str = "",
+    implicit_params_text: str = "",
     external_constants: set[str] | None = None,
+    implicit_param_names: set[str] | None = None,
 ) -> list[dict[str, str]]:
     """Batch LLM extraction with three-layer protection.
 
@@ -564,8 +570,9 @@ async def _batch_extract_relation_objects(
         # Phase 1 + 2a: Generate with enhanced retry
         result = await _extract_with_retry(
             llm, rel, signatures_text, param_shapes_text, sem,
-            shape_dim_mappings_text=shape_dim_mappings_text,
+            implicit_params_text=implicit_params_text,
             external_constants=external_constants,
+            implicit_param_names=implicit_param_names,
         )
 
         # Check if semantic verification is needed (Phase 2b)
@@ -585,7 +592,7 @@ async def _batch_extract_relation_objects(
 
 
 # ---------------------------------------------------------------------------
-# Phase 5: Safety net — dim var substitution with multi-level fallback
+# Constant substitution (only replace known constant values, not dim vars)
 # ---------------------------------------------------------------------------
 
 
@@ -594,95 +601,30 @@ def _substitute_dim_vars(
     mappings: list[dict],
     external_constants: set[str] | None = None,
 ) -> str:
-    """Replace dim_var.range_value (and bare dim_var) with tensor.shape[i].
+    """Replace only constant dimension values (e.g. k0 -> 16).
 
-    Level 1 safety net: catches cases where the LLM still uses old notation
-    despite updated prompts. For variables mapping to multiple tensors,
-    uses the first mapping found.
+    Named dimension variables (BS, H, N, etc.) are kept as-is — they are
+    treated as implicit parameters referenced by name in expressions.
 
-    External constants are skipped — they should remain as-is in the expr.
+    External constants are also kept as-is.
     """
     if not expr or not mappings:
         return expr
 
-    ext_set = external_constants or set()
-    seen_vars: set[str] = set()
     substitutions: dict[str, str] = {}
 
     for m in mappings:
         var = m["var_name"]
-        if var in seen_vars:
-            continue
-        # Skip external constants — don't substitute them
-        if m.get("is_external_constant") or var in ext_set:
-            continue
-        seen_vars.add(var)
-
         if m.get("is_constant"):
             val = str(m.get("constant_value", 0))
             substitutions[f"{var}.range_value"] = val
             substitutions[var] = val
-        else:
-            replacement = f'{m["tensor_param"]}.shape[{m["dim_index"]}]'
-            substitutions[f"{var}.range_value"] = replacement
-            substitutions[var] = replacement
 
     # Apply substitutions (longest key first to avoid partial matches)
     for old, new in sorted(substitutions.items(), key=lambda x: -len(x[0])):
         expr = expr.replace(old, new)
 
     return expr
-
-
-def _try_alternate_mappings(
-    expr: str,
-    mappings: list[dict],
-    rel: dict,
-    external_constants: set[str] | None = None,
-) -> str | None:
-    """Try different tensor mapping combinations for ambiguous variables.
-
-    Level 2 safety net: when a variable maps to multiple tensors
-    (e.g. b → self.shape[0] | mat2.shape[0]), try each combination
-    and return the first one that passes validation.
-    """
-    from itertools import product as iter_product
-
-    # Collect all replacement options per variable
-    var_options: dict[str, set[str]] = {}
-    for m in mappings:
-        var = m["var_name"]
-        if m.get("is_constant"):
-            replacement = str(m.get("constant_value", 0))
-        else:
-            replacement = f'{m["tensor_param"]}.shape[{m["dim_index"]}]'
-        var_options.setdefault(var, set()).add(replacement)
-
-    # Only process variables that appear in expr and have multiple options
-    ambiguous: dict[str, list[str]] = {}
-    for var, opts in var_options.items():
-        if len(opts) > 1 and (f"{var}.range_value" in expr or f" {var}" in expr):
-            ambiguous[var] = list(opts)
-
-    if not ambiguous:
-        return None
-
-    # Try all combinations (typically very few: 2-4 combinations)
-    for combo in iter_product(*ambiguous.values()):
-        candidate = expr
-        for var, replacement in zip(ambiguous.keys(), combo):
-            candidate = candidate.replace(f"{var}.range_value", replacement)
-            # Also replace bare var name (but not as substring of other words)
-            candidate = re.sub(
-                r"\b" + re.escape(var) + r"\b", replacement, candidate
-            )
-        is_valid, _ = _validate_expr(
-            candidate, rel.get("params", []), external_constants,
-        )
-        if is_valid:
-            return candidate
-
-    return None
 
 
 async def build_param_relations_node(state: PipelineState) -> dict[str, Any]:
@@ -715,13 +657,13 @@ async def build_param_relations_node(state: PipelineState) -> dict[str, Any]:
             return {"error": None}
 
         # Step 1b: Get shape dimension mappings from state (for prompt + safety net)
-        mappings = state.get("shape_dim_mappings", [])
-        shape_dim_mappings_text = ""
+        mappings = state.get("implicit_params", [])
+        implicit_params_text = ""
         if mappings:
             from agent.nodes.param_relation_extract.prompts import (
-                format_shape_dim_mappings_context,
+                format_implicit_params_context,
             )
-            shape_dim_mappings_text = format_shape_dim_mappings_context(mappings)
+            implicit_params_text = format_implicit_params_context(mappings)
 
         # Step 1c: Get platform constants and build external constant names
         platform_constants = state.get("platform_constants", [])
@@ -737,18 +679,12 @@ async def build_param_relations_node(state: PipelineState) -> dict[str, Any]:
                 sorted(external_const_names), doc_id,
             )
 
-        # Step 1d: Build set of valid function signature parameter names
-        # Used to filter out named dimension variables from relation_params
-        from agent.nodes.param_relation_extract.shape_dim_mapping_extract import (
-            _camel_to_snake,
-        )
-        sig_param_names: set[str] = set()
-        for sig in sigs:
-            for p in sig.get("parameters", []):
-                name = p.get("name", "")
-                if name:
-                    sig_param_names.add(name)
-                    sig_param_names.add(_camel_to_snake(name))
+        # Step 1d: Build set of implicit param names (named dim variables)
+        # Used to allow them in expression validation
+        implicit_param_names: set[str] = set()
+        for m in mappings:
+            if not m.get("is_external_constant") and not m.get("is_constant"):
+                implicit_param_names.add(m["var_name"])
 
         # Step 2: Build signature context (enriched with shape info)
         signatures_text = _format_signatures(sigs, params or [])
@@ -757,88 +693,33 @@ async def build_param_relations_node(state: PipelineState) -> dict[str, Any]:
         # Step 3: LLM batch extract expr_type + expr
         llm_results = await _batch_extract_relation_objects(
             relations, signatures_text, param_shapes_text,
-            shape_dim_mappings_text=shape_dim_mappings_text,
+            implicit_params_text=implicit_params_text,
             external_constants=external_const_names,
+            implicit_param_names=implicit_param_names,
         )
 
         # Step 4: Assemble relation_object and persist
-        # Phase 5 safety net: substitute dim vars in expressions
         updates: list[dict] = []
-        substitution_stats = {"total": 0, "level1": 0, "level2": 0, "level4": 0}
 
         for rel, llm_out in zip(relations, llm_results):
             original_expr = llm_out.get("expr", "")
             final_expr = original_expr
-            sub_level = 0
-            sub_error = ""
 
+            # Only substitute constant values (e.g. k0 -> 16), not dim vars
             if mappings and original_expr:
-                substitution_stats["total"] += 1
-
-                # Level 1: direct substitution + validation
                 substituted = _substitute_dim_vars(
                     original_expr, mappings, external_const_names,
                 )
-                is_valid, sub_error = _validate_expr(
-                    substituted, rel.get("params", []), external_const_names,
-                )
-
-                if is_valid and substituted != original_expr:
-                    sub_level = 1
-                    substitution_stats["level1"] += 1
-                    final_expr = substituted
-                elif not is_valid:
-                    # Level 2: try alternate tensor mappings
-                    alt_expr = _try_alternate_mappings(
-                        original_expr, mappings, rel, external_const_names,
+                if substituted != original_expr:
+                    is_valid, _ = _validate_expr(
+                        substituted, rel.get("params", []),
+                        external_const_names, implicit_param_names,
                     )
-                    if alt_expr:
-                        is_valid2, sub_error = _validate_expr(
-                            alt_expr, rel.get("params", []),
-                            external_const_names,
-                        )
-                        if is_valid2:
-                            sub_level = 2
-                            substitution_stats["level2"] += 1
-                            final_expr = alt_expr
+                    if is_valid:
+                        final_expr = substituted
 
-                if sub_level == 0 and original_expr != final_expr:
-                    # Level 4: fall back to original expr (already validated in Phase 2a)
-                    sub_level = 4
-                    substitution_stats["level4"] += 1
-                    final_expr = original_expr
-                    logger.warning(
-                        "BuildParamRelations: substitution Level 4 fallback "
-                        "for relation id=%s: %s",
-                        rel.get("id", "?"), sub_error,
-                    )
-
-            # Step A: Clean relation_params — only keep function signature
-            # params and external constants (filter out named dim variables
-            # like BS, H, N that the LLM incorrectly included)
-            clean_params = [
-                p for p in rel.get("params", [])
-                if p in sig_param_names or p in external_const_names
-            ]
-
-            # Step B: Detect unsubstituted named variables in expr
-            # (e.g. LLM used a variable not in shape_dim_mappings)
-            if final_expr:
-                remaining = re.findall(
-                    r'\b([A-Za-z]\w*)\.range_value', final_expr,
-                )
-                unsubstituted = [
-                    v for v in remaining
-                    if v not in external_const_names
-                    and v not in sig_param_names
-                ]
-                if unsubstituted:
-                    logger.warning(
-                        "BuildParamRelations: unsubstituted named vars %s "
-                        "in expr '%s' for relation id=%s — clearing expr",
-                        unsubstituted, final_expr, rel.get("id", "?"),
-                    )
-                    final_expr = ""
+            # Keep original params (including implicit/non-operator params)
+            clean_params = rel.get("params", [])
 
             relation_object = {
                 "expr_type": llm_out.get("expr_type", ""),
@@ -846,16 +727,6 @@ async def build_param_relations_node(state: PipelineState) -> dict[str, Any]:
                 "relation_params": clean_params,
                 "src_text": rel.get("source_citation", ""),
             }
-
-            # Log substitution metadata for observability (not stored in DB)
-            if mappings and original_expr and sub_level > 0:
-                logger.debug(
-                    "BuildParamRelations: substitution level=%d fallback=%s "
-                    "for relation id=%s: original='%s' final='%s'%s",
-                    sub_level, sub_level == 4, rel.get("id", "?"),
-                    original_expr, final_expr,
-                    f" error='{sub_error}'" if sub_error else "",
-                )
 
             # Log metadata for debugging (not stored in DB)
             if llm_out.get("_validation_error"):
@@ -898,18 +769,6 @@ async def build_param_relations_node(state: PipelineState) -> dict[str, Any]:
             "BuildParamRelations: grouped into %d platforms (doc_id=%s)",
             len(grouped), doc_id,
         )
-
-        # Log substitution stats for observability
-        if substitution_stats["total"] > 0:
-            logger.info(
-                "BuildParamRelations: dim var substitution stats: "
-                "total=%d, level1=%d, level2=%d, level4_fallback=%d (doc_id=%s)",
-                substitution_stats["total"],
-                substitution_stats["level1"],
-                substitution_stats["level2"],
-                substitution_stats["level4"],
-                doc_id,
-            )
 
         return {"error": None}
 

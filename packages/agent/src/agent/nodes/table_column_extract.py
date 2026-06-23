@@ -19,11 +19,9 @@ from agent.mcp_client import MCPClient
 from agent.nodes.state import PipelineState
 from agent.utils.table_parser import (
     detect_table_columns,
-    extract_4_columns_from_table,
-    extract_platform_attributes_from_table,
+    extract_columns_as_json,
     find_param_name_column,
     is_table_form,
-    parse_html_tables,
     parse_html_tables_with_raw,
 )
 
@@ -55,9 +53,9 @@ def _extract_from_sections(
 ) -> list[dict]:
     """Parse HTML tables from section text and extract values for each param.
 
-    Returns a list of dicts, one per successfully extracted parameter,
-    with keys: function_name, param_name, shape, dtype_desc, dformat_desc,
-    is_support_discontinuous, platform_attributes.
+    Returns a list of dicts, one per successfully extracted parameter.
+    Value fields (shape, dtype_desc, dformat_desc, param_desc, usage_notes)
+    are stored as JSON {platform: value} dicts.
     """
     tables, raw_tables = parse_html_tables_with_raw(sections_text)
     if not tables:
@@ -89,18 +87,12 @@ def _extract_from_sections(
             continue
 
         # Try each table until we find a match
-        extracted: dict[str, str] = {}
-        platform_attrs: dict[str, dict[str, str]] = {}
+        extracted: dict[str, Any] = {}
         for grid, raw_grid, col_map, name_idx in table_info:
-            extracted = extract_4_columns_from_table(
-                grid, col_map, param_name, param_type, name_idx
+            extracted = extract_columns_as_json(
+                grid, raw_grid, col_map, param_name, param_type, name_idx
             )
             if extracted:
-                # Also extract platform-tagged values from raw HTML
-                if raw_grid:
-                    platform_attrs = extract_platform_attributes_from_table(
-                        raw_grid, col_map, param_name, name_idx
-                    )
                 break
 
         if not extracted:
@@ -111,23 +103,16 @@ def _extract_from_sections(
             "param_name": param_name,
         }
 
-        # Only include non-empty values
-        if extracted.get("shape"):
-            record["shape"] = extracted["shape"]
-        if extracted.get("dtype_desc"):
-            record["dtype_desc"] = extracted["dtype_desc"]
-        if extracted.get("dformat_desc"):
-            record["dformat_desc"] = extracted["dformat_desc"]
+        # JSON fields: shape, dtype_desc, dformat_desc, param_desc, usage_notes
+        for field in ("shape", "dtype_desc", "dformat_desc", "param_desc", "usage_notes"):
+            if extracted.get(field):
+                record[field] = extracted[field]
+
+        # Non-JSON fields
         if extracted.get("is_support_discontinuous"):
             record["is_support_discontinuous"] = extracted["is_support_discontinuous"]
-        if extracted.get("param_desc"):
-            record["param_desc"] = extracted["param_desc"]
         if extracted.get("direction"):
             record["direction"] = extracted["direction"]
-
-        # Include platform_attributes if any platform-tagged values found
-        if platform_attrs:
-            record["platform_attributes"] = platform_attrs
 
         # Only add if at least one field was extracted
         if len(record) > 2:
@@ -137,7 +122,11 @@ def _extract_from_sections(
 
 
 async def _persist_to_db(doc_id: int, results: list[dict]) -> None:
-    """Persist extracted table column values to DB via MCP."""
+    """Persist extracted table column values to DB via MCP.
+
+    Value fields (shape, dtype_desc, dformat_desc, param_desc, usage_notes)
+    are stored as JSON strings: {platform: value}.
+    """
     if not results:
         return
 
@@ -148,19 +137,34 @@ async def _persist_to_db(doc_id: int, results: list[dict]) -> None:
         logger.warning("TableColumnExtract: unexpected MCP response type: %r", res)
         return 0
 
-    # Group by field type for batch updates
+    # JSON fields: serialize dict → JSON string
     shape_updates = [
-        {"function_name": r["function_name"], "param_name": r["param_name"], "shape": r["shape"]}
+        {"function_name": r["function_name"], "param_name": r["param_name"],
+         "shape": json.dumps(r["shape"], ensure_ascii=False)}
         for r in results if r.get("shape")
     ]
     dtype_updates = [
-        {"function_name": r["function_name"], "param_name": r["param_name"], "dtype": r["dtype_desc"]}
+        {"function_name": r["function_name"], "param_name": r["param_name"],
+         "dtype": json.dumps(r["dtype_desc"], ensure_ascii=False)}
         for r in results if r.get("dtype_desc")
     ]
     dformat_updates = [
-        {"function_name": r["function_name"], "param_name": r["param_name"], "dformat": r["dformat_desc"]}
+        {"function_name": r["function_name"], "param_name": r["param_name"],
+         "dformat": json.dumps(r["dformat_desc"], ensure_ascii=False)}
         for r in results if r.get("dformat_desc")
     ]
+    desc_updates = [
+        {"function_name": r["function_name"], "param_name": r["param_name"],
+         "param_desc": json.dumps(r["param_desc"], ensure_ascii=False)}
+        for r in results if r.get("param_desc")
+    ]
+    usage_updates = [
+        {"function_name": r["function_name"], "param_name": r["param_name"],
+         "usage_notes": json.dumps(r["usage_notes"], ensure_ascii=False)}
+        for r in results if r.get("usage_notes")
+    ]
+
+    # Non-JSON fields
     disc_updates = [
         {
             "function_name": r["function_name"],
@@ -169,21 +173,10 @@ async def _persist_to_db(doc_id: int, results: list[dict]) -> None:
         }
         for r in results if r.get("is_support_discontinuous")
     ]
-    desc_updates = [
-        {"function_name": r["function_name"], "param_name": r["param_name"], "param_desc": r["param_desc"]}
-        for r in results if r.get("param_desc")
-    ]
     direction_updates = [
-        {"function_name": r["function_name"], "param_name": r["param_name"], "direction": r["direction"]}
+        {"function_name": r["function_name"], "param_name": r["param_name"],
+         "direction": r["direction"]}
         for r in results if r.get("direction")
-    ]
-    plat_attrs_updates = [
-        {
-            "function_name": r["function_name"],
-            "param_name": r["param_name"],
-            "platform_attributes": json.dumps(r["platform_attributes"], ensure_ascii=False),
-        }
-        for r in results if r.get("platform_attributes")
     ]
 
     if shape_updates:
@@ -210,16 +203,20 @@ async def _persist_to_db(doc_id: int, results: list[dict]) -> None:
         res = await _mcp_client.update_param_direction(doc_id, direction_updates)
         logger.info("TableColumnExtract: updated direction for %d params", _updated_count(res))
 
-    if plat_attrs_updates:
-        res = await _mcp_client.update_param_platform_attributes(doc_id, plat_attrs_updates)
-        logger.info("TableColumnExtract: updated platform_attributes for %d params", _updated_count(res))
+    if usage_updates:
+        res = await _mcp_client.update_param_usage_notes(doc_id, usage_updates)
+        logger.info("TableColumnExtract: updated usage_notes for %d params", _updated_count(res))
 
 
 def _merge_into_params(
     original_params: list[dict],
     results: list[dict],
 ) -> list[dict]:
-    """Merge extraction results back into the parameter list."""
+    """Merge extraction results back into the parameter list.
+
+    JSON fields (shape, dtype_desc, dformat_desc, param_desc, usage_notes)
+    are serialized to JSON strings for downstream compatibility.
+    """
     if not results:
         return original_params
 
@@ -234,30 +231,20 @@ def _merge_into_params(
         update = result_map.get(key)
         if update:
             merged = dict(p)
-            if update.get("shape"):
-                merged["shape"] = update["shape"]
+            # JSON fields: serialize dict → JSON string
+            for field in ("shape", "dtype_desc", "dformat_desc", "param_desc", "usage_notes"):
+                if update.get(field):
+                    merged[field] = json.dumps(update[field], ensure_ascii=False)
+            # Also set data_type / data_format for MCP API compatibility
             if update.get("dtype_desc"):
-                merged["dtype_desc"] = update["dtype_desc"]
-                # Also set under the MCP API key so downstream nodes
-                # (e.g. build_param_constraint) that read "data_type"
-                # can find the value.
-                merged["data_type"] = update["dtype_desc"]
+                merged["data_type"] = json.dumps(update["dtype_desc"], ensure_ascii=False)
             if update.get("dformat_desc"):
-                merged["dformat_desc"] = update["dformat_desc"]
-                # Also set under the MCP API key so downstream nodes
-                # (e.g. build_param_constraint) that read "data_format"
-                # can find the value.
-                merged["data_format"] = update["dformat_desc"]
+                merged["data_format"] = json.dumps(update["dformat_desc"], ensure_ascii=False)
+            # Non-JSON fields
             if update.get("is_support_discontinuous"):
                 merged["is_support_discontinuous"] = update["is_support_discontinuous"]
-            if update.get("param_desc"):
-                merged["param_desc"] = update["param_desc"]
             if update.get("direction"):
                 merged["direction"] = update["direction"]
-            if update.get("platform_attributes"):
-                merged["platform_attributes"] = json.dumps(
-                    update["platform_attributes"], ensure_ascii=False,
-                )
             enriched.append(merged)
         else:
             enriched.append(p)

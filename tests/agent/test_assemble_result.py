@@ -298,6 +298,83 @@ class TestBuildInputsOutputs:
         assert inputs["x"] == {}
 
 
+class TestQuantizationTypeImplicitParam:
+    """Verify quantization_type default implicit param flows to inputs."""
+
+    def test_quantization_type_with_modes(self):
+        mapping = [{
+            "var_name": "quantization_type",
+            "is_quantization_type": True,
+            "param_type": "char",
+            "allowed_range_value": ["per-channel", "per-tensor"],
+            "allowed_range_type": "enum",
+            "tensor_param": None,
+            "dim_index": None,
+            "shape_text": None,
+            "is_constant": False,
+            "is_external_constant": False,
+        }]
+        inputs, _ = _build_inputs_outputs([], implicit_params=mapping)
+        assert "quantization_type" in inputs
+        plat_constraint = inputs["quantization_type"]["通用"]
+        assert plat_constraint["type"]["value"] == "char"
+        arv = plat_constraint["allowed_range_value"]
+        assert arv["type"] == "enum"
+        assert arv["value"] == ["per-channel", "per-tensor"]
+
+    def test_quantization_type_empty_modes(self):
+        """No document hits → empty allowed_range_value, enum type preserved."""
+        mapping = [{
+            "var_name": "quantization_type",
+            "is_quantization_type": True,
+            "param_type": "char",
+            "allowed_range_value": [],
+            "allowed_range_type": "enum",
+            "tensor_param": None,
+            "dim_index": None,
+            "is_constant": False,
+            "is_external_constant": False,
+        }]
+        inputs, _ = _build_inputs_outputs([], implicit_params=mapping)
+        arv = inputs["quantization_type"]["通用"]["allowed_range_value"]
+        assert arv["type"] == "enum"
+        assert arv["value"] == []
+
+    def test_quantization_type_does_not_shadow_shape_dims(self):
+        """A regular shape-dim implicit param keeps int64_t + range defaults."""
+        mappings = [
+            {
+                "var_name": "BS",
+                "tensor_param": "x1",
+                "dim_index": 0,
+                "shape_text": "(BS, H)",
+                "is_constant": False,
+                "is_external_constant": False,
+            },
+            {
+                "var_name": "quantization_type",
+                "is_quantization_type": True,
+                "param_type": "char",
+                "allowed_range_value": ["per-group"],
+                "allowed_range_type": "enum",
+                "tensor_param": None,
+                "dim_index": None,
+                "is_constant": False,
+                "is_external_constant": False,
+            },
+        ]
+        inputs, _ = _build_inputs_outputs([], implicit_params=mappings)
+        # Shape dim stays int64_t / range
+        bs = inputs["BS"]["通用"]
+        assert bs["type"]["value"] == "int64_t"
+        assert bs["allowed_range_value"]["type"] == "range"
+        # Quantization type is char / enum
+        qt = inputs["quantization_type"]["通用"]
+        assert qt["type"]["value"] == "char"
+        assert qt["allowed_range_value"]["type"] == "enum"
+        assert qt["allowed_range_value"]["value"] == ["per-group"]
+
+
 class TestHasMeaningfulExpr:
     def test_empty_string(self):
         assert _has_meaningful_expr({"expr": ""}) is False

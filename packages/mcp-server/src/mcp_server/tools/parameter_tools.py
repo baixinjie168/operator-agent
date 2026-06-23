@@ -60,7 +60,7 @@ def query_params_by_doc_id(doc_id: int) -> list[dict]:
         "SELECT id, function_name, param_name, param_type, direction, "
         "src_content, dtype_desc, dformat_desc, shape, is_optional, "
         "is_support_discontinuous, array_length, param_desc, allowed_range_value, "
-        "param_constraint, llm_description "
+        "param_constraint, llm_description, usage_notes "
         "FROM parameters WHERE doc_id = ? ORDER BY function_name, direction, param_name",
         (doc_id,),
     ).fetchall()
@@ -74,6 +74,8 @@ def query_params_by_doc_id(doc_id: int) -> list[dict]:
             "src_content": r[5],
             "data_type": r[6],
             "data_format": r[7],
+            "dtype_desc": r[6],
+            "dformat_desc": r[7],
             "shape": r[8],
             "is_optional": r[9],
             "is_support_discontinuous": r[10],
@@ -82,6 +84,7 @@ def query_params_by_doc_id(doc_id: int) -> list[dict]:
             "allowed_range_value": r[13],
             "param_constraint": r[14],
             "llm_description": r[15],
+            "usage_notes": r[16],
         }
         for r in rows
     ]
@@ -104,7 +107,8 @@ def query_parameters(operator_name: str | None = None) -> list[dict]:
             "SELECT p.id, o.name, dv.version, p.function_name, p.param_name, "
             "p.param_type, p.direction, p.src_content, p.llm_description, "
             "p.dtype_desc, p.dformat_desc, p.shape, p.is_optional, "
-            "p.is_support_discontinuous, p.array_length, p.param_desc, p.allowed_range_value "
+            "p.is_support_discontinuous, p.array_length, p.param_desc, "
+            "p.allowed_range_value, p.usage_notes "
             "FROM parameters p "
             "JOIN document_versions dv ON p.doc_id = dv.id "
             "JOIN operators o ON dv.operator_id = o.id "
@@ -116,7 +120,8 @@ def query_parameters(operator_name: str | None = None) -> list[dict]:
             "SELECT p.id, o.name, dv.version, p.function_name, p.param_name, "
             "p.param_type, p.direction, p.src_content, p.llm_description, "
             "p.dtype_desc, p.dformat_desc, p.shape, p.is_optional, "
-            "p.is_support_discontinuous, p.array_length, p.param_desc, p.allowed_range_value "
+            "p.is_support_discontinuous, p.array_length, p.param_desc, "
+            "p.allowed_range_value, p.usage_notes "
             "FROM parameters p "
             "JOIN document_versions dv ON p.doc_id = dv.id "
             "JOIN operators o ON dv.operator_id = o.id "
@@ -136,12 +141,15 @@ def query_parameters(operator_name: str | None = None) -> list[dict]:
             "llm_description": r[8],
             "data_type": r[9],
             "data_format": r[10],
+            "dtype_desc": r[9],
+            "dformat_desc": r[10],
             "shape": r[11],
             "is_optional": r[12],
             "is_support_discontinuous": r[13],
             "array_length": r[14],
             "param_desc": r[15],
             "allowed_range_value": r[16],
+            "usage_notes": r[17],
         }
         for r in rows
     ]
@@ -164,6 +172,7 @@ _PARAM_FIELD_COLUMN_MAP = {
     "allowed_range_value": "allowed_range_value",
     "param_constraint": "param_constraint",
     "platform_attributes": "platform_attributes",
+    "usage_notes": "usage_notes",
 }
 
 # Default values when the update dict doesn't contain the field key
@@ -173,6 +182,7 @@ _FIELD_DEFAULTS = {
     "allowed_range_value": "[]",
     "param_constraint": "{}",
     "platform_attributes": "{}",
+    "usage_notes": "{}",
     "is_optional": 0,
 }
 
@@ -189,6 +199,7 @@ _FIELD_VALUE_KEY = {
     "allowed_range_value": "allowed_range_value",
     "param_constraint": "param_constraint",
     "platform_attributes": "platform_attributes",
+    "usage_notes": "usage_notes",
 }
 def batch_update_param_field(doc_id: int, field: str, updates: list[dict]) -> dict:
     """Generic batch update for any parameter field.
@@ -330,3 +341,8 @@ def update_param_constraint(doc_id: int, updates: list[dict]) -> dict:
 def update_param_platform_attributes(doc_id: int, updates: list[dict]) -> dict:
     """Batch update only the platform_attributes field of parameters."""
     return batch_update_param_field(doc_id, "platform_attributes", updates)
+
+
+def update_param_usage_notes(doc_id: int, updates: list[dict]) -> dict:
+    """Batch update only the usage_notes field of parameters."""
+    return batch_update_param_field(doc_id, "usage_notes", updates)

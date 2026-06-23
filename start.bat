@@ -26,7 +26,7 @@ echo   URL        = http://127.0.0.1:8000
 echo ========================================================
 echo.
 
-uvicorn agent.main:create_app --factory --host 127.0.0.1 --port 8000 --reload
+uvicorn agent.main:create_app --factory --host 127.0.0.1 --port 8000
 
 endlocal
 \r

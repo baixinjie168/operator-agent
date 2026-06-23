@@ -108,13 +108,18 @@ ALLOWED_RANGE_EXTRACT_PROMPT = """\
 5. 如果完全没有该参数的取值范围信息，返回空数组 []
 6. allowed_range_value 保留原文的关键描述，简洁但完整
 7. 不要提取 shape、数据类型、数据格式等其他约束，只提取取值范围/取值约束
+8. type 字段区分两种语义：
+   - "range"（默认）：连续数值范围，如 "0-100"、"[-1, 1]"
+   - "enum"：参数取值是特定的完整数组值（通常是 aclIntArray 类型），
+     如 "支持配置空或者[-2,-1]" 中 [-2,-1] 是一个完整数组而非范围
+   如果参数类型是 aclIntArray 且约束描述的是特定数组值，type 设为 "enum"
 
 严格按以下 JSON 数组格式返回，不要添加任何其他文字:
 [
-  {{"platform": "平台名称或空字符串", "allowed_range_value": "取值范围描述"}}
+  {{"platform": "平台名称或空字符串", "allowed_range_value": "取值范围描述", "type": "range或enum"}}
 ]
 
-无约束时返回: []
+type 为 "range" 时可省略（默认 range）。无约束时返回: []
 
 {semantic_rules_context}
 

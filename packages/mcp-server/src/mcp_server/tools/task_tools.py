@@ -331,7 +331,7 @@ _DOC_ID_CHILD_TABLES = [
     "return_codes",
     "dtype_combinations",
     "constraints_result",
-    "shape_dim_mappings",
+    "implicit_params",
     "platform_constants",
 ]
 

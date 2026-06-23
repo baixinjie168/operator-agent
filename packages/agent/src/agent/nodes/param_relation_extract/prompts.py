@@ -72,49 +72,75 @@ RELATION_EXTRACT_PROMPT = """\
 """
 
 # ---------------------------------------------------------------------------
-# Shape dimension mapping context (injected into prompt when present)
+# Implicit (non-operator) parameters context (injected into prompt)
 # ---------------------------------------------------------------------------
 
-SHAPE_DIM_MAPPING_CONTEXT = """\
-## Shape 维度映射（命名维度变量 → tensor.shape[i]）
-以下是命名维度变量到具体 tensor shape 索引的对应关系。
-请使用 tensor.shape[i] 形式引用这些维度，不要使用命名变量名，
-也不要将其列入 params 列表。
+IMPLICIT_PARAMS_CONTEXT = """\
+## 非算子参数（命名维度变量）
+以下是从 shape 描述中提取的非算子参数（命名维度变量），
+它们虽然不是函数签名中的参数，但在 shape 约束中作为有意义的维度变量出现。
+请将它们视为正式参数，在 params 列表中包含，并在表达式中直接使用其名称。
 
-维度映射表：
+非算子参数列表：
 {mapping_list}
 
 注意：
-1. params 列表中只列入真实的函数签名参数
-2. description/source_citation 中可以保留原始命名变量
-3. 对于常量维度，直接在表达式中使用数值
+1. params 列表中应包含所有涉及的参数，包括算子参数和非算子参数
+2. 表达式中使用命名变量名（如 BS.range_value、H.range_value）
+3. 不要使用 tensor.shape[i] 替代命名变量
+4. 对于常量维度（如 k0=16），在表达式中直接使用数值
+5. description/source_citation 中可保留原始描述
 
 """
 
 
-def format_shape_dim_mappings_context(
-    mappings: list[dict],
+def format_implicit_params_context(
+    implicit_params: list[dict],
     platform_constants: list[dict] | None = None,
 ) -> str:
-    """Build the shape dim mapping context string for prompt injection.
+    """Build the implicit parameters context string for prompt injection.
 
-    Returns empty string when no mappings exist, so the prompt
+    Returns empty string when no implicit params exist, so the prompt
     section is omitted entirely.
 
     Enhanced with external constant section when platform_constants
     or external constant mappings are present.
     """
-    if not mappings:
+    if not implicit_params:
         return ""
 
+    # Handle old-style implicit_params data (backward compat)
+    if implicit_params and "param_name" in implicit_params[0] and "var_name" not in implicit_params[0]:
+        lines = []
+        for ip in implicit_params:
+            name = ip.get("param_name", "")
+            ptype = ip.get("param_type", "int64_t")
+            lines.append(f"- {name}（{ptype}）：隐式维度变量")
+        old_context = """\
+## 隐式维度变量（非函数签名参数，但在 shape 描述中作为命名维度使用）
+以下标识符虽然不是函数签名中的参数，但它们是重要的维度变量，\
+在 shape 描述中以命名形式出现。请将它们视为正式参数，\
+并在涉及它们的约束关系中将其列入 params 列表：
+{implicit_params_list}
+
+"""
+        return old_context.format(
+            implicit_params_list="\n".join(lines)
+        )
+
+    # New-style: implicit params data (dicts with var_name/tensor_param)
     from collections import defaultdict
 
     var_groups: dict[str, list[str]] = defaultdict(list)
     constants: dict[str, int] = {}
     ext_consts: list[dict] = []
+    quant_entry: dict | None = None
 
-    for m in mappings:
+    for m in implicit_params:
         var = m["var_name"]
+        if m.get("is_quantization_type"):
+            quant_entry = m
+            continue
         if m.get("is_external_constant"):
             ext_consts.append(m)
             continue
@@ -128,23 +154,42 @@ def format_shape_dim_mappings_context(
     lines: list[str] = []
     for var in sorted(var_groups):
         refs = var_groups[var]
-        lines.append(f"- {var} → {' | '.join(refs)}")
+        lines.append(f"- {var}（非算子参数）：对应 {', '.join(refs)}")
     for var in sorted(constants):
         val = constants[var]
         tensor_refs = [
             f'{m["tensor_param"]}.shape[{m["dim_index"]}]'
-            for m in mappings
+            for m in implicit_params
             if m["var_name"] == var
         ]
-        ref_str = f"，{', '.join(tensor_refs)}" if tensor_refs else ""
-        lines.append(f"- {var} → {val}（常量{ref_str}）")
+        ref_str = f"，对应 {', '.join(tensor_refs)}" if tensor_refs else ""
+        lines.append(f"- {var} = {val}（常量，直接使用数值{ref_str}）")
+
+    # Quantization type section (default char-typed enum implicit param)
+    if quant_entry:
+        modes = quant_entry.get("allowed_range_value", [])
+        modes_str = "、".join(modes) if modes else "无（文档未明确）"
+        lines.append("")
+        lines.append("## 量化粒度参数（char 类型枚举）")
+        lines.append(
+            "quantization_type 是非算子参数（char 类型枚举），"
+            "表示量化粒度模式。"
+        )
+        lines.append(
+            f"其允许取值（allowed_range_value）为：{modes_str}。"
+        )
+        lines.append(
+            "在涉及量化场景的约束表达式中，以 "
+            "quantization_type.range_value == \"per-channel\" "
+            "等形式引用，并将其列入 params 列表。"
+        )
 
     # External constants section
     if ext_consts or platform_constants:
         lines.append("")
         lines.append(
             "## 平台外部常量（非函数签名参数，"
-            "不可映射为 tensor.shape[i]）"
+            "平台级常量）"
         )
         lines.append(
             "以下变量是平台级外部常量，在约束表达式中"
@@ -173,53 +218,6 @@ def format_shape_dim_mappings_context(
                         f"{pv['values']}"
                     )
 
-    return SHAPE_DIM_MAPPING_CONTEXT.format(
+    return IMPLICIT_PARAMS_CONTEXT.format(
         mapping_list="\n".join(lines)
-    )
-
-
-# ---------------------------------------------------------------------------
-# Legacy compatibility alias
-# ---------------------------------------------------------------------------
-
-IMPLICIT_PARAMS_CONTEXT = SHAPE_DIM_MAPPING_CONTEXT
-
-
-def format_implicit_params_context(
-    implicit_params: list[dict],
-    platform_constants: list[dict] | None = None,
-) -> str:
-    """Legacy entry point — delegates to format_shape_dim_mappings_context.
-
-    When called with shape_dim_mappings data (dicts with var_name/tensor_param),
-    produces the new shape mapping context. When called with old-style
-    implicit_params data (dicts with param_name/param_type), produces the
-    old implicit params context for backward compatibility.
-    """
-    if not implicit_params:
-        return ""
-
-    # Detect new-style mapping data
-    if implicit_params and "var_name" in implicit_params[0]:
-        return format_shape_dim_mappings_context(
-            implicit_params, platform_constants,
-        )
-
-    # Old-style implicit params (backward compat during migration)
-    lines = []
-    for ip in implicit_params:
-        name = ip.get("param_name", "")
-        ptype = ip.get("param_type", "int64_t")
-        lines.append(f"- {name}（{ptype}）：隐式维度变量")
-
-    old_context = """\
-## 隐式维度变量（非函数签名参数，但在 shape 描述中作为命名维度使用）
-以下标识符虽然不是函数签名中的参数，但它们是重要的维度变量，\
-在 shape 描述中以命名形式出现。请将它们视为正式参数，\
-并在涉及它们的约束关系中将其列入 params 列表：
-{implicit_params_list}
-
-"""
-    return old_context.format(
-        implicit_params_list="\n".join(lines)
     )

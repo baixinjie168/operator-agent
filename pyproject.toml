@@ -17,6 +17,7 @@ dependencies = [
     "pydantic-settings>=2.0",
     "langchain-openai>=0.3",
     "langgraph>=0.4",
+    "deepagents>=0.6",
 ]
 
 [project.optional-dependencies]

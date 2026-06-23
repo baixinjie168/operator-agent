@@ -40,20 +40,24 @@ def _section_filled(desc: str, header: str) -> bool:
     return bool(body) and body != "无"
 
 
-def _has_platform_dtype(result: dict) -> bool:
-    """Check if platform_attributes contains dtype info.
+def _has_json_dtype(result: dict) -> bool:
+    """Check if dtype_desc field contains JSON values.
 
     When a parameter's dtype is entirely platform-specific (e.g. all values
     tagged with <term>PLATFORM</term>), the LLM correctly omits it from
     llm_description. But the dtype IS captured by table_column_extract
-    in platform_attributes. This check prevents false-positive warnings.
+    in the dtype_desc JSON field. This check prevents false-positive warnings.
     """
     try:
-        pa_raw = result.get("platform_attributes", "") or ""
-        pa = json.loads(pa_raw) if isinstance(pa_raw, str) else pa_raw
+        dtype_raw = result.get("dtype_desc", "") or ""
+        if not dtype_raw:
+            return False
+        parsed = json.loads(dtype_raw) if isinstance(dtype_raw, str) else dtype_raw
+        if isinstance(parsed, dict):
+            return any(v for v in parsed.values() if isinstance(v, str) and v.strip())
     except (json.JSONDecodeError, TypeError):
-        return False
-    return bool(pa.get("dtype"))
+        pass
+    return False
 
 
 ATTR_CHECKLIST: list[tuple[str, Any]] = [
@@ -65,7 +69,7 @@ ATTR_CHECKLIST: list[tuple[str, Any]] = [
             k in r.get("llm_description", "").lower()
             for k in ["float", "int", "bool", "dtype", "type"]
         )
-        or _has_platform_dtype(r),
+        or _has_json_dtype(r),
     ),
     (
         "shape",

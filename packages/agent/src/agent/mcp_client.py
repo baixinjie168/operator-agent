@@ -141,6 +141,15 @@ class MCPClient:
             "updates": json.dumps(updates, ensure_ascii=False),
         })
 
+    async def update_param_usage_notes(
+        self, doc_id: int, updates: list[dict]
+    ) -> dict:
+        """Batch update the usage_notes field of parameters."""
+        return await self._call_tool("update_param_usage_notes", {
+            "doc_id": doc_id,
+            "updates": json.dumps(updates, ensure_ascii=False),
+        })
+
     async def batch_update_params(self, doc_id: int, field: str, updates: list[dict]) -> dict:
         """Generic batch update for any parameter field.
 
@@ -396,19 +405,19 @@ class MCPClient:
             "operator_name": operator_name,
         })
 
-    async def save_shape_dim_mappings(
+    async def save_implicit_params(
         self, doc_id: int, mappings_json: str, rendered_text: str
     ) -> dict:
-        """Persist shape dimension mappings for traceability."""
-        return await self._call_tool("save_shape_dim_mappings", {
+        """Persist implicit (non-operator) parameters for traceability."""
+        return await self._call_tool("save_implicit_params", {
             "doc_id": doc_id,
             "mappings_json": mappings_json,
             "rendered_text": rendered_text,
         })
 
-    async def query_shape_dim_mappings_by_doc_id(self, doc_id: int) -> dict | None:
-        """Query shape dimension mappings for a document version by doc_id."""
-        return await self._call_tool("query_shape_dim_mappings_by_doc_id", {
+    async def query_implicit_params_by_doc_id(self, doc_id: int) -> dict | None:
+        """Query implicit parameters for a document version by doc_id."""
+        return await self._call_tool("query_implicit_params_by_doc_id", {
             "doc_id": doc_id,
         })
 
@@ -426,6 +435,23 @@ class MCPClient:
     ) -> dict | None:
         """Query platform constants for a document version by doc_id."""
         return await self._call_tool("query_platform_constants_by_doc_id", {
+            "doc_id": doc_id,
+        })
+
+    async def save_parameter_representations(
+        self, doc_id: int, representations_json: str,
+    ) -> dict:
+        """Persist parameter_representation records for a document version."""
+        return await self._call_tool("save_parameter_representations", {
+            "doc_id": doc_id,
+            "representations_json": representations_json,
+        })
+
+    async def query_parameter_representations_by_doc_id(
+        self, doc_id: int,
+    ) -> dict | None:
+        """Query parameter_representation records for a document version by doc_id."""
+        return await self._call_tool("query_parameter_representations_by_doc_id", {
             "doc_id": doc_id,
         })
 

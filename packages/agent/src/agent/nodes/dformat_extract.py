@@ -1,6 +1,7 @@
 """DFormatExtract node: extract data formats from parameter descriptions via LLM."""
 
 import asyncio
+import json
 import logging
 import re
 from typing import Any
@@ -25,8 +26,29 @@ _VALID_DFORMATS = frozenset({
 
 
 def _is_dformat_valid(dformat_desc: str) -> bool:
-    """Check whether an existing dformat_desc value is reasonable."""
+    """Check whether an existing dformat_desc value is reasonable.
+
+    Handles JSON format: {"*": "ND"} or {"platform": "NCHW"}.
+    """
     s = dformat_desc.strip()
+    if not s:
+        return False
+    try:
+        parsed = json.loads(s)
+        if isinstance(parsed, dict) and parsed:
+            return any(
+                _is_plain_dformat_valid(v)
+                for v in parsed.values()
+                if isinstance(v, str)
+            )
+    except (json.JSONDecodeError, TypeError):
+        pass
+    return _is_plain_dformat_valid(s)
+
+
+def _is_plain_dformat_valid(s: str) -> bool:
+    """Check a plain text dformat value (non-JSON)."""
+    s = s.strip()
     if not s:
         return False
     if is_dash(s):
@@ -101,6 +123,11 @@ async def dformat_extract_node(state: PipelineState) -> dict[str, Any]:
         results = await asyncio.gather(*[_extract_one(p) for p in described])
 
         dformat_updates = [r for r in results if r is not None and r.get("dformat")]
+        # Wrap plain text dformat values as JSON: {"*": value}
+        for u in dformat_updates:
+            val = u["dformat"]
+            if isinstance(val, str) and not val.startswith("{"):
+                u["dformat"] = json.dumps({"*": val}, ensure_ascii=False)
         if dformat_updates:
             result = await _mcp_client.update_param_dformat(doc_id, dformat_updates)
             logger.info(

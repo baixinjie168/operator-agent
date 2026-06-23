@@ -27,8 +27,30 @@ def _is_shape_valid(shape: str) -> bool:
     - Empty / whitespace-only strings
     - Dash variants (-, —, –, －)
     - Cross-references to other params (e.g. "与self一致")
+
+    Handles JSON format: {"*": "[M, K1]"} or {"platform": "[M, K1]"}.
+    If any platform value is valid, returns True.
     """
     s = shape.strip()
+    if not s:
+        return False
+    # Try parsing as JSON
+    try:
+        parsed = json.loads(s)
+        if isinstance(parsed, dict) and parsed:
+            return any(
+                _is_plain_shape_valid(v)
+                for v in parsed.values()
+                if isinstance(v, str)
+            )
+    except (json.JSONDecodeError, TypeError):
+        pass
+    return _is_plain_shape_valid(s)
+
+
+def _is_plain_shape_valid(s: str) -> bool:
+    """Check a plain text shape value (non-JSON)."""
+    s = s.strip()
     if not s:
         return False
     if is_dash(s):
@@ -100,6 +122,11 @@ async def shape_extract_node(state: PipelineState) -> dict[str, Any]:
         results = await asyncio.gather(*[_extract_one(p) for p in described])
 
         shape_updates = [r for r in results if r is not None and r.get("shape")]
+        # Wrap plain text shape values as JSON: {"*": value}
+        for u in shape_updates:
+            val = u["shape"]
+            if isinstance(val, str) and not val.startswith("{"):
+                u["shape"] = json.dumps({"*": val}, ensure_ascii=False)
         if shape_updates:
             result = await _mcp_client.update_param_shape(doc_id, shape_updates)
             logger.info(

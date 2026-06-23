@@ -349,14 +349,14 @@ def get_json_constraints(operator_name: str) -> dict | None:
         return None
 
 
-def save_shape_dim_mappings(doc_id: int, mappings_json: str, rendered_text: str) -> dict:
-    """Persist shape dimension mappings for traceability.
+def save_implicit_params(doc_id: int, mappings_json: str, rendered_text: str) -> dict:
+    """Persist implicit (non-operator) parameters for traceability.
 
     Uses INSERT OR REPLACE for idempotency (one mapping set per doc_id).
 
     Args:
         doc_id: Primary key of document_versions table.
-        mappings_json: JSON string of the shape_dim_mappings list.
+        mappings_json: JSON string of the implicit_params list.
         rendered_text: The rendered prompt context text that the LLM sees.
 
     Returns:
@@ -365,7 +365,7 @@ def save_shape_dim_mappings(doc_id: int, mappings_json: str, rendered_text: str)
     db = get_db()
     conn = db.conn
     conn.execute(
-        "INSERT OR REPLACE INTO shape_dim_mappings "
+        "INSERT OR REPLACE INTO implicit_params "
         "(doc_id, mappings_json, rendered_text) "
         "VALUES (?, ?, ?)",
         (doc_id, mappings_json, rendered_text),
@@ -374,8 +374,8 @@ def save_shape_dim_mappings(doc_id: int, mappings_json: str, rendered_text: str)
     return {"saved": True}
 
 
-def query_shape_dim_mappings_by_doc_id(doc_id: int) -> dict | None:
-    """Query shape dimension mappings for a specific document version by doc_id.
+def query_implicit_params_by_doc_id(doc_id: int) -> dict | None:
+    """Query implicit parameters for a specific document version by doc_id.
 
     Args:
         doc_id: Primary key of document_versions table.
@@ -386,7 +386,7 @@ def query_shape_dim_mappings_by_doc_id(doc_id: int) -> dict | None:
     db = get_db()
     row = db.conn.execute(
         "SELECT mappings_json, rendered_text "
-        "FROM shape_dim_mappings WHERE doc_id = ?",
+        "FROM implicit_params WHERE doc_id = ?",
         (doc_id,),
     ).fetchone()
     if not row:
@@ -398,4 +398,59 @@ def query_shape_dim_mappings_by_doc_id(doc_id: int) -> dict | None:
     return {
         "mappings": mappings,
         "rendered_text": row[1] or "",
+    }
+
+
+def save_parameter_representations(
+    doc_id: int, representations_json: str,
+) -> dict:
+    """Persist parameter_representation records for a document version.
+
+    Uses INSERT OR REPLACE for idempotency (one record per doc_id).
+
+    Args:
+        doc_id: Primary key of document_versions table.
+        representations_json: JSON string with shape
+            {"representations": [...], "platform_representations": {platform: [...]}}.
+
+    Returns:
+        dict with saved flag.
+    """
+    db = get_db()
+    conn = db.conn
+    conn.execute(
+        "INSERT OR REPLACE INTO parameter_representations "
+        "(doc_id, representations) VALUES (?, ?)",
+        (doc_id, representations_json),
+    )
+    conn.commit()
+    return {"saved": True}
+
+
+def query_parameter_representations_by_doc_id(doc_id: int) -> dict | None:
+    """Query parameter_representation records for a document version by doc_id.
+
+    Args:
+        doc_id: Primary key of document_versions table.
+
+    Returns:
+        Dict with 'representations' (list) and 'platform_representations'
+        (dict platform -> list), or None if not found.
+    """
+    db = get_db()
+    row = db.conn.execute(
+        "SELECT representations FROM parameter_representations WHERE doc_id = ?",
+        (doc_id,),
+    ).fetchone()
+    if not row:
+        return None
+    try:
+        data = json.loads(row[0]) if row[0] else {}
+    except (json.JSONDecodeError, TypeError):
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+    return {
+        "representations": data.get("representations", []) or [],
+        "platform_representations": data.get("platform_representations", {}) or {},
     }

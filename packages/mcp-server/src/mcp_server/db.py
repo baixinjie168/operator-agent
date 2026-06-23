@@ -501,6 +501,40 @@ class Database:
             )
         except sqlite3.OperationalError:
             pass
+        # 迁移：v38 — shape_dim_mappings 重命名为 implicit_params
+        try:
+            self._conn.execute(
+                "ALTER TABLE shape_dim_mappings RENAME TO implicit_params"
+            )
+        except sqlite3.OperationalError:
+            pass
+        # 迁移：v39 — parameters 新增 usage_notes 列（平台差异化使用说明）
+        try:
+            self._conn.execute(
+                "ALTER TABLE parameters ADD COLUMN usage_notes "
+                "TEXT NOT NULL DEFAULT '{}'"
+            )
+        except sqlite3.OperationalError:
+            pass
+        # 迁移：v40 — 新增 parameter_representations 表
+        # 存储确定性生成的 parameter_representation 关系（来源于
+        # implicit_params mappings 与 platform_constants）。
+        try:
+            self._conn.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS parameter_representations (
+                    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                    doc_id              INTEGER NOT NULL REFERENCES document_versions(id),
+                    representations     TEXT NOT NULL DEFAULT '{}',
+                    created_at          TEXT DEFAULT (datetime('now')),
+                    UNIQUE(doc_id)
+                );
+                CREATE INDEX IF NOT EXISTS idx_parameter_representations_doc_id
+                    ON parameter_representations(doc_id);
+                """
+            )
+        except sqlite3.OperationalError:
+            pass
         self._conn.commit()
 
     @property

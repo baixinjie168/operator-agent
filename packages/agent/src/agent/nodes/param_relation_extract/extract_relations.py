@@ -46,9 +46,7 @@ async def extract_ws_node(state: RelationExtractState) -> dict[str, Any]:
 
     content = state.get("ws_section_content", "")
     param_names = state.get("param_names", [])
-    # Prefer shape_dim_mappings (new), fall back to implicit_params (legacy)
-    mappings = state.get("shape_dim_mappings", [])
-    implicit_params = mappings or state.get("implicit_params", [])
+    implicit_params = state.get("implicit_params", [])
     logger.info(
         "ExtractWS-Agent: extracting from %d chars, %d params",
         len(content),
@@ -83,9 +81,7 @@ async def extract_exe_node(state: RelationExtractState) -> dict[str, Any]:
 
     content = state.get("exe_section_content", "")
     param_names = state.get("param_names", [])
-    # Prefer shape_dim_mappings (new), fall back to implicit_params (legacy)
-    mappings = state.get("shape_dim_mappings", [])
-    implicit_params = mappings or state.get("implicit_params", [])
+    implicit_params = state.get("implicit_params", [])
     logger.info(
         "ExtractExe-Agent: extracting from %d chars, %d params",
         len(content),

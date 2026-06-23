@@ -15,6 +15,12 @@ RELATION_OBJECT_BUILD_PROMPT = """\
 - type_equality：数据类型必须一致
 - format_equality：数据格式必须一致
 
+注意：`parameter_representation` 类型由确定性节点生成（用于声明
+命名变量与算子参数 shape 维度的对应关系，如
+`BS.range_value == x1.shape[0]`），**LLM 不应产出此类型**。若要
+表达多参数之间的派生约束（例如 output.shape[0]*rankSize == x1.shape[0]），
+请使用 shape_value_dependency。
+
 ## expr 生成规则
 1. 输出合法 Python 布尔表达式，返回值为 bool
 2. 形状引用：param.shape[dim_index]，如 x.shape[0]
@@ -120,7 +126,7 @@ RELATION_OBJECT_BUILD_PROMPT = """\
 ## 参数 shape 信息
 {param_shapes_text}
 
-{shape_dim_mappings_text}
+{implicit_params_text}
 ## 输入
 relation_type（粗粒度提示）：{relation_type}
 params：{params}

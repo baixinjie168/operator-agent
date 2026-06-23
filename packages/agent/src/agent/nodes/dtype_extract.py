@@ -1,6 +1,7 @@
 """DtypeExtract node: extract data types from parameter descriptions via LLM."""
 
 import asyncio
+import json
 import logging
 import re
 from typing import Any
@@ -21,13 +22,29 @@ _mcp_client = MCPClient()
 def _is_dtype_valid(dtype_desc: str) -> bool:
     """Check whether an existing dtype_desc value is reasonable.
 
-    Returns False for values that should trigger re-extraction:
-    - Empty / whitespace-only strings
-    - Dash variants
-    - Cross-references to other params
-    - Tokens not in the approved dtype whitelist
+    Handles JSON format: {"*": "FLOAT16,BFLOAT16"} or {"platform": "FLOAT16"}.
+    If any platform value is valid, returns True.
     """
     s = dtype_desc.strip()
+    if not s:
+        return False
+    # Try parsing as JSON
+    try:
+        parsed = json.loads(s)
+        if isinstance(parsed, dict) and parsed:
+            return any(
+                _is_plain_dtype_valid(v)
+                for v in parsed.values()
+                if isinstance(v, str)
+            )
+    except (json.JSONDecodeError, TypeError):
+        pass
+    return _is_plain_dtype_valid(s)
+
+
+def _is_plain_dtype_valid(s: str) -> bool:
+    """Check a plain text dtype value (non-JSON)."""
+    s = s.strip()
     if not s:
         return False
     if is_dash(s):
@@ -102,6 +119,11 @@ async def dtype_extract_node(state: PipelineState) -> dict[str, Any]:
         results = await asyncio.gather(*[_extract_one(p) for p in described])
 
         dtype_updates = [r for r in results if r is not None and r.get("dtype")]
+        # Wrap plain text dtype values as JSON: {"*": value}
+        for u in dtype_updates:
+            val = u["dtype"]
+            if isinstance(val, str) and not val.startswith("{"):
+                u["dtype"] = json.dumps({"*": val}, ensure_ascii=False)
         if dtype_updates:
             result = await _mcp_client.update_param_dtype(doc_id, dtype_updates)
             logger.info(

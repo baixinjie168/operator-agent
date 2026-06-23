@@ -1,7 +1,9 @@
-"""ShapeDimMappingExtract node: build shape dimension mappings from document text.
+"""ImplicitParamExtract node: extract non-operator (implicit) parameters from document text.
 
 Extracts named dimension variables (e.g. BS, H, N, b, m, k, n1) from
-shape tuples in parameter tables and maps them to (tensor_param, dim_index).
+shape tuples in parameter tables.  These named variables are treated as
+implicit (non-operator) parameters: they appear in constraint expressions
+by name, not substituted with tensor.shape[i].
 
 Supports:
 - Slot-aware parsing for compound expressions (e.g. H*rankSize, BS/rankSize)
@@ -15,15 +17,8 @@ For example, for aclnnAlltoAllMatmul:
   N  -> x2.shape[1] | biasOptional.shape[0]
   rankSize -> external constant (platform-dependent values)
 
-For aclnnBatchMatMulWeightNz:
-  b  -> self.shape[0] | mat2.shape[0] | out.shape[0]
-  m  -> self.shape[1] | out.shape[1]
-  k  -> self.shape[2]
-  n1 -> mat2.shape[1]
-  k0 -> 16 (constant, mat2.shape[3])
-
-The mapping is persisted to DB (shape_dim_mappings table) for traceability,
-and passed to downstream nodes via state["shape_dim_mappings"].
+The result is persisted to DB (implicit_params table) for traceability,
+and passed to downstream nodes via state["implicit_params"].
 
 Zero LLM calls - purely deterministic regex-based extraction.
 
@@ -40,7 +35,7 @@ from typing import Any
 
 from agent.mcp_client import MCPClient
 from agent.nodes.param_relation_extract.prompts import (
-    format_shape_dim_mappings_context,
+    format_implicit_params_context,
 )
 from agent.nodes.param_relation_extract.state import RelationExtractState
 
@@ -108,6 +103,22 @@ _EXCLUDE_WORDS = frozenset({
     "Or", "And", "If", "Else", "When",
     "The", "For", "Not", "With", "From",
 })
+
+# ---------------------------------------------------------------------------
+# Quantization type (default implicit parameter)
+# ---------------------------------------------------------------------------
+
+# The fixed universe of quantization granularity modes.  The parameter's
+# allowed_range_value is the subset of these that actually appear in the
+# operator's section text (preserving this canonical order, de-duplicated).
+_QUANTIZATION_CANDIDATES = (
+    "per-channel",
+    "per-group",
+    "per-tensor",
+    "per-token",
+)
+
+_QUANTIZATION_PARAM_NAME = "quantization_type"
 
 
 def _is_markdown_url(content: str) -> bool:
@@ -339,7 +350,7 @@ def _detect_external_constants(
                 "referenced_in": refs,
             })
             logger.debug(
-                "ShapeDimMapping: detected external constant '%s' "
+                "ImplicitParamExtract: detected external constant '%s' "
                 "(referenced_in=%s, confirmed_by_text=%s)",
                 var, refs, is_confirmed,
             )
@@ -426,7 +437,7 @@ def _detect_constants(
                     m["is_constant"] = True
                     m["constant_value"] = const_val
             logger.debug(
-                "ShapeDimMapping: detected constant %s = %d", var, const_val,
+                "ImplicitParamExtract: detected constant %s = %d", var, const_val,
             )
 
 
@@ -435,7 +446,7 @@ def _detect_constants(
 # ---------------------------------------------------------------------------
 
 
-def _build_shape_dim_mappings(
+def _build_implicit_params(
     sections_text: str,
     signatures: list[dict],
     tensor_params: set[str] | None = None,
@@ -477,7 +488,7 @@ def _build_shape_dim_mappings(
             nearby_param, _tensor_params,
         ):
             logger.debug(
-                "ShapeDimMapping: skipping shape tuple in non-tensor "
+                "ImplicitParamExtract: skipping shape tuple in non-tensor "
                 "param row '%s': (%s)",
                 nearby_param, tuple_content,
             )
@@ -510,11 +521,82 @@ def _build_shape_dim_mappings(
     return mappings
 
 # ---------------------------------------------------------------------------
+# Phase 5: Quantization type extraction (default implicit parameter)
+# ---------------------------------------------------------------------------
+
+
+def _extract_quantization_modes(
+    sections_text: str,
+) -> tuple[list[str], str]:
+    """Scan section text for quantization granularity modes.
+
+    Searches for each candidate in :data:`_QUANTIZATION_CANDIDATES` using
+    word-boundary matching (case-sensitive) and returns those that appear,
+    preserving the canonical candidate order and de-duplicating.
+
+    Returns ``(matched_modes, source_citation)`` where *source_citation* is
+    a short snippet around the first match (empty when nothing matches).
+    """
+    matched: list[str] = []
+    first_citation = ""
+    for candidate in _QUANTIZATION_CANDIDATES:
+        # Use ASCII-letter lookbehind/lookahead instead of \b: Python's \b
+        # treats Chinese characters as word chars (Unicode \w), which would
+        # prevent matching candidates adjacent to Chinese text (e.g.
+        # "支持per-channel" or "per-channel下").  The lookbehind still rejects
+        # false positives like "super-channel" → "per-channel".
+        pattern = re.compile(
+            r"(?<![A-Za-z])" + re.escape(candidate) + r"(?![A-Za-z])"
+        )
+        m = pattern.search(sections_text)
+        if m:
+            matched.append(candidate)
+            if not first_citation:
+                start = max(0, m.start() - 20)
+                end = min(len(sections_text), m.end() + 20)
+                first_citation = sections_text[start:end].strip()
+    return matched, first_citation
+
+
+def _build_quantization_type_mapping(
+    sections_text: str,
+) -> dict[str, Any]:
+    """Build the default ``quantization_type`` implicit parameter mapping.
+
+    Always returns a mapping (even when no modes are found — in which case
+    ``allowed_range_value`` is an empty list).  The parameter is a
+    ``char``-typed enum constrained to the quantization granularity modes
+    mentioned in the document.
+    """
+    modes, citation = _extract_quantization_modes(sections_text)
+    return {
+        "var_name": _QUANTIZATION_PARAM_NAME,
+        "is_quantization_type": True,
+        "param_type": "char",
+        "allowed_range_value": modes,
+        "allowed_range_type": "enum",
+        "source_citation": citation,
+        # Compatibility fields (kept consistent with shape-dim mappings so
+        # that downstream consumers can treat it uniformly).
+        "tensor_param": None,
+        "dim_index": None,
+        "shape_text": None,
+        "slot_index": None,
+        "slot_expr": None,
+        "is_compound": False,
+        "compound_expr": None,
+        "is_constant": False,
+        "constant_value": None,
+        "is_external_constant": False,
+        "referenced_in": [],
+    }
+
+# ---------------------------------------------------------------------------
 # Node entry point
 # ---------------------------------------------------------------------------
 
 
-async def shape_dim_mapping_extract_node(
+async def implicit_param_extract_node(
     state: RelationExtractState,
 ) -> dict[str, Any]:
     """Build shape dimension mappings and persist to DB for traceability.
@@ -535,12 +617,12 @@ async def shape_dim_mapping_extract_node(
     doc_id = state.get("doc_id", 0)
     operator_name = state.get("operator_name", "")
 
-    logger.info("ShapeDimMapping: doc_id=%s for %s", doc_id, operator_name)
+    logger.info("ImplicitParamExtract: doc_id=%s for %s", doc_id, operator_name)
 
     if not doc_id:
-        logger.warning("ShapeDimMapping: no doc_id, skipping")
+        logger.warning("ImplicitParamExtract: no doc_id, skipping")
         return {
-            "shape_dim_mappings": [],
+            "implicit_params": [],
             "platform_constants": [],
             "error": None,
         }
@@ -553,10 +635,10 @@ async def shape_dim_mapping_extract_node(
 
         if not sections_text.strip():
             logger.info(
-                "ShapeDimMapping: no section content for doc_id=%s", doc_id
+                "ImplicitParamExtract: no section content for doc_id=%s", doc_id
             )
             return {
-                "shape_dim_mappings": [],
+                "implicit_params": [],
                 "platform_constants": [],
                 "error": None,
             }
@@ -568,25 +650,20 @@ async def shape_dim_mapping_extract_node(
         # Phase 0: Identify tensor parameters
         tensor_params = _identify_tensor_params(sections_text, sig_params)
         logger.debug(
-            "ShapeDimMapping: identified %d tensor params: %s",
+            "ImplicitParamExtract: identified %d tensor params: %s",
             len(tensor_params), sorted(tensor_params),
         )
 
         # Phase 1+2: Build mappings with slot-aware parsing + tensor filtering
-        mappings = _build_shape_dim_mappings(
+        mappings = _build_implicit_params(
             sections_text, sigs, tensor_params,
         )
 
-        if not mappings:
-            logger.info(
-                "ShapeDimMapping: no dimension mappings found for %s",
-                operator_name,
-            )
-            return {
-                "shape_dim_mappings": [],
-                "platform_constants": [],
-                "error": None,
-            }
+        # Phase 5: Always inject the default quantization_type implicit param.
+        # It is a char-typed enum whose allowed_range_value is the subset of
+        # _QUANTIZATION_CANDIDATES that appear in the document (possibly empty).
+        quant_mapping = _build_quantization_type_mapping(sections_text)
+        mappings.append(quant_mapping)
 
         # Phase 3: Detect external constants
         ext_constants = _detect_external_constants(mappings, sections_text)
@@ -611,11 +688,11 @@ async def shape_dim_mapping_extract_node(
                     "platform_values": pv,
                 })
 
-        # Persist shape_dim_mappings to DB
-        rendered = format_shape_dim_mappings_context(
+        # Persist implicit_params to DB
+        rendered = format_implicit_params_context(
             mappings, platform_constants,
         )
-        await _mcp_client.save_shape_dim_mappings(
+        await _mcp_client.save_implicit_params(
             doc_id=doc_id,
             mappings_json=json.dumps(mappings, ensure_ascii=False),
             rendered_text=rendered,
@@ -632,7 +709,7 @@ async def shape_dim_mapping_extract_node(
                 )
             except Exception:
                 logger.debug(
-                    "ShapeDimMapping: save_platform_constants not yet "
+                    "ImplicitParamExtract: save_platform_constants not yet "
                     "available, skipping DB persist",
                 )
 
@@ -640,6 +717,7 @@ async def shape_dim_mapping_extract_node(
         var_names = sorted({
             m["var_name"] for m in mappings
             if not m.get("is_external_constant")
+            and not m.get("is_quantization_type")
         })
         const_names = sorted({
             m["var_name"] for m in mappings if m.get("is_constant")
@@ -651,10 +729,11 @@ async def shape_dim_mapping_extract_node(
         compound_count = sum(
             1 for m in mappings if m.get("is_compound")
         )
+        quant_modes = quant_mapping.get("allowed_range_value", [])
         logger.info(
-            "ShapeDimMapping: built %d mappings for %s: "
+            "ImplicitParamExtract: built %d mappings for %s: "
             "vars=%s, constants=%s, external=%s, compounds=%d, "
-            "platform_constants=%d",
+            "platform_constants=%d, quantization_type=%s",
             len(mappings),
             operator_name,
             var_names,
@@ -662,11 +741,12 @@ async def shape_dim_mapping_extract_node(
             ext_const_names,
             compound_count,
             len(platform_constants),
+            quant_modes,
         )
 
         # Return via state for downstream nodes
         return {
-            "shape_dim_mappings": mappings,
+            "implicit_params": mappings,
             "platform_constants": platform_constants,
             "error": None,
         }

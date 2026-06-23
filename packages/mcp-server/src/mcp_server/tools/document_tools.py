@@ -30,6 +30,7 @@ from mcp_server.tools.parameter_tools import (  # noqa: F401
     update_param_optional,
     update_param_platform_attributes,
     update_param_shape,
+    update_param_usage_notes,
 )
 from mcp_server.tools.relation_tools import (  # noqa: F401
     query_param_relations,
@@ -58,12 +59,14 @@ from mcp_server.tools.constraint_tools import (  # noqa: F401
     query_dtype_combos_by_operator,
     query_return_codes_by_doc_id,
     query_return_codes_by_operator,
-    query_shape_dim_mappings_by_doc_id,
+    query_implicit_params_by_doc_id,
+    query_parameter_representations_by_doc_id,
     save_constraints_result,
     save_dtype_combinations,
     save_json_constraints,
     save_return_codes,
-    save_shape_dim_mappings,
+    save_implicit_params,
+    save_parameter_representations,
 )
 
 

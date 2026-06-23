@@ -152,7 +152,6 @@ async def _extract_one(
         "direction": direction,
         "is_support_discontinuous": disc_json,
         "_context": context,  # retained for validate_results
-        "platform_attributes": param.get("platform_attributes", ""),
     }
 
 
