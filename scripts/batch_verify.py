@@ -77,7 +77,7 @@ logger = logging.getLogger("batch_verify")
 # ── Output directory ────────────────────────────────────────────────────────
 
 _OUTPUT_DIR = _PROJECT_ROOT / "batch_results"
-_CASES_DIR = _PROJECT_ROOT / "cases"
+_CASES_DIR = _PROJECT_ROOT / "batch_cases"
 
 
 # ── Subgraph builders ───────────────────────────────────────────────────────

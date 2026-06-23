@@ -366,9 +366,30 @@ async def _extract_with_retry(
     """Phase 2a: Extract with enhanced retry (max 2 attempts).
 
     On validation failure, inject relevant Few-shot example before retrying.
+
+    Returns a dict that also tracks per-phase validation outcomes in
+    `_validation_phases` so the frontend can show the AST syntax check,
+    parameter reference check, and (downstream) semantic check results:
+
+    - `_validation_phases.ast_syntax`:
+        {status: "passed"} when ast.parse() succeeds,
+        {status: "failed", error: "..."} when SyntaxError,
+        {status: "skipped"} when expr is empty.
+    - `_validation_phases.param_refs`:
+        {status: "passed"} when all Name/Attribute references are valid,
+        {status: "failed", error: "..."} when a reference is invalid,
+        {status: "skipped"} when ast_syntax failed or expr is empty.
     """
     last_error = ""
     last_expr = ""
+
+    # 默认 phase 结果：空表达式 → 全部跳过
+    def _make_phases(ast_status="skipped", ast_err="",
+                      ref_status="skipped", ref_err=""):
+        return {
+            "ast_syntax": {"status": ast_status, "error": ast_err},
+            "param_refs": {"status": ref_status, "error": ref_err},
+        }
 
     for attempt in range(settings.expr_max_retries + 1):
         async with sem:
@@ -394,39 +415,79 @@ async def _extract_with_retry(
                 expr = result.get("expr", "")
                 params = rel.get("params", [])
 
-                # Phase 0 validation
-                is_valid, error = _validate_expr(expr, params)
-                if is_valid:
+                # Phase 0 校验：分两步执行，并分别记录 phase 结果
+                if not expr:
+                    # 空表达式：所有 phase 标为 skipped
+                    result["_validation_phases"] = _make_phases()
                     return result
 
-                last_error = error
-                last_expr = expr
-
-                if attempt < settings.expr_max_retries:
+                # Phase 0a: AST 语法校验
+                ast_ok, ast_err = _validate_expr_syntax(expr)
+                if not ast_ok:
                     logger.warning(
-                        "BuildParamRelations: expr validation failed (attempt %d/%d) "
-                        "for relation id=%s: %s — retrying with example",
-                        attempt + 1, settings.expr_max_retries + 1, rel.get("id", "?"), error,
+                        "BuildParamRelations: AST 语法校验失败 (attempt %d/%d) "
+                        "for relation id=%s: %s",
+                        attempt + 1, settings.expr_max_retries + 1, rel.get("id", "?"), ast_err,
                     )
-                else:
-                    logger.error(
-                        "BuildParamRelations: expr failed after %d attempts "
-                        "for relation id=%s: %s — storing empty expr",
-                        settings.expr_max_retries + 1, rel.get("id", "?"), error,
+                    last_error = ast_err
+                    last_expr = expr
+                    if attempt < settings.expr_max_retries:
+                        continue
+                    # 重试耗尽，记录失败并返回
+                    result["_validation_phases"] = _make_phases(
+                        ast_status="failed", ast_err=ast_err,
                     )
                     return {
                         "expr_type": result.get("expr_type", ""),
                         "expr": "",
-                        "_validation_error": error,
+                        "_validation_error": ast_err,
+                        "_validation_phases": result["_validation_phases"],
                     }
+
+                # Phase 0b: 参数引用校验
+                ref_ok, ref_err = _validate_expr_refs(expr, params)
+                if not ref_ok:
+                    logger.warning(
+                        "BuildParamRelations: 参数引用校验失败 (attempt %d/%d) "
+                        "for relation id=%s: %s",
+                        attempt + 1, settings.expr_max_retries + 1, rel.get("id", "?"), ref_err,
+                    )
+                    last_error = ref_err
+                    last_expr = expr
+                    if attempt < settings.expr_max_retries:
+                        continue
+                    # 重试耗尽，记录失败并返回
+                    result["_validation_phases"] = _make_phases(
+                        ast_status="passed",
+                        ref_status="failed", ref_err=ref_err,
+                    )
+                    return {
+                        "expr_type": result.get("expr_type", ""),
+                        "expr": "",
+                        "_validation_error": ref_err,
+                        "_validation_phases": result["_validation_phases"],
+                    }
+
+                # 两步都通过
+                result["_validation_phases"] = _make_phases(
+                    ast_status="passed",
+                    ref_status="passed",
+                )
+                return result
+
             except Exception:
                 logger.warning(
                     "BuildParamRelations: LLM failed for relation id=%s",
                     rel.get("id", "?"),
                 )
-                return {"expr_type": "", "expr": ""}
+                return {
+                    "expr_type": "",
+                    "expr": "",
+                    "_validation_phases": _make_phases(),
+                }
 
-    return {"expr_type": "", "expr": ""}
+    # 理论上不会走到这里，兜底返回
+    return {"expr_type": "", "expr": "", "_validation_phases": _make_phases()}
 
 
 # ---------------------------------------------------------------------------
@@ -506,11 +567,22 @@ async def _verify_and_fix(
     """Phase 2b: Verify and fix expression with loop-back validation.
 
     If verification LLM returns corrected_expr, it must pass Phase 0 again.
+
+    The returned dict always carries `_validation_phases.semantic` with:
+    - {status: "passed", reason: "..."} when the LLM confirmed correctness
+    - {status: "corrected", reason: "..."} when an expr was corrected and
+      the corrected version passed Phase 0 loop-back
+    - {status: "failed", reason: "..."} when verification found an issue
+      but the correction was missing or invalid (original kept as-is)
+    - {status: "skipped"} when the LLM call itself errored out
     """
     rel_id = rel.get("id", "?")
     logger.error("[Phase2b][VerifyAndFix] ===== START relation_id=%s =====", rel_id)
     logger.error("  original_expr=%s", expr_result.get('expr', ''))
     logger.error("  original_expr_type=%s", expr_result.get('expr_type', ''))
+
+    # 透传上游 phase 结果
+    prev_phases = dict(expr_result.get("_validation_phases") or {})
 
     try:
         verify_result = await _call_verify_llm(llm, rel, expr_result, param_shapes_text, sem)
@@ -521,6 +593,11 @@ async def _verify_and_fix(
         )
         logger.error("[Phase2b][VerifyAndFix] relation_id=%s LLM_CALL_FAILED, accepting original", rel_id)
         logger.error("[Phase2b][VerifyAndFix] ===== END relation_id=%s =====", rel_id)
+        prev_phases["semantic"] = {
+            "status": "skipped",
+            "reason": "语义校验 LLM 调用失败，沿用原表达式",
+        }
+        expr_result["_validation_phases"] = prev_phases
         return expr_result  # Accept original on verification failure
 
     is_correct = verify_result.get("is_correct", True)
@@ -535,6 +612,8 @@ async def _verify_and_fix(
     if is_correct:
         logger.error("[Phase2b][VerifyAndFix] relation_id=%s → ACCEPT ORIGINAL (semantically correct)", rel_id)
         logger.error("[Phase2b][VerifyAndFix] ===== END relation_id=%s =====", rel_id)
+        prev_phases["semantic"] = {"status": "passed", "reason": reason or "语义校验通过"}
+        expr_result["_validation_phases"] = prev_phases
         return expr_result
 
     # Verification failed, use corrected_expr
@@ -546,6 +625,11 @@ async def _verify_and_fix(
         )
         logger.error("[Phase2b][VerifyAndFix] relation_id=%s → ACCEPT ORIGINAL (no corrected_expr provided)", rel_id)
         logger.error("[Phase2b][VerifyAndFix] ===== END relation_id=%s =====", rel_id)
+        prev_phases["semantic"] = {
+            "status": "failed",
+            "reason": reason or "语义校验未通过，且未提供修正表达式",
+        }
+        expr_result["_validation_phases"] = prev_phases
         return expr_result  # Accept original if no correction
 
     # Critical: corrected_expr must pass Phase 0 validation
@@ -559,6 +643,11 @@ async def _verify_and_fix(
         )
         logger.error("[Phase2b][VerifyAndFix] relation_id=%s → ACCEPT ORIGINAL (corrected_expr failed Phase 0: %s)", rel_id, error)
         logger.error("[Phase2b][VerifyAndFix] ===== END relation_id=%s =====", rel_id)
+        prev_phases["semantic"] = {
+            "status": "failed",
+            "reason": f"{reason or '语义校验未通过'}；修正表达式未通过 AST 语法/参数引用校验：{error}",
+        }
+        expr_result["_validation_phases"] = prev_phases
         return expr_result  # Accept original if correction is invalid
 
     logger.info(
@@ -571,12 +660,15 @@ async def _verify_and_fix(
     logger.error("  correction_reason=%s", reason)
     logger.error("  corrected_expr passed Phase 0 validation")
     logger.error("[Phase2b][VerifyAndFix] ===== END relation_id=%s =====", rel_id)
-    return {
+    prev_phases["semantic"] = {"status": "corrected", "reason": reason or "语义校验后修正"}
+    new_result = {
         "expr_type": expr_result.get("expr_type", ""),
         "expr": corrected,
         "_corrected": True,
         "_correction_reason": verify_result.get("reason", ""),
+        "_validation_phases": prev_phases,
     }
+    return new_result
 
 
 async def _batch_extract_relation_objects(
@@ -619,13 +711,16 @@ async def _batch_extract_relation_objects(
         # Check if semantic verification is needed (Phase 2b)
         confidence = result.get("confidence", "high")
         rel_id = rel.get("id", "?")
-        
+
+        # 初始化 semantic phase 默认状态
+        prev_phases = dict(result.get("_validation_phases") or {})
+
         # Phase 2b: Semantic verification
         # Trigger conditions:
         # 1. confidence == "low" and has expr (original logic)
         # 2. settings.force_phase2b == True (for analysis/debugging)
         force_phase2b = getattr(settings, "force_phase2b", False)
-        
+
         if confidence == "low" and result.get("expr"):
             # Force semantic verification for low confidence
             logger.error("[Phase2b] relation_id=%s — confidence=low, triggering semantic verification", rel_id)
@@ -637,6 +732,11 @@ async def _batch_extract_relation_objects(
         else:
             # Phase2b skipped
             logger.error("[Phase2b] relation_id=%s — SKIPPED (confidence=%s, force_phase2b=%s)", rel_id, confidence, force_phase2b)
+            prev_phases["semantic"] = {
+                "status": "skipped",
+                "reason": f"confidence={confidence} 且未强制开启，跳过语义校验",
+            }
+            result["_validation_phases"] = prev_phases
         # For medium confidence, verification is optional (disabled by default)
         # Uncomment below to enable:
         # elif confidence == "medium" and result.get("expr"):
@@ -715,10 +815,40 @@ async def build_param_relations_node(state: PipelineState) -> dict[str, Any]:
         corrected_count = sum(1 for r in llm_results if r.get("_corrected"))
         error_count = sum(1 for r in llm_results if r.get("_validation_error"))
 
+        # 三段式校验的分段计数（用于进度事件 + 前端展示）
+        ast_failed = sum(
+            1 for r in llm_results
+            if (r.get("_validation_phases") or {}).get("ast_syntax", {}).get("status") == "failed"
+        )
+        ref_failed = sum(
+            1 for r in llm_results
+            if (r.get("_validation_phases") or {}).get("param_refs", {}).get("status") == "failed"
+        )
+        semantic_passed = sum(
+            1 for r in llm_results
+            if (r.get("_validation_phases") or {}).get("semantic", {}).get("status") == "passed"
+        )
+        semantic_corrected = sum(
+            1 for r in llm_results
+            if (r.get("_validation_phases") or {}).get("semantic", {}).get("status") == "corrected"
+        )
+        semantic_failed = sum(
+            1 for r in llm_results
+            if (r.get("_validation_phases") or {}).get("semantic", {}).get("status") == "failed"
+        )
+        semantic_skipped = sum(
+            1 for r in llm_results
+            if (r.get("_validation_phases") or {}).get("semantic", {}).get("status") == "skipped"
+        )
+
         # 原始 dump: 把每条 LLM 提取结果完整输出（不做拼装）
         print(f"[Backend][BuildParamRelations] ========== LLM EXTRACTION RESULTS ==========")
         print(f"[Backend][BuildParamRelations] total_relations={len(relations)} valid_expr={valid_count} corrected={corrected_count} validation_errors={error_count}")
+        print(f"[Backend][BuildParamRelations] phase_ast_failed={ast_failed} phase_ref_failed={ref_failed} "
+              f"phase_semantic_passed={semantic_passed} phase_semantic_corrected={semantic_corrected} "
+              f"phase_semantic_failed={semantic_failed} phase_semantic_skipped={semantic_skipped}")
         for _i, (_rel, _r) in enumerate(zip(relations, llm_results)):
+            _phases = _r.get("_validation_phases") or {}
             print(f"[Backend][BuildParamRelations] llm_result[{_i}]:")
             print(f"  relation_id={_rel.get('id', '?')}")
             print(f"  relation_type={_rel.get('relation_type', '')}")
@@ -732,6 +862,9 @@ async def build_param_relations_node(state: PipelineState) -> dict[str, Any]:
             print(f"  → _validation_error={_r.get('_validation_error', '')}")
             print(f"  → _corrected={_r.get('_corrected', False)}")
             print(f"  → _correction_reason={_r.get('_correction_reason', '')}")
+            print(f"  → phase_ast_syntax={_phases.get('ast_syntax', {})}")
+            print(f"  → phase_param_refs={_phases.get('param_refs', {})}")
+            print(f"  → phase_semantic={_phases.get('semantic', {})}")
         print(f"[Backend][BuildParamRelations] ========== END LLM RESULTS ==========")
 
         _emit(EventType.NODE_PROGRESS, {
@@ -742,6 +875,12 @@ async def build_param_relations_node(state: PipelineState) -> dict[str, Any]:
             "valid_count": valid_count,
             "corrected_count": corrected_count,
             "error_count": error_count,
+            "ast_failed_count": ast_failed,
+            "ref_failed_count": ref_failed,
+            "semantic_passed_count": semantic_passed,
+            "semantic_corrected_count": semantic_corrected,
+            "semantic_failed_count": semantic_failed,
+            "semantic_skipped_count": semantic_skipped,
         })
 
         # Step 4: Assemble relation_object and persist
@@ -822,6 +961,31 @@ async def build_param_relations_node(state: PipelineState) -> dict[str, Any]:
 
         validation_results = []
         for rel, llm_out in zip(relations, llm_results):
+            phases = llm_out.get("_validation_phases") or {}
+            # 兼容旧数据：当 _validation_phases 不存在时（旧版本或空 expr 路径），
+            # 退化为单条 validation_error；前端按需展示。
+            ast = phases.get("ast_syntax") or {}
+            ref = phases.get("param_refs") or {}
+            sem = phases.get("semantic") or {}
+
+            # syntax_valid 重写：只看 phase 是否有真实失败
+            #   - 任一 phase 是 "failed" → False
+            #   - 全部 phase 都是 "skipped"（如 expr 为空，无可校验内容）→ True（不当作错误）
+            #   - 其它情况（含 passed / corrected）→ True
+            any_failed = (
+                ast.get("status") == "failed"
+                or ref.get("status") == "failed"
+                or sem.get("status") == "failed"
+            )
+            syntax_valid = not any_failed
+
+            # has_validation：是否真的有 phase 实际跑过（非全 skipped）
+            # 前端据此区分 "通过" 与 "跳过"
+            has_validation = any(
+                p.get("status") in ("passed", "failed", "corrected", "recovered")
+                for p in (ast, ref, sem)
+            )
+
             validation_results.append({
                 "relation_id": rel.get("id"),
                 "relation_type": rel.get("relation_type", ""),
@@ -829,10 +993,26 @@ async def build_param_relations_node(state: PipelineState) -> dict[str, Any]:
                 "expr_type": llm_out.get("expr_type", ""),
                 "expr": llm_out.get("expr", ""),
                 "confidence": llm_out.get("confidence", ""),
-                "syntax_valid": not bool(llm_out.get("_validation_error")) and bool(llm_out.get("expr")),
+                # 兼容字段：syntax_valid 仅在 phase 真失败时为 False
+                "syntax_valid": syntax_valid,
                 "validation_error": llm_out.get("_validation_error", ""),
                 "corrected": bool(llm_out.get("_corrected")),
                 "correction_reason": llm_out.get("_correction_reason", ""),
+                # 前端用 has_validation 区分"通过"和"跳过"
+                "has_validation": has_validation,
+                # 三段式校验结果（Phase 0a / 0b / 2b），供前端按段渲染
+                "phase_ast_syntax": {
+                    "status": ast.get("status", "skipped"),
+                    "error": ast.get("error", ""),
+                },
+                "phase_param_refs": {
+                    "status": ref.get("status", "skipped"),
+                    "error": ref.get("error", ""),
+                },
+                "phase_semantic": {
+                    "status": sem.get("status", "skipped"),
+                    "reason": sem.get("reason", ""),
+                },
             })
 
         return {

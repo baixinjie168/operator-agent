@@ -11,6 +11,9 @@ __pycache__/
 .claude
 cases
 executors
+exported_constraints
+operators
+batch_results
 
 # Data files
 /uploads/

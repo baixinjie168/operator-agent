@@ -121,7 +121,7 @@ async def build_param_constraint_node(state: PipelineState) -> dict[str, Any]:
         ]
 
         # Step 3: LLM batch parse shape → dimensions
-        shape_map = await _batch_parse_dimensions(params)
+        shape_map, dim_phase_map = await _batch_parse_dimensions(params)
 
         print(f"[Backend][BuildParamConstraint] ========== DIMENSIONS PARSING RESULTS ==========")
         print(f"[Backend][BuildParamConstraint][DIMENSIONS] total_parsed={len(shape_map)}")
@@ -141,16 +141,38 @@ async def build_param_constraint_node(state: PipelineState) -> dict[str, Any]:
             print(f"  → validation_error={_val_err}")
         print(f"[Backend][BuildParamConstraint] ========== END DIMENSIONS ==========")
 
+        # 三段式校验的分段计数（dimensions）
+        dim_struct_passed = sum(
+            1 for v in dim_phase_map.values()
+            if v.get("phase_dim_structure", {}).get("status") == "passed"
+        )
+        dim_struct_failed = sum(
+            1 for v in dim_phase_map.values()
+            if v.get("phase_dim_structure", {}).get("status") == "failed"
+        )
+        dim_align_passed = sum(
+            1 for v in dim_phase_map.values()
+            if v.get("phase_dim_alignment", {}).get("status") == "passed"
+        )
+        dim_align_failed = sum(
+            1 for v in dim_phase_map.values()
+            if v.get("phase_dim_alignment", {}).get("status") == "failed"
+        )
+
         _emit(EventType.NODE_PROGRESS, {
             "message": f"维度解析完成: {len(shape_map)} 个参数已提取 dimensions",
             "phase": "dimensions_done",
             "dimensions_count": len(shape_map),
+            "dim_structure_passed_count": dim_struct_passed,
+            "dim_structure_failed_count": dim_struct_failed,
+            "dim_alignment_passed_count": dim_align_passed,
+            "dim_alignment_failed_count": dim_align_failed,
         })
 
         # Step 4: LLM batch extract allowed_range_value for all params
         constraints_section = await _mcp_client.get_section(doc_id, "constraints")
         constraints_text = (constraints_section or {}).get("content", "") or ""
-        ar_map = await _batch_extract_allowed_range(
+        ar_map, ar_phase_map = await _batch_extract_allowed_range(
             params, constraints_text
         )
 
@@ -172,10 +194,22 @@ async def build_param_constraint_node(state: PipelineState) -> dict[str, Any]:
             print(f"  → validation_error={_val_err}")
         print(f"[Backend][BuildParamConstraint] ========== END ALLOWED_RANGE ==========")
 
+        # 三段式校验的分段计数（allowed_range）
+        ar_struct_passed = sum(
+            1 for v in ar_phase_map.values()
+            if v.get("phase_range_structure", {}).get("status") == "passed"
+        )
+        ar_struct_failed = sum(
+            1 for v in ar_phase_map.values()
+            if v.get("phase_range_structure", {}).get("status") == "failed"
+        )
+
         _emit(EventType.NODE_PROGRESS, {
             "message": f"取值范围提取完成: {len(ar_map)} 个参数已提取 allowed_range",
             "phase": "range_done",
             "range_count": len(ar_map),
+            "range_structure_passed_count": ar_struct_passed,
+            "range_structure_failed_count": ar_struct_failed,
         })
 
         # Step 4b: Narrow bool allowed_range_value using existing constraints
@@ -208,6 +242,81 @@ async def build_param_constraint_node(state: PipelineState) -> dict[str, Any]:
                     "BuildParamConstraint: failed to narrow bool ranges from relations",
                     exc_info=True,
                 )
+
+        # 合并 dim + range 的 phase 校验结果
+        # 每个 param 一条 validation_result，含：
+        #   - phase_dim_structure / phase_dim_alignment
+        #   - phase_range_structure
+        # 旧字段：syntax_valid / validation_error 兼容旧前端
+        cst_validation_results: list[dict] = []
+        for param in params:
+            key = (param.get("function_name", ""), param.get("param_name", ""))
+            dim_phases = dim_phase_map.get(key) or {
+                "phase_dim_structure": {"status": "skipped", "error": ""},
+                "phase_dim_alignment": {"status": "skipped", "error": ""},
+            }
+            ar_phases = ar_phase_map.get(key) or {
+                "phase_range_structure": {"status": "skipped", "error": ""},
+            }
+            dim_struct = dim_phases.get("phase_dim_structure", {})
+            dim_align = dim_phases.get("phase_dim_alignment", {})
+            range_struct = ar_phases.get("phase_range_structure", {})
+
+            dims_value = shape_map.get(key, [])
+            ar_value = ar_map.get(key, [])
+
+            dim_struct_ok = dim_struct.get("status") != "failed"
+            dim_align_ok = dim_align.get("status") != "failed"
+            range_struct_ok = range_struct.get("status") != "failed"
+            syntax_valid = dim_struct_ok and dim_align_ok and range_struct_ok
+            if not syntax_valid:
+                # 取第一个失败原因作为 compat.validation_error
+                if dim_struct.get("status") == "failed":
+                    validation_error = "维度结构校验: " + dim_struct.get("error", "")
+                elif dim_align.get("status") == "failed":
+                    validation_error = "维度对齐校验: " + dim_align.get("error", "")
+                elif range_struct.get("status") == "failed":
+                    validation_error = "取值范围结构校验: " + range_struct.get("error", "")
+                else:
+                    validation_error = ""
+            else:
+                validation_error = ""
+
+            # has_validation：是否真的有 phase 实际跑过
+            # 前端据此区分"通过"和"跳过"——全部 skipped 时不算"通过"
+            has_validation = any(
+                p.get("status") in ("passed", "failed", "corrected", "recovered")
+                for p in (dim_struct, dim_align, range_struct)
+            )
+
+            cst_validation_results.append({
+                "param_id": param.get("id"),
+                "function_name": param.get("function_name", ""),
+                "param_name": param.get("param_name", ""),
+                "param_type": param.get("param_type", ""),
+                # 兼容旧字段
+                "syntax_valid": syntax_valid,
+                "validation_error": validation_error,
+                "expr": json.dumps(dims_value, ensure_ascii=False) if dims_value else "",
+                # 前端用 has_validation 区分"通过"和"跳过"
+                "has_validation": has_validation,
+                # 三段式校验结果
+                "phase_dim_structure": {
+                    "status": dim_struct.get("status", "skipped"),
+                    "error": dim_struct.get("error", ""),
+                },
+                "phase_dim_alignment": {
+                    "status": dim_align.get("status", "skipped"),
+                    "error": dim_align.get("error", ""),
+                },
+                "phase_range_structure": {
+                    "status": range_struct.get("status", "skipped"),
+                    "error": range_struct.get("error", ""),
+                },
+                # 额外信息：parsed 后的具体值（供前端展示）
+                "parsed_dimensions": json.dumps(dims_value, ensure_ascii=False, default=str),
+                "parsed_range": json.dumps(ar_value, ensure_ascii=False, default=str),
+            })
 
         # Step 5: Assemble constraint JSON for each parameter
         updates: list[dict] = []
@@ -303,7 +412,12 @@ async def build_param_constraint_node(state: PipelineState) -> dict[str, Any]:
                 print(f"  param_constraint={_u.get('param_constraint', '')}")
             print(f"[Backend][BuildParamConstraint] ========== END PARAM_CONSTRAINT ==========")
 
-        return {"error": None, "params_count": len(updates), "updated": updated_count}
+        return {
+            "error": None,
+            "params_count": len(updates),
+            "updated": updated_count,
+            "validation_results": cst_validation_results,
+        }
 
     except Exception as e:
         logger.exception("BuildParamConstraint failed for %s", operator_name)
@@ -638,7 +752,9 @@ def _validate_range_source(
     return True, ""
 
 
-async def _batch_parse_dimensions(params: list[dict]) -> dict[tuple[str, str], list[list] | list[int]]:
+async def _batch_parse_dimensions(
+    params: list[dict],
+) -> tuple[dict[tuple[str, str], list[list] | list[int]], dict[tuple[str, str], dict]]:
     """Collect all shape values and parse via LLM with deterministic preprocessing + validation.
 
     Flow:
@@ -648,7 +764,13 @@ async def _batch_parse_dimensions(params: list[dict]) -> dict[tuple[str, str], l
     4. Structure validation: validate each parsed result
 
     Returns:
-        Map of (function_name, param_name) → dimensions array.
+        (result, phase_results) tuple:
+        - result: Map of (function_name, param_name) → dimensions array.
+        - phase_results: Map of key → {
+            "phase_dim_structure": {status, error},
+            "phase_dim_alignment": {status, error},
+          }
+          where status is one of "passed" / "failed" / "skipped".
     """
     shape_entries: list[dict] = []
     for param in params:
@@ -660,8 +782,31 @@ async def _batch_parse_dimensions(params: list[dict]) -> dict[tuple[str, str], l
                 "shape": shape_raw,
             })
 
+    # 打印输入参数列表
+    logger.error("[BuildParamConstraint][DIM_INPUT] ===== 维度解析输入 =====")
+    logger.error("[BuildParamConstraint][DIM_INPUT] 总参数数=%d", len(params))
+    for p in params:
+        shape_raw = (p.get("shape", "") or "").strip()
+        param_type = p.get("param_type", "")
+        if shape_raw:
+            logger.error("[BuildParamConstraint][DIM_INPUT] %s.%s type=%s shape='%s' → 将解析",
+                         p.get("function_name", ""), p.get("param_name", ""), param_type, shape_raw)
+        else:
+            logger.error("[BuildParamConstraint][DIM_INPUT] %s.%s type=%s shape='' → 跳过(无shape字段)",
+                         p.get("function_name", ""), p.get("param_name", ""), param_type)
+    logger.error("[BuildParamConstraint][DIM_INPUT] ===== END =====")
+
+    # 初始化 phase 结果：所有 shape 项默认 structure skipped、alignment skipped
+    phase_results: dict[tuple[str, str], dict] = {}
+    for entry in shape_entries:
+        key = (entry["function_name"], entry["param_name"])
+        phase_results[key] = {
+            "phase_dim_structure": {"status": "skipped", "error": ""},
+            "phase_dim_alignment": {"status": "skipped", "error": ""},
+        }
+
     if not shape_entries:
-        return {}
+        return {}, phase_results
 
     # Phase 1: Deterministic preprocessing
     result: dict[tuple[str, str], list] = {}
@@ -672,8 +817,18 @@ async def _batch_parse_dimensions(params: list[dict]) -> dict[tuple[str, str], l
         deterministic = _try_deterministic_parse(entry["shape"])
         if deterministic is not None:
             key = (entry["function_name"], entry["param_name"])
-            is_valid, _ = _validate_dimensions_structure(deterministic)
-            result[key] = deterministic if is_valid else []
+            is_valid, val_err = _validate_dimensions_structure(deterministic)
+            if is_valid:
+                result[key] = deterministic
+                phase_results[key]["phase_dim_structure"] = {
+                    "status": "passed", "error": "",
+                }
+            else:
+                # 确定性解析命中但结构不合法：structure 失败，alignment 跳过
+                result[key] = []
+                phase_results[key]["phase_dim_structure"] = {
+                    "status": "failed", "error": val_err,
+                }
             deterministic_count += 1
         else:
             llm_needed.append(entry)
@@ -688,7 +843,7 @@ async def _batch_parse_dimensions(params: list[dict]) -> dict[tuple[str, str], l
             print(f"  deterministic: {_k[0]}.{_k[1]} → {json.dumps(_v, ensure_ascii=False, default=str)}")
 
     if not llm_needed:
-        return result
+        return result, phase_results
 
     # Phase 2: LLM batch parsing
     try:
@@ -704,7 +859,10 @@ async def _batch_parse_dimensions(params: list[dict]) -> dict[tuple[str, str], l
         for entry in llm_needed:
             key = (entry["function_name"], entry["param_name"])
             result[key] = []
-        return result
+            phase_results[key]["phase_dim_structure"] = {
+                "status": "failed", "error": "LLM 不可用，dimensions 解析失败",
+            }
+        return result, phase_results
 
     async def _parse_single(entry: dict) -> list:
         """Parse a single shape via LLM."""
@@ -714,10 +872,25 @@ async def _batch_parse_dimensions(params: list[dict]) -> dict[tuple[str, str], l
             text = response.content if hasattr(response, "content") else str(response)
             parsed = _parse_dimensions_response(text)
             if parsed and len(parsed) == 1:
-                return parsed[0]
-            return parsed if isinstance(parsed, list) and _is_rank_format(parsed) else []
+                result_val = parsed[0]
+                if not result_val:  # 空结果
+                    logger.error("[BuildParamConstraint][DIM_LLM_SINGLE] param=%s.%s shape='%s' → EMPTY (LLM返回空，可能是标量或无维度约束)",
+                                 entry['function_name'], entry['param_name'], entry['shape'])
+                else:
+                    logger.error("[BuildParamConstraint][DIM_LLM_SINGLE] param=%s.%s shape='%s' → %s",
+                                 entry['function_name'], entry['param_name'], entry['shape'], json.dumps(result_val, ensure_ascii=False, default=str))
+                return result_val
+            result_val = parsed if isinstance(parsed, list) and _is_rank_format(parsed) else []
+            if not result_val:
+                logger.error("[BuildParamConstraint][DIM_LLM_SINGLE] param=%s.%s shape='%s' → EMPTY (LLM返回格式不符或为空)",
+                             entry['function_name'], entry['param_name'], entry['shape'])
+            else:
+                logger.error("[BuildParamConstraint][DIM_LLM_SINGLE] param=%s.%s shape='%s' → %s",
+                             entry['function_name'], entry['param_name'], entry['shape'], json.dumps(result_val, ensure_ascii=False, default=str))
+            return result_val
         except Exception:
-            logger.warning("BuildParamConstraint: LLM failed for shape '%s'", entry["shape"])
+            logger.error("[BuildParamConstraint][DIM_LLM_SINGLE] param=%s.%s shape='%s' → ERROR (LLM调用失败)",
+                         entry['function_name'], entry['param_name'], entry['shape'])
             return []
 
     # Build indexed list for batch LLM call
@@ -741,15 +914,19 @@ async def _batch_parse_dimensions(params: list[dict]) -> dict[tuple[str, str], l
                 parsed = []
 
     # Phase 3: Alignment validation
-    is_aligned, error = _validate_dimensions_alignment(len(llm_needed), parsed)
+    is_aligned, align_error = _validate_dimensions_alignment(len(llm_needed), parsed)
 
-    print(f"[Backend][BuildParamConstraint][DIM_ALIGNMENT] expected={len(llm_needed)} got={len(parsed) if isinstance(parsed, list) else '?'} is_aligned={is_aligned} error={error}")
+    print(f"[Backend][BuildParamConstraint][DIM_ALIGNMENT] expected={len(llm_needed)} got={len(parsed) if isinstance(parsed, list) else '?'} is_aligned={is_aligned} error={align_error}")
 
     if not is_aligned:
         logger.warning(
             "BuildParamConstraint: dimensions alignment failed: %s — fallback to per-item",
-            error,
+            align_error,
         )
+        # alignment 校验暂时未通过，但下面会通过 per-item LLM 恢复
+        # 不在这里直接标 alignment=failed，等 per-item 跑完再统一判断：
+        #   - per-item 拿到合法结构 → alignment 视为"已恢复"（passed）
+        #   - per-item 仍失败 → alignment 才是"真实失败"
         # Fallback: per-item LLM calls
         sem = asyncio.Semaphore(_CONCURRENCY_LIMIT)
 
@@ -764,32 +941,94 @@ async def _batch_parse_dimensions(params: list[dict]) -> dict[tuple[str, str], l
         per_item_results = await asyncio.gather(*tasks)
         for key, value in per_item_results:
             result[key] = value
+            # 逐项 LLM 后，单独 structure 校验
+            # phase 状态判定原则：只有 _validate_dimensions_structure 真实返回 invalid 才算"failed"
+            # 空列表（如标量、shape="与输入相同"）在 _validate_dimensions_structure 里是合法的，
+            # 不应被算作结构错误
+            is_valid, val_err = _validate_dimensions_structure(value)
+            if is_valid:
+                # per-item 恢复成功 → alignment 视为已恢复（recovered）
+                # 保留 initial_error 供前端展示"检测到错误→已修复"生命周期
+                phase_results[key]["phase_dim_structure"] = {
+                    "status": "passed", "error": "",
+                }
+                phase_results[key]["phase_dim_alignment"] = {
+                    "status": "recovered",
+                    "error": "",
+                    "reason": f"批量解析未对齐（{align_error}），已通过逐项 LLM 恢复",
+                    "initial_error": f"批量解析未对齐：{align_error}",
+                    "fix_method": "逐项 LLM 重新解析",
+                }
+            else:
+                # per-item 仍失败 → alignment 才是真实失败
+                phase_results[key]["phase_dim_structure"] = {
+                    "status": "failed", "error": val_err or "维度结构校验失败",
+                }
+                phase_results[key]["phase_dim_alignment"] = {
+                    "status": "failed",
+                    "error": f"批量解析: {align_error}；逐项 LLM 也失败: {val_err}",
+                    "initial_error": f"批量解析未对齐：{align_error}",
+                }
     else:
+        # Alignment OK：所有 llm_needed 标 alignment 通过
+        for entry in llm_needed:
+            key = (entry["function_name"], entry["param_name"])
+            phase_results[key]["phase_dim_alignment"] = {
+                "status": "passed", "error": "",
+            }
         # Alignment OK: structure validation + store
         for i, entry in enumerate(llm_needed):
             key = (entry["function_name"], entry["param_name"])
             dims = parsed[i]
-            is_valid, validation_error = _validate_dimensions_structure(dims)
+            is_valid, val_err = _validate_dimensions_structure(dims)
             if is_valid:
                 result[key] = dims
+                if not dims:  # 空结果但结构合法
+                    logger.error("[BuildParamConstraint][DIM_BATCH] param=%s.%s shape='%s' → EMPTY (结构合法，可能是标量或无维度约束)",
+                                 entry["function_name"], entry["param_name"], entry["shape"])
+                else:
+                    logger.error("[BuildParamConstraint][DIM_BATCH] param=%s.%s shape='%s' → %s (PASSED)",
+                                 entry["function_name"], entry["param_name"], entry["shape"], json.dumps(dims, ensure_ascii=False, default=str))
+                phase_results[key]["phase_dim_structure"] = {
+                    "status": "passed", "error": "",
+                }
             else:
-                logger.warning(
-                    "BuildParamConstraint: dimensions structure invalid for %s.%s: %s",
-                    entry["function_name"], entry["param_name"], validation_error,
-                )
+                logger.error("[BuildParamConstraint][DIM_BATCH] param=%s.%s shape='%s' → %s (FAILED: %s)",
+                             entry["function_name"], entry["param_name"], entry["shape"], json.dumps(dims, ensure_ascii=False, default=str), val_err)
                 result[key] = []
+                phase_results[key]["phase_dim_structure"] = {
+                    "status": "failed", "error": val_err,
+                }
 
     logger.info(
         "BuildParamConstraint: parsed %d dimensions (%d deterministic, %d LLM)",
         len(result), deterministic_count, len(llm_needed),
     )
-    return result
+
+    # 打印所有参数的维度解析结果摘要
+    logger.error("[BuildParamConstraint][DIM_SUMMARY] ===== 维度解析结果汇总 =====")
+    logger.error("[BuildParamConstraint][DIM_SUMMARY] 总参数数=%d, 有shape字段=%d, 确定性解析=%d, LLM解析=%d",
+                 len(params), len(shape_entries), deterministic_count, len(llm_needed))
+    # 没有 shape 字段的参数
+    no_shape_params = [p for p in params if not (p.get("shape", "") or "").strip()]
+    if no_shape_params:
+        logger.error("[BuildParamConstraint][DIM_SUMMARY] 无shape字段(跳过): %s",
+                     ", ".join(f"{p.get('function_name','')}.{p.get('param_name','')}" for p in no_shape_params))
+    # 有结果的参数
+    for key, dims in result.items():
+        if dims:
+            logger.error("[BuildParamConstraint][DIM_SUMMARY] %s.%s → %s", key[0], key[1], json.dumps(dims, ensure_ascii=False, default=str))
+        else:
+            logger.error("[BuildParamConstraint][DIM_SUMMARY] %s.%s → [] (空)", key[0], key[1])
+    logger.error("[BuildParamConstraint][DIM_SUMMARY] ===== END =====")
+
+    return result, phase_results
 
 
 async def _batch_extract_allowed_range(
     params: list[dict],
     constraints_text: str,
-) -> dict[tuple[str, str], list]:
+) -> tuple[dict[tuple[str, str], list], dict[tuple[str, str], dict]]:
     """Batch extract allowed_range_value for all params via LLM.
 
     Flow:
@@ -800,13 +1039,27 @@ async def _batch_extract_allowed_range(
     5. Source validation: check if values appear in source text (soft check)
 
     Returns:
-        Map of (function_name, param_name) → [[min,max], ...] array.
+        (result, phase_results) tuple:
+        - result: Map of (function_name, param_name) → [[min,max], ...] array.
+        - phase_results: Map of key → {
+            "phase_range_structure": {status, error},
+            "phase_range_source": {status, error},
+          }
     """
     if not params:
-        return {}
+        return {}, {}
 
     result: dict[tuple[str, str], list] = {}
+    phase_results: dict[tuple[str, str], dict] = {}
     sem = asyncio.Semaphore(_CONCURRENCY_LIMIT)
+
+    # 初始化 phase：所有 params 默认 range_structure skipped、range_source skipped
+    for p in params:
+        key = (p["function_name"], p["param_name"])
+        phase_results[key] = {
+            "phase_range_structure": {"status": "skipped", "error": ""},
+            "phase_range_source": {"status": "skipped", "error": ""},
+        }
 
     # Phase 0: Separate bool params (short-circuit)
     bool_params: list[dict] = []
@@ -820,6 +1073,10 @@ async def _batch_extract_allowed_range(
     for p in bool_params:
         key = (p["function_name"], p["param_name"])
         result[key] = [True, False]
+        # bool 默认 [True, False] 是合法结构
+        phase_results[key]["phase_range_structure"] = {
+            "status": "passed", "error": "",
+        }
 
     # Phase 1: Deterministic preprocessing
     llm_needed: list[dict] = []
@@ -827,9 +1084,10 @@ async def _batch_extract_allowed_range(
 
     for p in remaining_params:
         llm_desc = p.get("llm_description", "") or ""
+        key = (p["function_name"], p["param_name"])
         if not llm_desc.strip() and not constraints_text.strip():
-            key = (p["function_name"], p["param_name"])
             result[key] = []
+            # 无任何上下文：range_structure 跳过
             continue
 
         deterministic = _try_deterministic_range(llm_desc)
@@ -837,10 +1095,18 @@ async def _batch_extract_allowed_range(
             deterministic = _try_deterministic_range(constraints_text)
 
         if deterministic is not None:
-            key = (p["function_name"], p["param_name"])
             param_type = p.get("param_type", "")
-            is_valid, _ = _validate_range_structure(deterministic, param_type)
-            result[key] = deterministic if is_valid else []
+            is_valid, val_err = _validate_range_structure(deterministic, param_type)
+            if is_valid:
+                result[key] = deterministic
+                phase_results[key]["phase_range_structure"] = {
+                    "status": "passed", "error": "",
+                }
+            else:
+                result[key] = []
+                phase_results[key]["phase_range_structure"] = {
+                    "status": "failed", "error": val_err,
+                }
             deterministic_count += 1
         else:
             llm_needed.append(p)
@@ -856,7 +1122,7 @@ async def _batch_extract_allowed_range(
                 print(f"  deterministic: {_k[0]}.{_k[1]} → {json.dumps(_v, ensure_ascii=False, default=str)}")
 
     if not llm_needed:
-        return result
+        return result, phase_results
 
     # Phase 2: LLM extraction with retry + validation
     try:
@@ -871,9 +1137,15 @@ async def _batch_extract_allowed_range(
         for p in llm_needed:
             key = (p["function_name"], p["param_name"])
             result[key] = []
-        return result
+            phase_results[key]["phase_range_structure"] = {
+                "status": "failed", "error": "LLM 不可用，取值范围解析失败",
+            }
+        return result, phase_results
 
-    async def _extract_one_with_retry(param: dict) -> tuple[tuple[str, str], list]:
+    async def _extract_one_with_retry(
+        param: dict,
+    ) -> tuple[tuple[str, str], list, str]:
+        """返回 (key, parsed_value, last_error)"""
         async with sem:
             key = (param["function_name"], param["param_name"])
             c_type = param.get("param_type", "")
@@ -887,8 +1159,9 @@ async def _batch_extract_allowed_range(
 
             context_text = "\n\n".join(context_parts) if context_parts else ""
             if not context_text.strip():
-                return key, []
+                return key, [], ""
 
+            last_error = ""
             # Retry loop
             for attempt in range(settings.dimensions_max_retries + 1):
                 try:
@@ -904,6 +1177,7 @@ async def _batch_extract_allowed_range(
                     # Structural validation
                     is_valid, error = _validate_range_structure(parsed, c_type)
                     if not is_valid:
+                        last_error = error
                         if attempt < settings.dimensions_max_retries:
                             logger.warning(
                                 "BuildParamConstraint: range validation failed for %s (attempt %d): %s",
@@ -915,14 +1189,15 @@ async def _batch_extract_allowed_range(
                                 "BuildParamConstraint: range validation failed after %d attempts for %s: %s",
                                 settings.dimensions_max_retries + 1, param["param_name"], error,
                             )
-                            return key, []
+                            return key, [], error
 
                     # Source validation (soft check)
                     _validate_range_source(parsed, context_text)
 
-                    return key, parsed
+                    return key, parsed, ""
 
-                except Exception:
+                except Exception as exc:
+                    last_error = f"LLM 调用失败: {exc}"
                     if attempt < settings.dimensions_max_retries:
                         logger.warning(
                             "BuildParamConstraint: LLM call failed for %s (attempt %d)",
@@ -934,14 +1209,26 @@ async def _batch_extract_allowed_range(
                             "BuildParamConstraint: LLM call failed after %d attempts for %s",
                             settings.dimensions_max_retries + 1, param["param_name"],
                         )
-                        return key, []
+                        return key, [], last_error
 
-            return key, []
+            return key, [], last_error
 
     tasks = [_extract_one_with_retry(p) for p in llm_needed]
     llm_results = await asyncio.gather(*tasks)
-    for key, value in llm_results:
+    for key, value, last_err in llm_results:
         result[key] = value
+        # phase 状态判定原则：只有后端真实检测到错误才算"failed"
+        # - last_err 非空：_validate_range_structure 实际校验失败 → 真实错误
+        # - last_err 为空 + value 为空：LLM 正常返回空（如参数未指定取值范围）→ 不算错误
+        # - value 非空：结构合法
+        if last_err:
+            phase_results[key]["phase_range_structure"] = {
+                "status": "failed", "error": last_err,
+            }
+        else:
+            phase_results[key]["phase_range_structure"] = {
+                "status": "passed", "error": "",
+            }
 
     extracted = sum(1 for v in result.values() if v)
     logger.info(
@@ -949,7 +1236,7 @@ async def _batch_extract_allowed_range(
         "(%d bool short-circuited, %d deterministic, %d LLM)",
         extracted, len(params), len(bool_params), deterministic_count, len(llm_needed),
     )
-    return result
+    return result, phase_results
 
 
 def _parse_dimensions_response(text: str) -> list[list] | list[int]:
