@@ -202,10 +202,14 @@ class TestExtractWithRetry:
         rel = {"id": 1, "params": ["x", "y"], "relation_type": "shape",
                "description": "test", "source_citation": "test"}
         sem = asyncio.Semaphore(5)
-        result = await _extract_with_retry(mock_llm, rel, "sig", sem)
+        result = await _extract_with_retry(mock_llm, rel, "sig", "shapes", sem)
 
         assert result["expr"] == "x.shape == y.shape"
         assert mock_llm.ainvoke.call_count == 1
+        # 三段式校验结果：AST + refs 通过
+        phases = result.get("_validation_phases") or {}
+        assert phases.get("ast_syntax", {}).get("status") == "passed"
+        assert phases.get("param_refs", {}).get("status") == "passed"
 
     @pytest.mark.asyncio
     async def test_retry_on_syntax_error(self):
@@ -230,7 +234,7 @@ class TestExtractWithRetry:
         rel = {"id": 2, "params": ["x", "y"], "relation_type": "shape",
                "description": "test", "source_citation": "test"}
         sem = asyncio.Semaphore(5)
-        result = await _extract_with_retry(mock_llm, rel, "sig", sem)
+        result = await _extract_with_retry(mock_llm, rel, "sig", "shapes", sem)
 
         assert result["expr"] == "x.shape == y.shape"
         assert mock_llm.ainvoke.call_count == 2
@@ -258,10 +262,14 @@ class TestExtractWithRetry:
         rel = {"id": 3, "params": ["x", "y"], "relation_type": "shape",
                "description": "test", "source_citation": "test"}
         sem = asyncio.Semaphore(5)
-        result = await _extract_with_retry(mock_llm, rel, "sig", sem)
+        result = await _extract_with_retry(mock_llm, rel, "sig", "shapes", sem)
 
         assert result["expr"] == "x.shape == y.shape"
         assert mock_llm.ainvoke.call_count == 2
+        # AST 通过、refs 通过（重试后修好）
+        phases = result.get("_validation_phases") or {}
+        assert phases.get("ast_syntax", {}).get("status") == "passed"
+        assert phases.get("param_refs", {}).get("status") == "passed"
 
     @pytest.mark.asyncio
     async def test_max_retries_exceeded(self):
@@ -280,11 +288,16 @@ class TestExtractWithRetry:
         rel = {"id": 4, "params": ["x", "y"], "relation_type": "shape",
                "description": "test", "source_citation": "test"}
         sem = asyncio.Semaphore(5)
-        result = await _extract_with_retry(mock_llm, rel, "sig", sem)
+        result = await _extract_with_retry(mock_llm, rel, "sig", "shapes", sem)
 
         assert result["expr"] == ""
         assert "_validation_error" in result
         assert mock_llm.ainvoke.call_count == 3
+        # 三段式 phase：AST 失败、refs skipped
+        phases = result.get("_validation_phases") or {}
+        assert phases.get("ast_syntax", {}).get("status") == "failed"
+        assert phases.get("ast_syntax", {}).get("error")
+        assert phases.get("param_refs", {}).get("status") == "skipped"
 
 
 # ---------------------------------------------------------------------------
@@ -311,12 +324,19 @@ class TestVerifyAndFix:
             "expr_type": "shape_equality",
             "expr": "x.shape == y.shape",
             "confidence": "low",
+            "_validation_phases": {
+                "ast_syntax": {"status": "passed", "error": ""},
+                "param_refs": {"status": "passed", "error": ""},
+            },
         }
         sem = asyncio.Semaphore(5)
-        result = await _verify_and_fix(mock_llm, rel, expr_result, sem)
+        result = await _verify_and_fix(mock_llm, rel, expr_result, "shapes", sem)
 
         assert result["expr"] == "x.shape == y.shape"
         assert "_corrected" not in result
+        # 语义校验：passed
+        phases = result.get("_validation_phases") or {}
+        assert phases.get("semantic", {}).get("status") == "passed"
 
     @pytest.mark.asyncio
     async def test_incorrect_expr_corrected(self):
@@ -337,12 +357,20 @@ class TestVerifyAndFix:
             "expr_type": "shape_dependency",
             "expr": "(x.shape[0] == y.shape[0]) if axis == 0 else False",
             "confidence": "low",
+            "_validation_phases": {
+                "ast_syntax": {"status": "passed", "error": ""},
+                "param_refs": {"status": "passed", "error": ""},
+            },
         }
         sem = asyncio.Semaphore(5)
-        result = await _verify_and_fix(mock_llm, rel, expr_result, sem)
+        result = await _verify_and_fix(mock_llm, rel, expr_result, "shapes", sem)
 
         assert result["expr"] == "(x.shape[0] == y.shape[0]) if axis == 0 else True"
         assert result["_corrected"] is True
+        # 语义校验：corrected
+        phases = result.get("_validation_phases") or {}
+        assert phases.get("semantic", {}).get("status") == "corrected"
+        assert phases.get("semantic", {}).get("reason")
 
     @pytest.mark.asyncio
     async def test_corrected_expr_invalid_fallback(self):
@@ -363,12 +391,20 @@ class TestVerifyAndFix:
             "expr_type": "shape_equality",
             "expr": "x.shape == y.shape",
             "confidence": "low",
+            "_validation_phases": {
+                "ast_syntax": {"status": "passed", "error": ""},
+                "param_refs": {"status": "passed", "error": ""},
+            },
         }
         sem = asyncio.Semaphore(5)
-        result = await _verify_and_fix(mock_llm, rel, expr_result, sem)
+        result = await _verify_and_fix(mock_llm, rel, expr_result, "shapes", sem)
 
         assert result["expr"] == "x.shape == y.shape"
         assert "_corrected" not in result
+        # 语义校验：failed（修正表达式未通过 Phase 0）
+        phases = result.get("_validation_phases") or {}
+        assert phases.get("semantic", {}).get("status") == "failed"
+        assert phases.get("semantic", {}).get("reason")
 
     @pytest.mark.asyncio
     async def test_corrected_expr_hallucinated_param_fallback(self):
@@ -389,8 +425,15 @@ class TestVerifyAndFix:
             "expr_type": "shape_equality",
             "expr": "x.shape == y.shape",
             "confidence": "low",
+            "_validation_phases": {
+                "ast_syntax": {"status": "passed", "error": ""},
+                "param_refs": {"status": "passed", "error": ""},
+            },
         }
         sem = asyncio.Semaphore(5)
-        result = await _verify_and_fix(mock_llm, rel, expr_result, sem)
+        result = await _verify_and_fix(mock_llm, rel, expr_result, "shapes", sem)
 
         assert result["expr"] == "x.shape == y.shape"
+        # 语义校验：failed（修正表达式引用了不存在的参数 z）
+        phases = result.get("_validation_phases") or {}
+        assert phases.get("semantic", {}).get("status") == "failed"

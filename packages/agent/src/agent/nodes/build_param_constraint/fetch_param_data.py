@@ -7,6 +7,8 @@ from typing import Any
 
 from agent.mcp_client import MCPClient
 from agent.nodes.build_param_constraint.state import BuildParamConstraintState
+from agent.runtime.context import get_context
+from agent.runtime.events import EventType, Span, SpanType
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +84,25 @@ async def fetch_param_data_node(state: BuildParamConstraintState) -> dict[str, A
             len(params), len(sigs), len(supported_platforms),
             len(dtype_combos), doc_id,
         )
+
+        # NODE_PROGRESS: data_ready (for the frontend constraint detail panel).
+        ctx = get_context()
+        if ctx and ctx.manager:
+            span = Span(
+                span_id="progress",
+                parent_span_id=ctx.current_span_id if ctx else None,
+                span_type=SpanType.NODE,
+                name="build_param_constraint",
+            )
+            ctx.manager.emit(EventType.NODE_PROGRESS, ctx.run_id, span, {
+                "agent_id": "constraint",
+                "node_id": "build_param_constraint",
+                "message": f"已加载 {len(params)} 个参数, {len(sigs)} 个签名, {len(dtype_combos)} 个 dtype 组合",
+                "phase": "data_ready",
+                "params_count": len(params),
+                "sigs_count": len(sigs),
+                "dtype_combos_count": len(dtype_combos),
+            })
 
         return {
             "params": params,

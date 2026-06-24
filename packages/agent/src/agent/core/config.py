@@ -56,6 +56,10 @@ class Settings(BaseSettings):
     # When False (default), only Layer 1 deterministic regex rules run.
     enable_single_param_llm: bool = False
 
+    # Force Phase 2b semantic verification for all relations (for analysis/debugging).
+    # When True, Phase2b runs regardless of LLM confidence level.
+    force_phase2b: bool = False
+
     # Master switch: which LLM provider to use
     llm_provider: LLMProvider = LLMProvider.ZAI
 

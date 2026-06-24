@@ -11,8 +11,16 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+_PROJECT_ROOT = Path(__file__).resolve().parents[4]
 DEFAULT_DB_PATH = "data/operator_agent.db"
 SCHEMA_PATH = Path(__file__).parent / "schema.sql"
+
+
+def _resolve_path(db_path: str) -> Path:
+    p = Path(db_path)
+    if not p.is_absolute():
+        p = _PROJECT_ROOT / p
+    return p
 
 
 def _load_schema() -> str:
@@ -23,15 +31,25 @@ class Database:
     """Synchronous SQLite database wrapper."""
 
     def __init__(self, db_path: str = DEFAULT_DB_PATH) -> None:
-        self._db_path = Path(db_path)
+        self._db_path = _resolve_path(db_path)
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn: sqlite3.Connection | None = None
 
     def connect(self) -> None:
-        self._conn = sqlite3.connect(str(self._db_path))
-        # WAL mode requires mmap-backed shared memory which can fail with
-        # "disk I/O error" on WSL /mnt/<drive> (DrvFs/9P) mounts.  Fall back
-        # to the rollback journal (DELETE) so the server still starts.
+        # `check_same_thread=False` is required because the MCP server's stdio
+        # event-loop and the FastAPI main app both pass this connection to
+        # threads; SQLite's thread checks otherwise raise ProgrammingError.
+        # `timeout=30.0` lets writers wait for the lock instead of failing.
+        self._conn = sqlite3.connect(
+            str(self._db_path),
+            check_same_thread=False,
+            timeout=30.0,
+        )
+        # ── WAL with WSL fallback ──────────────────────────────────────
+        # WAL mode lets one writer + many readers proceed in parallel, but
+        # it requires mmap-backed shared memory which can fail with "disk I/O
+        # error" on WSL /mnt/<drive> (DrvFs/9P) mounts.  Fall back to the
+        # rollback journal (DELETE) so the server still starts.
         try:
             self._conn.execute("PRAGMA journal_mode=WAL")
         except sqlite3.OperationalError:
@@ -44,13 +62,34 @@ class Database:
                         sidecar.unlink()
                     except OSError:
                         pass
-            self._conn = sqlite3.connect(str(self._db_path))
+            self._conn = sqlite3.connect(
+                str(self._db_path),
+                check_same_thread=False,
+                timeout=30.0,
+            )
             try:
                 self._conn.execute("PRAGMA journal_mode=WAL")
             except sqlite3.OperationalError:
                 # Last resort: disable WAL entirely
                 self._conn.execute("PRAGMA journal_mode=DELETE")
+        # ── Concurrency hardening ──────────────────────────────────────
+        # The MCP server is spawned as a fresh subprocess per tool call
+        # (see agent.mcp_client.MCPClient._call_tool), so two writers can
+        # land at the same time when the agent main process and the MCP
+        # subprocess both touch the SQLite file.  With WAL + busy_timeout
+        # the second writer waits for the first to commit instead of
+        # failing the request.
+        self._conn.execute("PRAGMA synchronous=NORMAL")  # WAL: safe with NORMAL
+        self._conn.execute("PRAGMA busy_timeout=30000")   # wait up to 30s for lock
         self._conn.execute("PRAGMA foreign_keys=ON")
+        # 预迁移：检测旧格式 test_cases 表（有 cases_json 列），删除以便重建新表
+        try:
+            cols = {r[1] for r in self._conn.execute("PRAGMA table_info(test_cases)").fetchall()}
+            if "cases_json" in cols:
+                self._conn.execute("DROP TABLE test_cases")
+                self._conn.commit()
+        except sqlite3.OperationalError:
+            pass
         self._conn.executescript(_load_schema())
         # 迁移：v2 — 新增 is_optional 列
         try:
@@ -319,11 +358,19 @@ class Database:
             )
         except sqlite3.OperationalError:
             pass
-        # 迁移：v25 — constraints_result 新增 constraints_in_param 列
+        # 迁移：v25 — constraints_result 新增 constraints_in_parameters 列
         try:
             self._conn.execute(
-                "ALTER TABLE constraints_result ADD COLUMN constraints_in_param "
+                "ALTER TABLE constraints_result ADD COLUMN constraints_in_parameters "
                 "TEXT NOT NULL DEFAULT '{}'"
+            )
+        except sqlite3.OperationalError:
+            pass
+        # 迁移：v27 — rename constraints_in_param → constraints_in_parameters
+        try:
+            self._conn.execute(
+                "ALTER TABLE constraints_result RENAME COLUMN constraints_in_param "
+                "TO constraints_in_parameters"
             )
         except sqlite3.OperationalError:
             pass
@@ -395,7 +442,26 @@ class Database:
                     )
         except sqlite3.OperationalError:
             pass
-        # 迁移：v30 — 新增 tasks + task_items 表
+        # 迁移：v30a — pipeline_runs 新增 task_type, task_name, parent_task_id 列
+        try:
+            self._conn.execute(
+                "ALTER TABLE pipeline_runs ADD COLUMN task_type TEXT"
+            )
+        except sqlite3.OperationalError:
+            pass
+        try:
+            self._conn.execute(
+                "ALTER TABLE pipeline_runs ADD COLUMN task_name TEXT"
+            )
+        except sqlite3.OperationalError:
+            pass
+        try:
+            self._conn.execute(
+                "ALTER TABLE pipeline_runs ADD COLUMN parent_task_id TEXT REFERENCES pipeline_runs(run_id)"
+            )
+        except sqlite3.OperationalError:
+            pass
+        # 迁移：v30b — 新增 tasks + task_items 表
         try:
             self._conn.executescript(
                 """
@@ -431,7 +497,54 @@ class Database:
             )
         except sqlite3.OperationalError:
             pass
-        # 迁移：v31 — 新增 llm_description 列
+        # 迁移：v31a — 重建 test_cases 表（旧表存 cases_json blob，新表逐条存储）+ 新建 exec_results 表
+        try:
+            existing_cols = {r[1] for r in self._conn.execute("PRAGMA table_info(test_cases)").fetchall()}
+            if "cases_json" in existing_cols:
+                self._conn.execute("DROP TABLE IF EXISTS test_cases")
+        except sqlite3.OperationalError:
+            pass
+        try:
+            self._conn.executescript("""
+                CREATE TABLE IF NOT EXISTS test_cases (
+                    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_id           TEXT NOT NULL REFERENCES pipeline_runs(run_id),
+                    operator_name     TEXT NOT NULL,
+                    case_index        INTEGER NOT NULL,
+                    case_name         TEXT NOT NULL,
+                    case_data         TEXT NOT NULL,
+                    constraint_doc_id INTEGER REFERENCES document_versions(id),
+                    created_at        TEXT DEFAULT (datetime('now'))
+                );
+                CREATE INDEX IF NOT EXISTS idx_test_cases_task ON test_cases(task_id);
+                CREATE INDEX IF NOT EXISTS idx_test_cases_operator ON test_cases(operator_name);
+                CREATE INDEX IF NOT EXISTS idx_test_cases_constraint_doc ON test_cases(constraint_doc_id);
+            """)
+        except sqlite3.OperationalError:
+            pass
+        try:
+            self._conn.executescript("""
+                CREATE TABLE IF NOT EXISTS exec_results (
+                    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_id             TEXT NOT NULL REFERENCES pipeline_runs(run_id),
+                    case_id             INTEGER NOT NULL REFERENCES test_cases(id),
+                    operator_name       TEXT NOT NULL,
+                    passed              INTEGER NOT NULL,
+                    cpu_precision_passed INTEGER,
+                    precision_detail    TEXT,
+                    actual_json         TEXT,
+                    error_message       TEXT,
+                    cpu_reference_code  TEXT,
+                    duration_ms         INTEGER,
+                    created_at          TEXT DEFAULT (datetime('now'))
+                );
+                CREATE INDEX IF NOT EXISTS idx_exec_results_task ON exec_results(task_id);
+                CREATE INDEX IF NOT EXISTS idx_exec_results_case ON exec_results(case_id);
+                CREATE INDEX IF NOT EXISTS idx_exec_results_operator ON exec_results(operator_name);
+            """)
+        except sqlite3.OperationalError:
+            pass
+        # 迁移：v31b — 新增 llm_description 列
         try:
             self._conn.execute(
                 "ALTER TABLE parameters ADD COLUMN llm_description "
@@ -439,7 +552,38 @@ class Database:
             )
         except sqlite3.OperationalError:
             pass
-        # 迁移：v32 — description → llm_description 回填 + 删除 description 列
+        # 迁移：v32a — 新建 servers 表（服务器管理）
+        try:
+            self._conn.executescript("""
+                CREATE TABLE IF NOT EXISTS servers (
+                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name        TEXT NOT NULL,
+                    ip          TEXT NOT NULL,
+                    port        INTEGER NOT NULL DEFAULT 22,
+                    username    TEXT NOT NULL,
+                    password    TEXT NOT NULL,
+                    status      TEXT NOT NULL DEFAULT 'active',
+                    created_at  TEXT DEFAULT (datetime('now')),
+                    updated_at  TEXT DEFAULT (datetime('now'))
+                );
+            """)
+        except sqlite3.OperationalError:
+            pass
+        # 迁移：v32b — servers 新增 supported_product 列
+        try:
+            self._conn.execute(
+                "ALTER TABLE servers ADD COLUMN supported_product TEXT NOT NULL DEFAULT ''"
+            )
+        except sqlite3.OperationalError:
+            pass
+        # 迁移：v32c — test_cases 新增 supported_product 列
+        try:
+            self._conn.execute(
+                "ALTER TABLE test_cases ADD COLUMN supported_product TEXT NOT NULL DEFAULT ''"
+            )
+        except sqlite3.OperationalError:
+            pass
+        # 迁移：v33 — description → llm_description 回填 + 删除 description 列
         try:
             # 回填：llm_description 为空时从 description 复制
             self._conn.execute(
@@ -453,7 +597,7 @@ class Database:
             self._conn.execute("ALTER TABLE parameters DROP COLUMN description")
         except sqlite3.OperationalError:
             pass
-        # 迁移：v33 — constraints_result 重命名 constraints_in_param 为 constraints_in_parameters
+        # 迁移：v34 — constraints_result 重命名 constraints_in_param 为 constraints_in_parameters
         try:
             columns = [
                 row[1] for row in self._conn.execute(
@@ -467,7 +611,7 @@ class Database:
                 )
         except sqlite3.OperationalError:
             pass
-        # 迁移：v34 — param_relations 重命名 precondition 为 platform
+        # 迁移：v35 — param_relations 重命名 precondition 为 platform
         try:
             columns = [
                 row[1] for row in self._conn.execute(
@@ -486,7 +630,7 @@ class Database:
                 )
         except sqlite3.OperationalError:
             pass
-        # 迁移：v35 — 新增 description_audit 列
+        # 迁移：v36 — 新增 description_audit 列
         try:
             self._conn.execute(
                 "ALTER TABLE parameters ADD COLUMN description_audit "
@@ -556,6 +700,13 @@ class Database:
         except sqlite3.OperationalError:
             pass
         self._conn.commit()
+        self._migrate()
+
+    def _migrate(self) -> None:
+        existing = {r[1] for r in self._conn.execute("PRAGMA table_info(parameters)").fetchall()}
+        if "src_content" not in existing:
+            self._conn.execute("ALTER TABLE parameters ADD COLUMN src_content TEXT")
+            self._conn.commit()
 
     @property
     def conn(self) -> sqlite3.Connection:

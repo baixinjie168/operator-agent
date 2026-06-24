@@ -56,6 +56,10 @@ async def function_explanation_extract_node(
             doc_id, summary
         )
 
+        stored = await _mcp_client.get_function_explanation_summary(doc_id)
+        if stored:
+            summary = stored
+
         return {
             "function_explanation_summary": summary,
             "error": None,

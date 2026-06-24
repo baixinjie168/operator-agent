@@ -510,7 +510,6 @@ def _build_constraints_in_parameters(
                         if val:
                             ar_lookup[name] = (val, ar_type)
                     break
-
     grouped: dict[str, list[dict]] = {}
     skipped_count = 0
     for r in relations:
