@@ -91,7 +91,7 @@ class Database:
                     doc_id          INTEGER NOT NULL REFERENCES document_versions(id),
                     function_name   TEXT NOT NULL DEFAULT '',
                     relation_type   TEXT NOT NULL,
-                    precondition    TEXT NOT NULL DEFAULT '无',
+                    platform        TEXT NOT NULL DEFAULT '',
                     description     TEXT NOT NULL,
                     params          TEXT NOT NULL,
                     param_optional  TEXT NOT NULL DEFAULT '{}',
@@ -419,7 +419,7 @@ class Database:
                     )
         except sqlite3.OperationalError:
             pass
-        # 迁移：v30 — pipeline_runs 新增 task_type, task_name, parent_task_id 列
+        # 迁移：v30a — pipeline_runs 新增 task_type, task_name, parent_task_id 列
         try:
             self._conn.execute(
                 "ALTER TABLE pipeline_runs ADD COLUMN task_type TEXT"
@@ -438,7 +438,43 @@ class Database:
             )
         except sqlite3.OperationalError:
             pass
-        # 迁移：v31 — 重建 test_cases 表（旧表存 cases_json blob，新表逐条存储）+ 新建 exec_results 表
+        # 迁移：v30b — 新增 tasks + task_items 表
+        try:
+            self._conn.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS tasks (
+                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name            TEXT NOT NULL,
+                    status          TEXT NOT NULL DEFAULT 'pending',
+                    total_count     INTEGER NOT NULL,
+                    completed_count INTEGER NOT NULL DEFAULT 0,
+                    failed_count    INTEGER NOT NULL DEFAULT 0,
+                    upload_dir      TEXT NOT NULL,
+                    created_at      TEXT DEFAULT (datetime('now')),
+                    updated_at      TEXT DEFAULT (datetime('now'))
+                );
+
+                CREATE TABLE IF NOT EXISTS task_items (
+                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_id         INTEGER NOT NULL REFERENCES tasks(id),
+                    seq             INTEGER NOT NULL,
+                    operator_name   TEXT NOT NULL,
+                    file_path       TEXT NOT NULL,
+                    status          TEXT NOT NULL DEFAULT 'pending',
+                    doc_id          INTEGER,
+                    error           TEXT,
+                    started_at      TEXT,
+                    finished_at     TEXT,
+                    created_at      TEXT DEFAULT (datetime('now'))
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_task_items_task_id
+                    ON task_items(task_id);
+                """
+            )
+        except sqlite3.OperationalError:
+            pass
+        # 迁移：v31a — 重建 test_cases 表（旧表存 cases_json blob，新表逐条存储）+ 新建 exec_results 表
         try:
             existing_cols = {r[1] for r in self._conn.execute("PRAGMA table_info(test_cases)").fetchall()}
             if "cases_json" in existing_cols:
@@ -485,7 +521,15 @@ class Database:
             """)
         except sqlite3.OperationalError:
             pass
-        # 迁移：v32 — 新建 servers 表（服务器管理）
+        # 迁移：v31b — 新增 llm_description 列
+        try:
+            self._conn.execute(
+                "ALTER TABLE parameters ADD COLUMN llm_description "
+                "TEXT NOT NULL DEFAULT ''"
+            )
+        except sqlite3.OperationalError:
+            pass
+        # 迁移：v32a — 新建 servers 表（服务器管理）
         try:
             self._conn.executescript("""
                 CREATE TABLE IF NOT EXISTS servers (
@@ -513,6 +557,122 @@ class Database:
         try:
             self._conn.execute(
                 "ALTER TABLE test_cases ADD COLUMN supported_product TEXT NOT NULL DEFAULT ''"
+            )
+        except sqlite3.OperationalError:
+            pass
+        # 迁移：v33 — description → llm_description 回填 + 删除 description 列
+        try:
+            # 回填：llm_description 为空时从 description 复制
+            self._conn.execute(
+                "UPDATE parameters SET llm_description = description "
+                "WHERE (llm_description IS NULL OR llm_description = '') "
+                "AND description IS NOT NULL AND description != ''"
+            )
+        except sqlite3.OperationalError:
+            pass
+        try:
+            self._conn.execute("ALTER TABLE parameters DROP COLUMN description")
+        except sqlite3.OperationalError:
+            pass
+        # 迁移：v34 — constraints_result 重命名 constraints_in_param 为 constraints_in_parameters
+        try:
+            columns = [
+                row[1] for row in self._conn.execute(
+                    "PRAGMA table_info(constraints_result)"
+                ).fetchall()
+            ]
+            if "constraints_in_param" in columns and "constraints_in_parameters" not in columns:
+                self._conn.execute(
+                    "ALTER TABLE constraints_result "
+                    "RENAME COLUMN constraints_in_param TO constraints_in_parameters"
+                )
+        except sqlite3.OperationalError:
+            pass
+        # 迁移：v35 — param_relations 重命名 precondition 为 platform
+        try:
+            columns = [
+                row[1] for row in self._conn.execute(
+                    "PRAGMA table_info(param_relations)"
+                ).fetchall()
+            ]
+            if "precondition" in columns and "platform" not in columns:
+                self._conn.execute(
+                    "ALTER TABLE param_relations "
+                    "RENAME COLUMN precondition TO platform"
+                )
+                # 清空历史数据中的非平台信息
+                self._conn.execute(
+                    "UPDATE param_relations SET platform = '' "
+                    "WHERE platform = '无'"
+                )
+        except sqlite3.OperationalError:
+            pass
+        # 迁移：v36 — 新增 description_audit 列
+        try:
+            self._conn.execute(
+                "ALTER TABLE parameters ADD COLUMN description_audit "
+                "TEXT NOT NULL DEFAULT ''"
+            )
+        except sqlite3.OperationalError:
+            pass
+        # 迁移：v36 — 新增 platform_constants 表
+        try:
+            self._conn.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS platform_constants (
+                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    doc_id          INTEGER NOT NULL REFERENCES document_versions(id),
+                    const_name      TEXT NOT NULL,
+                    description     TEXT NOT NULL DEFAULT '',
+                    platform_values TEXT NOT NULL DEFAULT '[]',
+                    source_citation TEXT NOT NULL DEFAULT '',
+                    created_at      TEXT DEFAULT (datetime('now'))
+                );
+                CREATE INDEX IF NOT EXISTS idx_platform_constants_doc_id
+                    ON platform_constants(doc_id);
+                """
+            )
+        except sqlite3.OperationalError:
+            pass
+        # 迁移：v37 — parameters 新增 platform_attributes 列
+        try:
+            self._conn.execute(
+                "ALTER TABLE parameters ADD COLUMN platform_attributes "
+                "TEXT NOT NULL DEFAULT '{}'"
+            )
+        except sqlite3.OperationalError:
+            pass
+        # 迁移：v38 — shape_dim_mappings 重命名为 implicit_params
+        try:
+            self._conn.execute(
+                "ALTER TABLE shape_dim_mappings RENAME TO implicit_params"
+            )
+        except sqlite3.OperationalError:
+            pass
+        # 迁移：v39 — parameters 新增 usage_notes 列（平台差异化使用说明）
+        try:
+            self._conn.execute(
+                "ALTER TABLE parameters ADD COLUMN usage_notes "
+                "TEXT NOT NULL DEFAULT '{}'"
+            )
+        except sqlite3.OperationalError:
+            pass
+        # 迁移：v40 — 新增 parameter_representations 表
+        # 存储确定性生成的 parameter_representation 关系（来源于
+        # implicit_params mappings 与 platform_constants）。
+        try:
+            self._conn.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS parameter_representations (
+                    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                    doc_id              INTEGER NOT NULL REFERENCES document_versions(id),
+                    representations     TEXT NOT NULL DEFAULT '{}',
+                    created_at          TEXT DEFAULT (datetime('now')),
+                    UNIQUE(doc_id)
+                );
+                CREATE INDEX IF NOT EXISTS idx_parameter_representations_doc_id
+                    ON parameter_representations(doc_id);
+                """
             )
         except sqlite3.OperationalError:
             pass

@@ -283,16 +283,15 @@ def save_parameters(doc_id: int, parameters: list[dict]) -> dict:
         conn.execute(
             "INSERT OR REPLACE INTO parameters "
             "(doc_id, function_name, param_name, param_type, "
-            "direction, src_content, description, dtype_desc, dformat_desc, shape) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "direction, src_content, dtype_desc, dformat_desc, shape) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 doc_id,
                 param.get("function_name", ""),
                 param.get("param_name", ""),
                 param.get("param_type", ""),
-                param.get("direction", "input"),
+                param.get("direction", ""),
                 param.get("src_content", ""),
-                param.get("description", ""),
                 param.get("data_type", ""),
                 param.get("data_format", ""),
                 param.get("shape", ""),
@@ -316,9 +315,9 @@ def query_params_by_doc_id(doc_id: int) -> list[dict]:
     conn = db.conn
     rows = conn.execute(
         "SELECT id, function_name, param_name, param_type, direction, "
-        "src_content, description, dtype_desc, dformat_desc, shape, is_optional, "
+        "src_content, dtype_desc, dformat_desc, shape, is_optional, "
         "is_support_discontinuous, array_length, param_desc, allowed_range_value, "
-        "param_constraint "
+        "param_constraint, llm_description "
         "FROM parameters WHERE doc_id = ? ORDER BY function_name, direction, param_name",
         (doc_id,),
     ).fetchall()
@@ -330,54 +329,19 @@ def query_params_by_doc_id(doc_id: int) -> list[dict]:
             "param_type": r[3],
             "direction": r[4],
             "src_content": r[5],
-            "description": r[6],
-            "data_type": r[7],
-            "data_format": r[8],
-            "shape": r[9],
-            "is_optional": r[10],
-            "is_support_discontinuous": r[11],
-            "array_length": r[12],
-            "param_desc": r[13],
-            "allowed_range_value": r[14],
-            "param_constraint": r[15],
+            "data_type": r[6],
+            "data_format": r[7],
+            "shape": r[8],
+            "is_optional": r[9],
+            "is_support_discontinuous": r[10],
+            "array_length": r[11],
+            "param_desc": r[12],
+            "allowed_range_value": r[13],
+            "param_constraint": r[14],
+            "llm_description": r[15],
         }
         for r in rows
     ]
-
-
-def update_param_descriptions(doc_id: int, updates: list[dict]) -> dict:
-    """Batch update parameter description fields.
-
-    Args:
-        doc_id: Primary key of document_versions table.
-        updates: List of dicts with keys: function_name, param_name,
-                 direction, data_type, data_format, shape, description.
-
-    Returns:
-        dict with count of updated parameters.
-    """
-    db = get_db()
-    conn = db.conn
-    count = 0
-    for u in updates:
-        cursor = conn.execute(
-            "UPDATE parameters SET direction = ?, description = ?, "
-            "dtype_desc = ?, dformat_desc = ?, shape = ? "
-            "WHERE doc_id = ? AND function_name = ? AND param_name = ?",
-            (
-                u.get("direction", ""),
-                u.get("description", ""),
-                u.get("data_type", ""),
-                u.get("data_format", ""),
-                u.get("shape", ""),
-                doc_id,
-                u.get("function_name", ""),
-                u.get("param_name", ""),
-            ),
-        )
-        count += cursor.rowcount
-    conn.commit()
-    return {"updated": count}
 
 
 def update_param_shape(doc_id: int, updates: list[dict]) -> dict:
@@ -476,12 +440,13 @@ def update_param_optional(doc_id: int, updates: list[dict]) -> dict:
     return {"updated": count}
 
 
-def update_param_src_content(doc_id: int, updates: list[dict]) -> dict:
-    """Batch update only the src_content field of parameters.
+def update_param_attrs(doc_id: int, updates: list[dict]) -> dict:
+    """Batch update is_support_discontinuous field of parameters.
 
     Args:
         doc_id: Primary key of document_versions table.
-        updates: List of dicts with keys: function_name, param_name, src_content.
+        updates: List of dicts with keys: function_name, param_name,
+                 is_support_discontinuous.
 
     Returns:
         dict with count of updated parameters.
@@ -491,22 +456,26 @@ def update_param_src_content(doc_id: int, updates: list[dict]) -> dict:
     count = 0
     for u in updates:
         cursor = conn.execute(
-            "UPDATE parameters SET src_content = ? "
+            "UPDATE parameters SET is_support_discontinuous = ? "
             "WHERE doc_id = ? AND function_name = ? AND param_name = ?",
-            (u.get("src_content", ""), doc_id, u.get("function_name", ""), u.get("param_name", "")),
+            (
+                u.get("is_support_discontinuous", '{"value":"N/A","src_text":""}'),
+                doc_id,
+                u.get("function_name", ""),
+                u.get("param_name", ""),
+            ),
         )
         count += cursor.rowcount
     conn.commit()
     return {"updated": count}
 
 
-def update_param_attrs(doc_id: int, updates: list[dict]) -> dict:
-    """Batch update is_support_discontinuous and param_desc fields of parameters.
+def update_param_desc(doc_id: int, updates: list[dict]) -> dict:
+    """Batch update param_desc field of parameters.
 
     Args:
         doc_id: Primary key of document_versions table.
-        updates: List of dicts with keys: function_name, param_name,
-                 is_support_discontinuous, param_desc.
+        updates: List of dicts with keys: function_name, param_name, param_desc.
 
     Returns:
         dict with count of updated parameters.
@@ -516,11 +485,83 @@ def update_param_attrs(doc_id: int, updates: list[dict]) -> dict:
     count = 0
     for u in updates:
         cursor = conn.execute(
-            "UPDATE parameters SET is_support_discontinuous = ?, param_desc = ? "
+            "UPDATE parameters SET param_desc = ? "
             "WHERE doc_id = ? AND function_name = ? AND param_name = ?",
             (
-                u.get("is_support_discontinuous", '{"value":"N/A","src_text":""}'),
                 u.get("param_desc", ""),
+                doc_id,
+                u.get("function_name", ""),
+                u.get("param_name", ""),
+            ),
+        )
+        count += cursor.rowcount
+    conn.commit()
+    return {"updated": count}
+
+
+def update_param_direction(doc_id: int, updates: list[dict]) -> dict:
+    """Batch update direction field of parameters.
+
+    Args:
+        doc_id: Primary key of document_versions table.
+        updates: List of dicts with keys: function_name, param_name, direction.
+
+    Returns:
+        dict with count of updated parameters.
+    """
+    db = get_db()
+    conn = db.conn
+    count = 0
+    for u in updates:
+        cursor = conn.execute(
+            "UPDATE parameters SET direction = ? "
+            "WHERE doc_id = ? AND function_name = ? AND param_name = ?",
+            (
+                u.get("direction", ""),
+                doc_id,
+                u.get("function_name", ""),
+                u.get("param_name", ""),
+            ),
+        )
+        count += cursor.rowcount
+    conn.commit()
+    return {"updated": count}
+
+
+def update_llm_descriptions(doc_id: int, updates: list[dict]) -> dict:
+    """Batch update llm_description, src_content, direction, is_support_discontinuous, and description_audit.
+
+    Args:
+        doc_id: Primary key of document_versions table.
+        updates: List of dicts with keys: function_name, param_name,
+                 llm_description, src_content, direction, is_support_discontinuous,
+                 description_audit.
+
+    Returns:
+        dict with count of updated parameters.
+    """
+    db = get_db()
+    conn = db.conn
+    count = 0
+    for u in updates:
+        # Serialize description_audit to JSON string if it's a dict/list.
+        # Without this, SQLite would receive a Python dict and raise
+        # InterfaceError for unsupported types.
+        audit = u.get("description_audit", "")
+        if isinstance(audit, (dict, list)):
+            audit = json.dumps(audit, ensure_ascii=False)
+
+        cursor = conn.execute(
+            "UPDATE parameters SET llm_description = ?, src_content = ?, "
+            "direction = ?, is_support_discontinuous = ?, "
+            "description_audit = ? "
+            "WHERE doc_id = ? AND function_name = ? AND param_name = ?",
+            (
+                u.get("llm_description", ""),
+                u.get("src_content", ""),
+                u.get("direction", ""),
+                u.get("is_support_discontinuous", '{"value":"N/A","src_text":""}'),
+                audit,
                 doc_id,
                 u.get("function_name", ""),
                 u.get("param_name", ""),
@@ -643,14 +684,14 @@ def save_param_relations(doc_id: int, relations: list[dict]) -> dict:
     for r in relations:
         conn.execute(
             "INSERT INTO param_relations "
-            "(doc_id, function_name, relation_type, precondition, "
+            "(doc_id, function_name, relation_type, platform, "
             "description, params, param_optional, source_citation, relation_object) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 doc_id,
                 r.get("function_name", ""),
                 r.get("relation_type", ""),
-                r.get("precondition", "无"),
+                r.get("platform", ""),
                 r.get("description", ""),
                 json.dumps(r.get("params", []), ensure_ascii=False),
                 json.dumps(r.get("param_optional", {}), ensure_ascii=False),
@@ -665,7 +706,7 @@ def save_param_relations(doc_id: int, relations: list[dict]) -> dict:
 def query_param_relations(doc_id: int) -> list[dict]:
     db = get_db()
     rows = db.conn.execute(
-        "SELECT id, function_name, relation_type, precondition, "
+        "SELECT id, function_name, relation_type, platform, "
         "description, params, param_optional, source_citation, relation_object "
         "FROM param_relations WHERE doc_id = ? ORDER BY id",
         (doc_id,),
@@ -675,7 +716,7 @@ def query_param_relations(doc_id: int) -> list[dict]:
             "id": r[0],
             "function_name": r[1],
             "relation_type": r[2],
-            "precondition": r[3],
+            "platform": r[3],
             "description": r[4],
             "params": json.loads(r[5]),
             "param_optional": json.loads(r[6]),
@@ -701,7 +742,7 @@ def query_param_relations_by_operator(operator_name: str | None = None) -> list[
     if operator_name:
         rows = conn.execute(
             "SELECT pr.id, o.name, dv.version, pr.function_name, pr.relation_type, "
-            "pr.precondition, pr.description, pr.params, pr.param_optional, pr.source_citation, "
+            "pr.platform, pr.description, pr.params, pr.param_optional, pr.source_citation, "
             "pr.relation_object "
             "FROM param_relations pr "
             "JOIN document_versions dv ON pr.doc_id = dv.id "
@@ -712,7 +753,7 @@ def query_param_relations_by_operator(operator_name: str | None = None) -> list[
     else:
         rows = conn.execute(
             "SELECT pr.id, o.name, dv.version, pr.function_name, pr.relation_type, "
-            "pr.precondition, pr.description, pr.params, pr.param_optional, pr.source_citation, "
+            "pr.platform, pr.description, pr.params, pr.param_optional, pr.source_citation, "
             "pr.relation_object "
             "FROM param_relations pr "
             "JOIN document_versions dv ON pr.doc_id = dv.id "
@@ -727,7 +768,7 @@ def query_param_relations_by_operator(operator_name: str | None = None) -> list[
             "version": r[2],
             "function_name": r[3],
             "relation_type": r[4],
-            "precondition": r[5],
+            "platform": r[5],
             "description": r[6],
             "params": json.loads(r[7]),
             "param_optional": json.loads(r[8]),
@@ -753,7 +794,7 @@ def query_parameters(operator_name: str | None = None) -> list[dict]:
     if operator_name:
         rows = conn.execute(
             "SELECT p.id, o.name, dv.version, p.function_name, p.param_name, "
-            "p.param_type, p.direction, p.src_content, p.description, "
+            "p.param_type, p.direction, p.src_content, p.llm_description, "
             "p.dtype_desc, p.dformat_desc, p.shape, p.is_optional, "
             "p.is_support_discontinuous, p.array_length, p.param_desc, p.allowed_range_value "
             "FROM parameters p "
@@ -765,7 +806,7 @@ def query_parameters(operator_name: str | None = None) -> list[dict]:
     else:
         rows = conn.execute(
             "SELECT p.id, o.name, dv.version, p.function_name, p.param_name, "
-            "p.param_type, p.direction, p.src_content, p.description, "
+            "p.param_type, p.direction, p.src_content, p.llm_description, "
             "p.dtype_desc, p.dformat_desc, p.shape, p.is_optional, "
             "p.is_support_discontinuous, p.array_length, p.param_desc, p.allowed_range_value "
             "FROM parameters p "
@@ -784,7 +825,7 @@ def query_parameters(operator_name: str | None = None) -> list[dict]:
             "param_type": r[5],
             "direction": r[6],
             "src_content": r[7],
-            "description": r[8],
+            "llm_description": r[8],
             "data_type": r[9],
             "data_format": r[10],
             "shape": r[11],

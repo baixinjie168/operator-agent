@@ -4,10 +4,15 @@ from __future__ import annotations
 
 import json
 
-from agent.nodes.allowed_range_extract import (
-    _is_ws_function,
-    _parse_allowed_range_response,
+from agent.utils.param_validators import (
+    is_bool_type as _is_bool_type,
+    is_tensor_type as _is_tensor_type,
+    is_ws_function as _is_ws_function,
 )
+from agent.utils.llm_common import parse_json_response as _raw_parse
+
+def _parse_allowed_range_response(text):
+    return _raw_parse(text, list)
 
 
 class TestIsWsFunction:
@@ -72,3 +77,40 @@ class TestParseAllowedRangeResponse:
         result = _parse_allowed_range_response(text)
         assert result is not None
         assert result[0]["platform"] == "Atlas A2 训练系列产品"
+
+
+class TestIsTensorType:
+    def test_acl_tensor(self):
+        assert _is_tensor_type("aclTensor") is True
+
+    def test_acl_tensor_list(self):
+        assert _is_tensor_type("aclTensorList") is True
+
+    def test_const_acl_tensor(self):
+        assert _is_tensor_type("const aclTensor") is True
+
+    def test_int64_not_tensor(self):
+        assert _is_tensor_type("int64_t") is False
+
+    def test_bool_not_tensor(self):
+        assert _is_tensor_type("bool") is False
+
+    def test_acl_int_array_not_tensor(self):
+        assert _is_tensor_type("aclIntArray") is False
+
+    def test_empty_not_tensor(self):
+        assert _is_tensor_type("") is False
+
+
+class TestIsBoolType:
+    def test_bool(self):
+        assert _is_bool_type("bool") is True
+
+    def test_bool_upper(self):
+        assert _is_bool_type("Bool") is True
+
+    def test_int_not_bool(self):
+        assert _is_bool_type("int64_t") is False
+
+    def test_tensor_not_bool(self):
+        assert _is_bool_type("aclTensor") is False

@@ -29,7 +29,7 @@ class ParameterItem(BaseModel):
     param_type: str = ""
     direction: str = "input"
     src_content: str = ""
-    description: str | None = None
+    llm_description: str = ""
     data_type: str | None = None
     data_format: str | None = None
     shape: str | None = None
@@ -51,7 +51,7 @@ class ParamRelationItem(BaseModel):
     version: int
     function_name: str
     relation_type: str
-    precondition: str = "无"
+    platform: str = ""
     description: str
     params: list[str]
     param_optional: dict[str, bool] = {}

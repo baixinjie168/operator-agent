@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 from typing import Any
 
 from mcp import ClientSession, StdioServerParameters
@@ -44,7 +45,12 @@ class MCPClient:
         if not server_command:
             server_command = settings.mcp_server_command
         parts = server_command.split()
-        self._params = StdioServerParameters(command=parts[0], args=parts[1:])
+        # Pass current env explicitly — mcp's stdio_client on Windows only
+        # forwards a minimal env subset (no PYTHONPATH), which causes the
+        # server subprocess to fail with ModuleNotFoundError.
+        self._params = StdioServerParameters(
+            command=parts[0], args=parts[1:], env=dict(os.environ),
+        )
         self._session: ClientSession | None = None
         self._read = None
         self._write = None
@@ -204,17 +210,42 @@ class MCPClient:
             "section_type": section_type,
         })
 
-    async def update_param_descriptions(self, doc_id: int, updates: list[dict]) -> dict:
-        """Batch update parameter description fields."""
-        return await self._call_tool("update_param_descs", {
-            "doc_id": doc_id,
-            "updates": json.dumps(updates, ensure_ascii=False),
-        })
-
     async def update_param_shape(self, doc_id: int, updates: list[dict]) -> dict:
         """Batch update only the shape field of parameters."""
         return await self._call_tool("update_param_shape", {
             "doc_id": doc_id,
+            "updates": json.dumps(updates, ensure_ascii=False),
+        })
+
+    async def update_param_platform_attributes(
+        self, doc_id: int, updates: list[dict]
+    ) -> dict:
+        """Batch update the platform_attributes field of parameters."""
+        return await self._call_tool("update_param_platform_attributes", {
+            "doc_id": doc_id,
+            "updates": json.dumps(updates, ensure_ascii=False),
+        })
+
+    async def update_param_usage_notes(
+        self, doc_id: int, updates: list[dict]
+    ) -> dict:
+        """Batch update the usage_notes field of parameters."""
+        return await self._call_tool("update_param_usage_notes", {
+            "doc_id": doc_id,
+            "updates": json.dumps(updates, ensure_ascii=False),
+        })
+
+    async def batch_update_params(self, doc_id: int, field: str, updates: list[dict]) -> dict:
+        """Generic batch update for any parameter field.
+
+        Args:
+            doc_id: Document version ID.
+            field: Target field name (shape, dtype, dformat, is_optional, etc.).
+            updates: List of dicts with function_name, param_name, and value.
+        """
+        return await self._call_tool("batch_update_params", {
+            "doc_id": doc_id,
+            "field": field,
             "updates": json.dumps(updates, ensure_ascii=False),
         })
 
@@ -239,16 +270,30 @@ class MCPClient:
             "updates": json.dumps(updates, ensure_ascii=False),
         })
 
-    async def update_param_src_content(self, doc_id: int, updates: list[dict]) -> dict:
-        """Batch update only the src_content field of parameters."""
-        return await self._call_tool("update_param_src_content", {
+    async def update_param_attrs(self, doc_id: int, updates: list[dict]) -> dict:
+        """Batch update is_support_discontinuous field of parameters."""
+        return await self._call_tool("update_param_attrs", {
             "doc_id": doc_id,
             "updates": json.dumps(updates, ensure_ascii=False),
         })
 
-    async def update_param_attrs(self, doc_id: int, updates: list[dict]) -> dict:
-        """Batch update is_support_discontinuous and param_desc fields of parameters."""
-        return await self._call_tool("update_param_attrs", {
+    async def update_param_desc(self, doc_id: int, updates: list[dict]) -> dict:
+        """Batch update param_desc field of parameters."""
+        return await self._call_tool("update_param_desc", {
+            "doc_id": doc_id,
+            "updates": json.dumps(updates, ensure_ascii=False),
+        })
+
+    async def update_param_direction(self, doc_id: int, updates: list[dict]) -> dict:
+        """Batch update direction field of parameters."""
+        return await self._call_tool("update_param_direction", {
+            "doc_id": doc_id,
+            "updates": json.dumps(updates, ensure_ascii=False),
+        })
+
+    async def update_llm_descriptions(self, doc_id: int, updates: list[dict]) -> dict:
+        """Batch update llm_description, src_content, direction, is_support_discontinuous."""
+        return await self._call_tool("update_llm_descriptions", {
             "doc_id": doc_id,
             "updates": json.dumps(updates, ensure_ascii=False),
         })
@@ -459,6 +504,56 @@ class MCPClient:
             "json_constraints": json_constraints,
         })
 
+    async def save_implicit_params(
+        self, doc_id: int, mappings_json: str, rendered_text: str
+    ) -> dict:
+        """Persist implicit (non-operator) parameters for traceability."""
+        return await self._call_tool("save_implicit_params", {
+            "doc_id": doc_id,
+            "mappings_json": mappings_json,
+            "rendered_text": rendered_text,
+        })
+
+    async def query_implicit_params_by_doc_id(self, doc_id: int) -> dict | None:
+        """Query implicit parameters for a document version by doc_id."""
+        return await self._call_tool("query_implicit_params_by_doc_id", {
+            "doc_id": doc_id,
+        })
+
+    async def save_platform_constants(
+        self, doc_id: int, constants_json: str
+    ) -> dict:
+        """Persist platform constants (external constants like rankSize)."""
+        return await self._call_tool("save_platform_constants", {
+            "doc_id": doc_id,
+            "constants_json": constants_json,
+        })
+
+    async def query_platform_constants_by_doc_id(
+        self, doc_id: int
+    ) -> dict | None:
+        """Query platform constants for a document version by doc_id."""
+        return await self._call_tool("query_platform_constants_by_doc_id", {
+            "doc_id": doc_id,
+        })
+
+    async def save_parameter_representations(
+        self, doc_id: int, representations_json: str,
+    ) -> dict:
+        """Persist parameter_representation records for a document version."""
+        return await self._call_tool("save_parameter_representations", {
+            "doc_id": doc_id,
+            "representations_json": representations_json,
+        })
+
+    async def query_parameter_representations_by_doc_id(
+        self, doc_id: int,
+    ) -> dict | None:
+        """Query parameter_representation records for a document version by doc_id."""
+        return await self._call_tool("query_parameter_representations_by_doc_id", {
+            "doc_id": doc_id,
+        })
+
     async def query_constraints_result(self, operator_name: str | None = None) -> list[dict]:
         """Query constraints results, optionally filtered by operator name."""
         args: dict[str, Any] = {}
@@ -494,3 +589,76 @@ class MCPClient:
     async def list_test_case_operators(self) -> list[dict]:
         """List operator names that have saved test cases, with counts."""
         return await self._call_tool("list_test_case_operators", {})
+
+    # ── Task management tools ────────────────────────────────────────
+
+    async def create_task(self, name: str, total_count: int, upload_dir: str) -> dict:
+        """Create a new batch processing task."""
+        return await self._call_tool("create_task", {
+            "name": name,
+            "total_count": total_count,
+            "upload_dir": upload_dir,
+        })
+
+    async def create_task_items(self, task_id: int, items: list[dict]) -> dict:
+        """Batch create task items."""
+        return await self._call_tool("create_task_items", {
+            "task_id": task_id,
+            "items": json.dumps(items, ensure_ascii=False),
+        })
+
+    async def update_task_status(self, task_id: int, status: str) -> dict:
+        """Update task status."""
+        return await self._call_tool("update_task_status", {
+            "task_id": task_id,
+            "status": status,
+        })
+
+    async def update_task_item_status(
+        self,
+        item_id: int,
+        status: str,
+        error: str | None = None,
+        doc_id: int | None = None,
+        started_at: str | None = None,
+        finished_at: str | None = None,
+    ) -> dict:
+        """Update task item status."""
+        args: dict[str, Any] = {"item_id": item_id, "status": status}
+        if error is not None:
+            args["error"] = error
+        if doc_id is not None:
+            args["doc_id"] = doc_id
+        if started_at is not None:
+            args["started_at"] = started_at
+        if finished_at is not None:
+            args["finished_at"] = finished_at
+        return await self._call_tool("update_task_item_status", args)
+
+    async def get_pending_task_items(self, task_id: int) -> list[dict]:
+        """Get all pending task items for a task."""
+        return await self._call_tool("get_pending_task_items", {"task_id": task_id})
+
+    async def get_task(self, task_id: int) -> dict | None:
+        """Get a single task by ID."""
+        return await self._call_tool("get_task", {"task_id": task_id})
+
+    async def list_tasks(self) -> list[dict]:
+        """List all tasks."""
+        return await self._call_tool("list_tasks", {})
+
+    async def get_task_with_items(self, task_id: int) -> dict | None:
+        """Get a task with all its items."""
+        return await self._call_tool("get_task_with_items", {"task_id": task_id})
+
+    async def refresh_task_progress(self, task_id: int) -> dict:
+        """Refresh task progress counts."""
+        return await self._call_tool("refresh_task_progress", {"task_id": task_id})
+
+    async def reset_stuck_task_items(self, task_id: int) -> dict:
+        """Reset task items stuck in 'running' back to 'pending'."""
+        return await self._call_tool("reset_stuck_task_items", {"task_id": task_id})
+
+    async def delete_task(self, task_id: int) -> dict:
+        """Delete a task and all associated operator data."""
+        return await self._call_tool("delete_task", {"task_id": task_id})

@@ -16,6 +16,14 @@ _PROVIDER_DEFAULTS: dict[LLMProvider, dict[str, str]] = {
         "base_url": "https://api.deepseek.com",
         "model": "deepseek-v4-flash",
     },
+    LLMProvider.OWN_AI: {
+        "base_url": "https://api.openai.com/v1",
+        "model": "gpt-4o",
+    },
+    LLMProvider.QWEN: {
+        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "model": "qwen3.7-max",
+    },
 }
 
 
@@ -25,10 +33,32 @@ class Settings(BaseSettings):
     project_name: str = "operator-agent"
     debug: bool = False
     operators_dir: str = "operators"
+    uploads_dir: str = "uploads"
     database_path: str = "data/operator_agent.db"
     log_level: str = "INFO"
     mcp_server_command: str = f"{sys.executable} -m mcp_server"
     static_dir: Path = Path(__file__).resolve().parent.parent / "static"
+
+    # Retry limits for LLM-based extraction (configurable per deployment)
+    expr_max_retries: int = Field(default=2, ge=0, le=10)
+    dimensions_max_retries: int = Field(default=2, ge=0, le=10)
+
+    # Parallel execution: how many operators to parse concurrently within a task
+    task_max_workers: int = Field(default=3, ge=1, le=20)
+    task_max_retries: int = Field(default=1, ge=0, le=5)
+    task_config_file: str = "config/task_config.yaml"
+    semantic_rules_file: str = "config/semantic_value_rules.yaml"
+
+    # Max tokens for LLM responses (prevents truncation of large JSON outputs)
+    llm_max_tokens: int = Field(default=16384, ge=256, le=131072)
+
+    # Layer 2 LLM switch for single-parameter constraint extraction.
+    # When False (default), only Layer 1 deterministic regex rules run.
+    enable_single_param_llm: bool = False
+
+    # Force Phase 2b semantic verification for all relations (for analysis/debugging).
+    # When True, Phase2b runs regardless of LLM confidence level.
+    force_phase2b: bool = False
 
     # Master switch: which LLM provider to use
     llm_provider: LLMProvider = LLMProvider.ZAI
@@ -42,6 +72,16 @@ class Settings(BaseSettings):
     deepseek_api_key: SecretStr = SecretStr("")
     deepseek_base_url: str = _PROVIDER_DEFAULTS[LLMProvider.DEEPSEEK]["base_url"]
     deepseek_model: str = _PROVIDER_DEFAULTS[LLMProvider.DEEPSEEK]["model"]
+
+    # Own-AI-specific configuration (OpenAI-compatible)
+    own_ai_api_key: SecretStr = SecretStr("")
+    own_ai_base_url: str = _PROVIDER_DEFAULTS[LLMProvider.OWN_AI]["base_url"]
+    own_ai_model: str = _PROVIDER_DEFAULTS[LLMProvider.OWN_AI]["model"]
+
+    # Qwen-specific configuration (DashScope OpenAI-compatible)
+    qwen_api_key: SecretStr = SecretStr("")
+    qwen_base_url: str = _PROVIDER_DEFAULTS[LLMProvider.QWEN]["base_url"]
+    qwen_model: str = _PROVIDER_DEFAULTS[LLMProvider.QWEN]["model"]
 
     # Shared LLM settings
     llm_temperature: float = Field(default=0.7, ge=0.0, le=2.0)
@@ -69,6 +109,10 @@ class Settings(BaseSettings):
                 return self.zai_base_url
             case LLMProvider.DEEPSEEK:
                 return self.deepseek_base_url
+            case LLMProvider.OWN_AI:
+                return self.own_ai_base_url
+            case LLMProvider.QWEN:
+                return self.qwen_base_url
 
     @property
     def active_model(self) -> str:
@@ -78,6 +122,10 @@ class Settings(BaseSettings):
                 return self.zai_model
             case LLMProvider.DEEPSEEK:
                 return self.deepseek_model
+            case LLMProvider.OWN_AI:
+                return self.own_ai_model
+            case LLMProvider.QWEN:
+                return self.qwen_model
 
     def _active_api_key(self) -> str:
         match self.llm_provider:
@@ -85,6 +133,10 @@ class Settings(BaseSettings):
                 return self.zai_api_key.get_secret_value()
             case LLMProvider.DEEPSEEK:
                 return self.deepseek_api_key.get_secret_value()
+            case LLMProvider.OWN_AI:
+                return self.own_ai_api_key.get_secret_value()
+            case LLMProvider.QWEN:
+                return self.qwen_api_key.get_secret_value()
 
 
 settings = Settings()

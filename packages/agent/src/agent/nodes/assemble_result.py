@@ -44,6 +44,16 @@ async def assemble_result_node(state: PipelineState) -> dict[str, Any]:
         return_codes = await _mcp_client.query_return_codes_by_doc_id(doc_id)
         dtype_combos = await _mcp_client.query_dtype_combos_by_doc_id(doc_id)
 
+        # Log single-param vs multi-param relation breakdown
+        single_count = sum(
+            1 for r in relations
+            if r.get("relation_type") == "self_constraint"
+        )
+        logger.info(
+            "assemble_result: %d total relations (%d single-param, %d multi-param)",
+            len(relations), single_count, len(relations) - single_count,
+        )
+
         # Step 2b: Fetch function_explanation_summary from document_versions
         fn_expl_summary = await _mcp_client.get_function_explanation_summary(doc_id)
         description = fn_expl_summary.get("description", "")
@@ -77,9 +87,31 @@ async def assemble_result_node(state: PipelineState) -> dict[str, Any]:
 
         # Step 3e: Build new fields
         det_computing = _build_deterministic_computing(platform_support_data)
-        inputs_dict, outputs_dict = _build_inputs_outputs(params)
-        constraints_ip = _build_constraints_in_parameters(relations, product_support_list)
+
+        # Fetch implicit params (non-operator parameters) from DB
+        implicit_params_data = await _mcp_client.query_implicit_params_by_doc_id(doc_id)
+        mappings = implicit_params_data.get("mappings", []) if implicit_params_data else []
+
+        inputs_dict, outputs_dict = _build_inputs_outputs(params, implicit_params=mappings)
+        constraints_ip = _build_constraints_in_parameters(
+            relations, product_support_list, params,
+        )
         dtype_support = _build_dtype_support(dtype_combos)
+
+        # Step 3f: Inject platform_constants into constraints_in_parameters
+        platform_consts_data = await _mcp_client.query_platform_constants_by_doc_id(doc_id)
+        if platform_consts_data and platform_consts_data.get("constants"):
+            _inject_platform_constants(
+                constraints_ip, platform_consts_data["constants"],
+            )
+
+        # Step 3g: Inject parameter_representation records into constraints_in_parameters
+        param_reprs_data = await _mcp_client.query_parameter_representations_by_doc_id(doc_id)
+        if param_reprs_data and (
+            param_reprs_data.get("representations")
+            or param_reprs_data.get("platform_representations")
+        ):
+            _inject_parameter_representations(constraints_ip, param_reprs_data)
 
         # Step 4: Save to constraints_result table
         await _mcp_client.save_constraints_result(
@@ -130,6 +162,23 @@ async def assemble_result_node(state: PipelineState) -> dict[str, Any]:
         return {"error": str(e)}
 
 
+def _has_meaningful_expr(obj: dict) -> bool:
+    """Check if a relation_object has a non-empty expr field.
+
+    Relations with empty expr (e.g. presence_dependency descriptions like
+    "当weightOptional为空时，会以self的shape创建一个全1的Tensor") are
+    implementation notes, not verifiable constraints — they should be
+    excluded from the final output.
+    """
+    if not isinstance(obj, dict):
+        return True
+    expr = obj.get("expr", "")
+    if isinstance(expr, str):
+        return bool(expr.strip())
+    # Non-string expr (e.g. list, number) is considered meaningful
+    return True
+
+
 def _build_function_explanation(
     params: list[dict],
     relations: list[dict],
@@ -155,7 +204,11 @@ def _build_function_explanation(
 
     for fn in sorted(all_fn_names):
         fn_params = [p for p in params if p.get("function_name") == fn]
-        fn_relations = [r for r in relations if r.get("function_name") == fn]
+        fn_relations = [
+            r for r in relations
+            if r.get("function_name") == fn
+            and _has_meaningful_expr(r.get("relation_object", {}))
+        ]
         fn_sig = next(
             (s for s in signatures if s.get("function_name") == fn), None,
         )
@@ -208,18 +261,99 @@ def _build_deterministic_computing(platforms: list[dict]) -> dict[str, Any]:
     return result
 
 
+def _extract_implicit_params(mappings: list[dict]) -> dict[str, dict]:
+    """Extract non-operator parameters from implicit_params mappings.
+
+    Returns: {var_name: {"type": ..., "shape_text": ..., ...}}
+    Excludes: external constants and constant values (e.g. k0=16).
+    """
+    result: dict[str, dict] = {}
+    for m in mappings:
+        if m.get("is_external_constant") or m.get("is_constant"):
+            continue
+        var = m["var_name"]
+        if var not in result:
+            # Quantization type: char-typed enum (no tensor shape reference)
+            if m.get("is_quantization_type"):
+                result[var] = {
+                    "type": m.get("param_type", "char"),
+                    "is_quantization_type": True,
+                    "allowed_range_value": m.get("allowed_range_value", []),
+                    "allowed_range_type": m.get("allowed_range_type", "enum"),
+                    "shape_text": "",
+                    "tensor_param": None,
+                    "dim_index": None,
+                }
+            else:
+                result[var] = {
+                    "type": "int64_t",
+                    "shape_text": m.get("shape_text", ""),
+                    "tensor_param": m.get("tensor_param", ""),
+                    "dim_index": m.get("dim_index"),
+                }
+    return result
+
+
+def _build_implicit_param_constraint(info: dict) -> dict:
+    """Build a minimal constraint object for a non-operator parameter.
+
+    Format matches operator param's param_constraint:
+    {platform: {description, type, format, ...}}
+    """
+    # Quantization type: char-typed enum with document-derived allowed values
+    if info.get("is_quantization_type"):
+        constraint = {
+            "description": "量化粒度隐式参数（per-channel/per-group/per-tensor/per-token 之一）",
+            "type": {"value": info.get("type", "char"), "src_text": ""},
+            "format": {"value": "N/A", "src_text": ""},
+            "is_optional": {"value": False, "src_text": ""},
+            "is_support_discontinuous": {"value": "N/A", "src_text": ""},
+            "is_operator_param": {"value": False, "src_text": ""},
+            "dimensions": {"value": [], "src_text": ""},
+            "array_length": {"value": "N/A", "src_text": ""},
+            "dtype": {"value": [], "src_text": ""},
+            "allowed_range_value": {
+                "value": info.get("allowed_range_value", []),
+                "type": info.get("allowed_range_type", "enum"),
+                "src_text": "",
+            },
+        }
+        return {"通用": constraint}
+
+    tensor_ref = ""
+    if info.get("tensor_param") and info.get("dim_index") is not None:
+        tensor_ref = f"{info['tensor_param']}.shape[{info['dim_index']}]"
+
+    constraint = {
+        "description": f"隐式维度变量" + (f"，对应 {tensor_ref}" if tensor_ref else ""),
+        "type": {"value": info.get("type", "int64_t"), "src_text": ""},
+        "format": {"value": "N/A", "src_text": ""},
+        "is_optional": {"value": False, "src_text": ""},
+        "is_support_discontinuous": {"value": "N/A", "src_text": ""},
+        "is_operator_param": {"value": False, "src_text": ""},
+        "dimensions": {"value": [], "src_text": ""},
+        "array_length": {"value": "N/A", "src_text": ""},
+        "dtype": {"value": [], "src_text": ""},
+        "allowed_range_value": {"value": [], "type": "range", "src_text": ""},
+    }
+    return {"通用": constraint}
+
+
 def _build_inputs_outputs(
     params: list[dict],
+    implicit_params: list[dict] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Build inputs/outputs: {param_name: param_constraint} split by direction.
 
-    Only includes parameters that meet ALL of:
-    1. function_name ends with "WorkspaceSize"
-    2. param_name is not "workspaceSize" or "executor"
+    Includes:
+    1. Parameters from *WorkspaceSize functions (excluding workspaceSize, executor)
+    2. Non-operator (implicit) parameters extracted from shape descriptions
     """
     _EXCLUDED_PARAMS = {"workspaceSize", "executor"}
     inputs: dict[str, Any] = {}
     outputs: dict[str, Any] = {}
+
+    # 1. Operator params from GetWorkspaceSize function
     for p in params:
         fn = p.get("function_name", "")
         if not fn.endswith("WorkspaceSize"):
@@ -236,23 +370,182 @@ def _build_inputs_outputs(
             outputs[name] = constraint
         else:
             inputs[name] = constraint
+
+    # 2. Non-operator (implicit) parameters from shape descriptions
+    if implicit_params:
+        extracted = _extract_implicit_params(implicit_params)
+        for name, info in extracted.items():
+            if name not in inputs and name not in outputs:
+                inputs[name] = _build_implicit_param_constraint(info)
+
     return inputs, outputs
+
+
+def _inject_platform_constants(
+    constraints_ip: dict[str, list[dict]],
+    platform_constants: list[dict],
+) -> None:
+    """Inject platform_constants into constraints_in_parameters per product.
+
+    Modifies constraints_ip in place: adds a "platform_constants" key
+    to each platform's constraint list (as a special metadata entry).
+
+    Args:
+        constraints_ip: {platform_name: [relation_object]} dict.
+        platform_constants: List of platform constant dicts from DB.
+    """
+    if not platform_constants:
+        return
+
+    # Build {platform: [constant_info]} mapping
+    const_by_platform: dict[str, list[dict]] = {}
+    for pc in platform_constants:
+        for pv in pc.get("platform_values", []):
+            plat = pv["platform"]
+            const_by_platform.setdefault(plat, []).append({
+                "name": pc["const_name"],
+                "description": pc.get("description", ""),
+                "values": pv["values"],
+            })
+
+    # Inject into each platform's constraint list
+    for plat, consts in const_by_platform.items():
+        if plat in constraints_ip:
+            # Prepend platform_constants as metadata entry
+            constraints_ip[plat].insert(0, {
+                "_type": "platform_constants",
+                "platform_constants": consts,
+            })
+
+
+def _inject_parameter_representations(
+    constraints_ip: dict[str, list[dict]],
+    param_reprs_data: dict,
+) -> None:
+    """Inject parameter_representation records into constraints_in_parameters.
+
+    Modifies *constraints_ip* in place. For each platform:
+    - Platform-specific representations (external constant value sets,
+      e.g. ``rankSize.range_value in [2, 4, 8]``) are inserted only into
+      the matching platform.
+    - Platform-agnostic tensor-dim representations (e.g.
+      ``BS.range_value == x1.shape[0]``) are inserted into every platform.
+
+    Insertion point is right after any ``_type: platform_constants``
+    metadata entry so the final per-platform ordering is:
+    ``[platform_constants, parameter_representations..., <other constraints>]``.
+    """
+    tensor_reps: list[dict] = param_reprs_data.get("representations", []) or []
+    platform_reps: dict[str, list[dict]] = (
+        param_reprs_data.get("platform_representations", {}) or {}
+    )
+
+    if not tensor_reps and not platform_reps:
+        return
+
+    for plat, constraint_list in constraints_ip.items():
+        inserts: list[dict] = []
+        # Platform-specific representations first
+        if plat in platform_reps:
+            inserts.extend(platform_reps[plat])
+        # Then platform-agnostic tensor-dim representations
+        if tensor_reps:
+            inserts.extend(tensor_reps)
+
+        if not inserts:
+            continue
+
+        # Insert after platform_constants metadata if present
+        insert_at = 0
+        if (
+            constraint_list
+            and isinstance(constraint_list[0], dict)
+            and constraint_list[0].get("_type") == "platform_constants"
+        ):
+            insert_at = 1
+        constraint_list[insert_at:insert_at] = inserts
 
 
 def _build_constraints_in_parameters(
     relations: list[dict],
     supported_platforms: list[str],
+    params: list[dict],
 ) -> dict[str, list[dict]]:
-    """Build constraints_in_parameters: {platform: [relation_object]}."""
+    """Build constraints_in_parameters: {platform: [relation_object]}.
+
+    Deduplicates single-parameter value_dependency constraints when the
+    parameter already has a non-empty allowed_range_value in inputs/outputs
+    (the structured range is the canonical representation).
+
+    Args:
+        relations: List of param_relation dicts with 'platform' and 'relation_object' fields.
+        supported_platforms: List of platform names where is_supported=1.
+        params: List of parameter dicts (used to build allowed_range_value lookup).
+
+    Returns:
+        Dict mapping platform name to list of relation_object dicts.
+        If a relation's platform is empty, it applies to all supported platforms.
+        If a relation's platform specifies platforms, it only applies to those
+        that are also in supported_platforms.
+    """
+    from agent.utils.platform_utils import resolve_target_platforms
+
+    # Build {param_name: (allowed_range_value, type)} lookup from param_constraint JSON
+    ar_lookup: dict[str, tuple[list, str]] = {}
+    for p in params:
+        name = p.get("param_name", "")
+        constraint_raw = p.get("param_constraint", "{}") or "{}"
+        try:
+            constraint = json.loads(constraint_raw) if isinstance(constraint_raw, str) else constraint_raw
+        except (json.JSONDecodeError, TypeError):
+            continue
+        # Extract allowed_range_value from any platform (they are all identical)
+        if isinstance(constraint, dict):
+            for plat_data in constraint.values():
+                if isinstance(plat_data, dict):
+                    ar = plat_data.get("allowed_range_value", {})
+                    if isinstance(ar, dict):
+                        val = ar.get("value", [])
+                        ar_type = ar.get("type", "range")
+                        if val:
+                            ar_lookup[name] = (val, ar_type)
+                    break
     grouped: dict[str, list[dict]] = {}
+    skipped_count = 0
     for r in relations:
         obj = r.get("relation_object", {})
         if not obj or obj == {}:
             continue
-        precondition = r.get("precondition", "无")
-        targets = supported_platforms if precondition == "无" else [precondition]
+        if not _has_meaningful_expr(obj):
+            continue
+
+        # Dedup: skip single-param value_dependency when allowed_range_value covers it
+        # But do NOT skip when type="enum" (enum semantics differ from range)
+        expr_type = obj.get("expr_type", "")
+        rel_params = obj.get("relation_params", [])
+        if (
+            expr_type == "value_dependency"
+            and len(rel_params) == 1
+            and rel_params[0] in ar_lookup
+        ):
+            _, ar_type = ar_lookup[rel_params[0]]
+            if ar_type != "enum":
+                skipped_count += 1
+                continue
+
+        platform_str = r.get("platform", "")
+        targets = resolve_target_platforms(platform_str, supported_platforms)
+
         for plat in targets:
             grouped.setdefault(plat, []).append(obj)
+
+    if skipped_count > 0:
+        logger.info(
+            "assemble_result: deduplicated %d single-param value_dependency "
+            "constraints (covered by allowed_range_value)",
+            skipped_count,
+        )
+
     return grouped
 
 

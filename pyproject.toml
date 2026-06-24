@@ -4,9 +4,20 @@ version = "0.1.0"
 description = "Monorepo workspace for operator-agent system"
 requires-python = ">=3.12"
 dependencies = [
-    "asyncssh>=2.23.1",
-    "fastapi>=0.136.3",
-    "pydantic>=2.13.4",
+    # shared
+    "pydantic>=2.0",
+    "python-dotenv>=1.0",
+    # mcp-server
+    "mcp>=1.0",
+    "aiosqlite>=0.20",
+    "markdown-it-py[plugins]>=3.0",
+    # agent
+    "fastapi>=0.110",
+    "uvicorn>=0.29",
+    "pydantic-settings>=2.0",
+    "langchain-openai>=0.3",
+    "langgraph>=0.4",
+    "deepagents>=0.6",
 ]
 
 [project.optional-dependencies]

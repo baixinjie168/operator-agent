@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from agent.nodes.assemble_result import (
+    _build_constraints_in_parameters,
     _build_function_explanation,
     _build_inputs_outputs,
+    _has_meaningful_expr,
     _transform_return_codes,
 )
 
@@ -48,13 +50,30 @@ class TestBuildFunctionExplanation:
 
     def test_relations_grouped(self):
         relations = [
-            {"function_name": "aclnnFoo", "relation_type": "dtype", "description": "x1 and x2 must match"},
-            {"function_name": "aclnnFoo", "relation_type": "shape", "description": "same shape"},
-            {"function_name": "aclnnBar", "relation_type": "dtype", "description": "bar relation"},
+            {"function_name": "aclnnFoo", "relation_type": "dtype", "description": "x1 and x2 must match",
+             "relation_object": {"expr_type": "type_equality", "expr": "x1.dtype == x2.dtype"}},
+            {"function_name": "aclnnFoo", "relation_type": "shape", "description": "same shape",
+             "relation_object": {"expr_type": "shape_equality", "expr": "x1.shape == x2.shape"}},
+            {"function_name": "aclnnBar", "relation_type": "dtype", "description": "bar relation",
+             "relation_object": {"expr_type": "type_equality", "expr": "a.dtype == b.dtype"}},
         ]
         result = _build_function_explanation([], relations, [], [], [])
         assert len(result["aclnnFoo"]["relations"]) == 2
         assert len(result["aclnnBar"]["relations"]) == 1
+
+    def test_relations_empty_expr_filtered(self):
+        """Relations with empty expr should be excluded from output."""
+        relations = [
+            {"function_name": "aclnnFoo", "relation_type": "shape_broadcast",
+             "relation_object": {"expr_type": "shape_broadcast", "expr": "all(x.shape[i] == y.shape[i] for i in range(len(x.shape)))"}},
+            {"function_name": "aclnnFoo", "relation_type": "presence_dependency",
+             "relation_object": {"expr_type": "presence_dependency", "expr": ""}},
+            {"function_name": "aclnnFoo", "relation_type": "presence_dependency",
+             "relation_object": {"expr_type": "presence_dependency", "expr": "  "}},
+        ]
+        result = _build_function_explanation([], relations, [], [], [])
+        assert len(result["aclnnFoo"]["relations"]) == 1
+        assert result["aclnnFoo"]["relations"][0]["relation_object"]["expr_type"] == "shape_broadcast"
 
     def test_return_codes_grouped(self):
         return_codes = [
@@ -73,7 +92,8 @@ class TestBuildFunctionExplanation:
 
     def test_all_sources_combined(self):
         params = [{"function_name": "aclnnFoo", "param_name": "x"}]
-        relations = [{"function_name": "aclnnFoo", "relation_type": "dtype"}]
+        relations = [{"function_name": "aclnnFoo", "relation_type": "dtype",
+                      "relation_object": {"expr_type": "type_equality", "expr": "x.dtype == y.dtype"}}]
         signatures = [{"function_name": "aclnnFoo", "full_signature": "sig"}]
         return_codes = [{"function_name": "aclnnFoo", "error_code": 1}]
         combos = [{"function_name": "aclnnFoo", "combo": {}}]
@@ -277,3 +297,247 @@ class TestBuildInputsOutputs:
         inputs, _ = _build_inputs_outputs(params)
         assert inputs["x"] == {}
 
+
+class TestQuantizationTypeImplicitParam:
+    """Verify quantization_type default implicit param flows to inputs."""
+
+    def test_quantization_type_with_modes(self):
+        mapping = [{
+            "var_name": "quantization_type",
+            "is_quantization_type": True,
+            "param_type": "char",
+            "allowed_range_value": ["per-channel", "per-tensor"],
+            "allowed_range_type": "enum",
+            "tensor_param": None,
+            "dim_index": None,
+            "shape_text": None,
+            "is_constant": False,
+            "is_external_constant": False,
+        }]
+        inputs, _ = _build_inputs_outputs([], implicit_params=mapping)
+        assert "quantization_type" in inputs
+        plat_constraint = inputs["quantization_type"]["通用"]
+        assert plat_constraint["type"]["value"] == "char"
+        arv = plat_constraint["allowed_range_value"]
+        assert arv["type"] == "enum"
+        assert arv["value"] == ["per-channel", "per-tensor"]
+
+    def test_quantization_type_empty_modes(self):
+        """No document hits → empty allowed_range_value, enum type preserved."""
+        mapping = [{
+            "var_name": "quantization_type",
+            "is_quantization_type": True,
+            "param_type": "char",
+            "allowed_range_value": [],
+            "allowed_range_type": "enum",
+            "tensor_param": None,
+            "dim_index": None,
+            "is_constant": False,
+            "is_external_constant": False,
+        }]
+        inputs, _ = _build_inputs_outputs([], implicit_params=mapping)
+        arv = inputs["quantization_type"]["通用"]["allowed_range_value"]
+        assert arv["type"] == "enum"
+        assert arv["value"] == []
+
+    def test_quantization_type_does_not_shadow_shape_dims(self):
+        """A regular shape-dim implicit param keeps int64_t + range defaults."""
+        mappings = [
+            {
+                "var_name": "BS",
+                "tensor_param": "x1",
+                "dim_index": 0,
+                "shape_text": "(BS, H)",
+                "is_constant": False,
+                "is_external_constant": False,
+            },
+            {
+                "var_name": "quantization_type",
+                "is_quantization_type": True,
+                "param_type": "char",
+                "allowed_range_value": ["per-group"],
+                "allowed_range_type": "enum",
+                "tensor_param": None,
+                "dim_index": None,
+                "is_constant": False,
+                "is_external_constant": False,
+            },
+        ]
+        inputs, _ = _build_inputs_outputs([], implicit_params=mappings)
+        # Shape dim stays int64_t / range
+        bs = inputs["BS"]["通用"]
+        assert bs["type"]["value"] == "int64_t"
+        assert bs["allowed_range_value"]["type"] == "range"
+        # Quantization type is char / enum
+        qt = inputs["quantization_type"]["通用"]
+        assert qt["type"]["value"] == "char"
+        assert qt["allowed_range_value"]["type"] == "enum"
+        assert qt["allowed_range_value"]["value"] == ["per-group"]
+
+
+class TestHasMeaningfulExpr:
+    def test_empty_string(self):
+        assert _has_meaningful_expr({"expr": ""}) is False
+
+    def test_whitespace_only(self):
+        assert _has_meaningful_expr({"expr": "   "}) is False
+
+    def test_non_empty(self):
+        assert _has_meaningful_expr({"expr": "x.shape == y.shape"}) is True
+
+    def test_missing_expr_key(self):
+        assert _has_meaningful_expr({"expr_type": "presence_dependency"}) is False
+
+    def test_empty_dict(self):
+        assert _has_meaningful_expr({}) is False
+
+    def test_non_dict(self):
+        # Non-dict objects are considered meaningful (defensive)
+        assert _has_meaningful_expr("some string") is True
+        assert _has_meaningful_expr(42) is True
+
+    def test_non_string_expr(self):
+        # Non-string expr (e.g. list) is considered meaningful
+        assert _has_meaningful_expr({"expr": [1, 2, 3]}) is True
+
+
+class TestBuildConstraintsInParameters:
+    def test_empty_expr_filtered(self):
+        """Relations with empty expr should not appear in constraints_in_parameters."""
+        relations = [
+            {"platform": "", "relation_object": {
+                "expr_type": "shape_broadcast",
+                "expr": "all(x.shape[i] == y.shape[i] for i in range(len(x.shape)))",
+            }},
+            {"platform": "", "relation_object": {
+                "expr_type": "presence_dependency",
+                "expr": "",
+            }},
+        ]
+        supported = ["Atlas A2 训练系列产品/Atlas A2 推理系列产品"]
+        result = _build_constraints_in_parameters(relations, supported, [])
+        plat = "Atlas A2 训练系列产品/Atlas A2 推理系列产品"
+        assert len(result.get(plat, [])) == 1
+        assert result[plat][0]["expr_type"] == "shape_broadcast"
+
+    def test_all_empty_expr_returns_empty(self):
+        """When all relations have empty expr, result is empty dict."""
+        relations = [
+            {"platform": "", "relation_object": {
+                "expr_type": "presence_dependency",
+                "expr": "",
+            }},
+            {"platform": "", "relation_object": {
+                "expr_type": "presence_dependency",
+                "expr": "",
+            }},
+        ]
+        supported = ["Atlas A2"]
+        result = _build_constraints_in_parameters(relations, supported, [])
+        assert result == {}
+
+    def test_empty_relation_object_skipped(self):
+        """Relations with empty relation_object ({}) are skipped."""
+        relations = [
+            {"platform": "", "relation_object": {}},
+            {"platform": "", "relation_object": {
+                "expr_type": "type_equality",
+                "expr": "x.dtype == y.dtype",
+            }},
+        ]
+        supported = ["Atlas A2"]
+        result = _build_constraints_in_parameters(relations, supported, [])
+        assert len(result.get("Atlas A2", [])) == 1
+
+    def test_dedup_single_param_value_dependency_with_allowed_range(self):
+        """Single-param value_dependency is skipped when allowed_range_value covers it."""
+        import json
+
+        params = [
+            {
+                "param_name": "self",
+                "param_constraint": json.dumps({
+                    "Atlas A2": {
+                        "allowed_range_value": {"value": [[0, 1]], "src_text": ""},
+                    }
+                }),
+            },
+        ]
+        relations = [
+            {"platform": "", "relation_object": {
+                "expr_type": "value_dependency",
+                "expr": "0 <= self.range_value <= 1",
+                "relation_params": ["self"],
+                "src_text": "取值在0~1之间",
+            }},
+            {"platform": "", "relation_object": {
+                "expr_type": "shape_equality",
+                "expr": "target.shape == self.shape",
+                "relation_params": ["target", "self"],
+                "src_text": "维度与self一致",
+            }},
+        ]
+        supported = ["Atlas A2"]
+        result = _build_constraints_in_parameters(relations, supported, params)
+        plat = "Atlas A2"
+        # value_dependency for self should be deduped, only shape_equality remains
+        assert len(result.get(plat, [])) == 1
+        assert result[plat][0]["expr_type"] == "shape_equality"
+
+    def test_dedup_keeps_value_dependency_without_allowed_range(self):
+        """Single-param value_dependency is kept when allowed_range_value is empty."""
+        import json
+
+        params = [
+            {
+                "param_name": "reduction",
+                "param_constraint": json.dumps({
+                    "Atlas A2": {
+                        "allowed_range_value": {"value": [], "src_text": ""},
+                    }
+                }),
+            },
+        ]
+        relations = [
+            {"platform": "", "relation_object": {
+                "expr_type": "value_dependency",
+                "expr": "reduction.range_value in (0, 1, 2)",
+                "relation_params": ["reduction"],
+                "src_text": "枚举值0/1/2",
+            }},
+        ]
+        supported = ["Atlas A2"]
+        result = _build_constraints_in_parameters(relations, supported, params)
+        plat = "Atlas A2"
+        # Should be kept because allowed_range_value is empty
+        assert len(result.get(plat, [])) == 1
+        assert result[plat][0]["expr_type"] == "value_dependency"
+
+    def test_dedup_ignores_multi_params_value_dependency(self):
+        """Multi-param value_dependency is never deduped even if one param has allowed_range."""
+        import json
+
+        params = [
+            {
+                "param_name": "self",
+                "param_constraint": json.dumps({
+                    "Atlas A2": {
+                        "allowed_range_value": {"value": [[0, 1]], "src_text": ""},
+                    }
+                }),
+            },
+        ]
+        relations = [
+            {"platform": "", "relation_object": {
+                "expr_type": "value_dependency",
+                "expr": "target.range_value == self.range_value",
+                "relation_params": ["target", "self"],
+                "src_text": "target取值与self一致",
+            }},
+        ]
+        supported = ["Atlas A2"]
+        result = _build_constraints_in_parameters(relations, supported, params)
+        plat = "Atlas A2"
+        # Multi-param value_dependency should NOT be deduped
+        assert len(result.get(plat, [])) == 1
+        assert result[plat][0]["expr_type"] == "value_dependency"

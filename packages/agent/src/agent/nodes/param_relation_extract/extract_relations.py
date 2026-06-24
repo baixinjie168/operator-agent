@@ -1,88 +1,111 @@
 """ExtractRelations nodes: LLM-based relation extraction from section content."""
 
-import json
 import logging
-import re
 from typing import Any
 
 from langchain_openai import ChatOpenAI
 
-from agent.core.config import settings
-from agent.nodes.param_relation_extract.prompts import RELATION_EXTRACT_PROMPT
+from agent.nodes.param_relation_extract.prompts import (
+    RELATION_EXTRACT_PROMPT,
+    RELATION_TYPE_DEFINITIONS,
+    format_implicit_params_context,
+)
 from agent.nodes.param_relation_extract.state import RelationExtractState
+from agent.utils.llm_common import create_llm, parse_json_response
 
 logger = logging.getLogger(__name__)
 
-_JSON_BLOCK_RE = re.compile(r"```(?:json)?\s*([\s\S]*?)```", re.IGNORECASE)
-
-
-def _create_llm() -> ChatOpenAI:
-    return ChatOpenAI(
-        api_key=settings.active_api_key,
-        base_url=settings.active_base_url,
-        model=settings.active_model,
-        temperature=0.1,
-    )
-
 
 def _parse_relations_response(text: str) -> list[dict[str, Any]]:
-    match = _JSON_BLOCK_RE.search(text)
-    if match:
-        text = match.group(1)
-    text = text.strip()
-
-    try:
-        data = json.loads(text)
-        if isinstance(data, list):
-            return data
-    except json.JSONDecodeError:
-        pass
-
-    arr_match = re.search(r"\[[\s\S]*\]", text)
-    if arr_match:
-        try:
-            data = json.loads(arr_match.group(0))
-            if isinstance(data, list):
-                return data
-        except json.JSONDecodeError:
-            pass
-
-    logger.warning("ExtractRelations: failed to parse LLM response as JSON: %s", text[:200])
-    return []
+    result = parse_json_response(text, list)
+    return result if result is not None else []
 
 
-async def _extract_relations(section_content: str) -> list[dict[str, Any]]:
+async def _extract_relations(
+    section_content: str,
+    llm: ChatOpenAI | None = None,
+    implicit_params: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
     if not section_content.strip():
         return []
 
-    llm = _create_llm()
-    prompt = RELATION_EXTRACT_PROMPT.format(section_content=section_content)
+    if llm is None:
+        llm = create_llm()
+    prompt = RELATION_EXTRACT_PROMPT.format(
+        section_content=section_content,
+        relation_types=RELATION_TYPE_DEFINITIONS,
+        implicit_params_context=format_implicit_params_context(implicit_params or []),
+    )
     response = await llm.ainvoke(prompt)
     text = response.content if hasattr(response, "content") else str(response)
     return _parse_relations_response(text.strip())
 
 
 async def extract_ws_node(state: RelationExtractState) -> dict[str, Any]:
-    content = state.get("ws_section_content", "")
-    logger.info("ExtractWS: extracting from %d chars", len(content))
+    from agent.nodes.param_relation_extract.agent_loop import extract_relations_agent
 
+    content = state.get("ws_section_content", "")
+    param_names = state.get("param_names", [])
+    implicit_params = state.get("implicit_params", [])
+    logger.info(
+        "ExtractWS-Agent: extracting from %d chars, %d params",
+        len(content),
+        len(param_names),
+    )
+
+    if not content.strip():
+        return {"ws_relations": [], "coverage_report": {"ws": {}}, "error": None}
+
+    llm = create_llm()
     try:
-        relations = await _extract_relations(content)
-        logger.info("ExtractWS: found %d relations", len(relations))
-        return {"ws_relations": relations, "error": None}
+        relations, report = await extract_relations_agent(
+            content, param_names, llm, implicit_params=implicit_params,
+        )
+        logger.info(
+            "ExtractWS-Agent: %d relations, coverage=%s",
+            len(relations),
+            report.get("coverage", ""),
+        )
+        return {
+            "ws_relations": relations,
+            "coverage_report": {"ws": report},
+            "error": None,
+        }
     except Exception:
-        logger.exception("ExtractWS failed")
-        return {"ws_relations": [], "error": "extract_ws_failed"}
+        logger.exception("ExtractWS-Agent failed")
+        return {"ws_relations": [], "coverage_report": {"ws": {}}, "error": "extract_ws_agent_failed"}
 
 
 async def extract_exe_node(state: RelationExtractState) -> dict[str, Any]:
-    content = state.get("exe_section_content", "")
-    logger.info("ExtractExe: extracting from %d chars", len(content))
+    from agent.nodes.param_relation_extract.agent_loop import extract_relations_agent
 
+    content = state.get("exe_section_content", "")
+    param_names = state.get("param_names", [])
+    implicit_params = state.get("implicit_params", [])
+    logger.info(
+        "ExtractExe-Agent: extracting from %d chars, %d params",
+        len(content),
+        len(param_names),
+    )
+
+    if not content.strip():
+        return {"exe_relations": [], "coverage_report": {"exe": {}}, "error": None}
+
+    llm = create_llm()
     try:
-        relations = await _extract_relations(content)
-        logger.info("ExtractExe: found %d relations", len(relations))
-        return {"exe_relations": relations, "error": None}
+        relations, report = await extract_relations_agent(
+            content, param_names, llm, implicit_params=implicit_params,
+        )
+        logger.info(
+            "ExtractExe-Agent: %d relations, coverage=%s",
+            len(relations),
+            report.get("coverage", ""),
+        )
+        return {
+            "exe_relations": relations,
+            "coverage_report": {"exe": report},
+            "error": None,
+        }
     except Exception:
-        logger.exception("ExtractExe failed")
-        return {"exe_relations": [], "error": "extract_exe_failed"}
+        logger.exception("ExtractExe-Agent failed")
+        return {"exe_relations": [], "coverage_report": {"exe": {}}, "error": "extract_exe_agent_failed"}

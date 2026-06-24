@@ -1,14 +1,14 @@
 .claude/settings.local.json
-.venv/
+.venv
 __pycache__/
 *.pyc
 .env
 .idea/
 
+# Project directories
 .opencode
 .vscode
 .claude
-
 cases
 executors
 exported_constraints
@@ -16,3 +16,13 @@ uploads
 data
 batch_results
 operators
+
+# Data files
+/uploads/
+/res/
+/data/operator_agent.db
+/data/operator_agent.db-shm
+/data/operator_agent.db-wal
+/data/operator_agent_backup_*.db
+/docs/res/
+/operators/checklist/

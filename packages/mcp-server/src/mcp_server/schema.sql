@@ -27,7 +27,6 @@ CREATE TABLE IF NOT EXISTS parameters (
     param_type      TEXT NOT NULL DEFAULT '',
     direction       TEXT NOT NULL DEFAULT 'input',
     src_content      TEXT,
-    description     TEXT,
     dtype_desc      TEXT,
     dformat_desc    TEXT,
     shape           TEXT,
@@ -37,6 +36,7 @@ CREATE TABLE IF NOT EXISTS parameters (
     param_desc      TEXT NOT NULL DEFAULT '',
     allowed_range_value TEXT NOT NULL DEFAULT '[]',
     param_constraint    TEXT NOT NULL DEFAULT '{}',
+    llm_description     TEXT NOT NULL DEFAULT '',
     created_at      TEXT DEFAULT (datetime('now')),
     UNIQUE(doc_id, function_name, param_name)
 );
@@ -82,7 +82,7 @@ CREATE TABLE IF NOT EXISTS param_relations (
     doc_id          INTEGER NOT NULL REFERENCES document_versions(id),
     function_name   TEXT NOT NULL DEFAULT '',
     relation_type   TEXT NOT NULL,
-    precondition    TEXT NOT NULL DEFAULT '无',
+    platform        TEXT NOT NULL DEFAULT '',
     description     TEXT NOT NULL,
     params          TEXT NOT NULL,
     param_optional  TEXT NOT NULL DEFAULT '{}',
@@ -203,3 +203,63 @@ CREATE TABLE IF NOT EXISTS exec_results (
 CREATE INDEX IF NOT EXISTS idx_exec_results_task ON exec_results(task_id);
 CREATE INDEX IF NOT EXISTS idx_exec_results_case ON exec_results(case_id);
 CREATE INDEX IF NOT EXISTS idx_exec_results_operator ON exec_results(operator_name);
+
+CREATE TABLE IF NOT EXISTS tasks (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    name            TEXT NOT NULL,
+    status          TEXT NOT NULL DEFAULT 'pending',
+    total_count     INTEGER NOT NULL,
+    completed_count INTEGER NOT NULL DEFAULT 0,
+    failed_count    INTEGER NOT NULL DEFAULT 0,
+    upload_dir      TEXT NOT NULL,
+    created_at      TEXT DEFAULT (datetime('now')),
+    updated_at      TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS task_items (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id         INTEGER NOT NULL REFERENCES tasks(id),
+    seq             INTEGER NOT NULL,
+    operator_name   TEXT NOT NULL,
+    file_path       TEXT NOT NULL,
+    status          TEXT NOT NULL DEFAULT 'pending',
+    doc_id          INTEGER,
+    error           TEXT,
+    started_at      TEXT,
+    finished_at     TEXT,
+    created_at      TEXT DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_task_items_task_id
+    ON task_items(task_id);
+
+CREATE TABLE IF NOT EXISTS shape_dim_mappings (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    doc_id          INTEGER NOT NULL REFERENCES document_versions(id),
+    mappings_json   TEXT NOT NULL DEFAULT '[]',
+    rendered_text   TEXT NOT NULL DEFAULT '',
+    created_at      TEXT DEFAULT (datetime('now'))
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_shape_dim_mappings_doc_id
+    ON shape_dim_mappings(doc_id);
+
+CREATE TABLE IF NOT EXISTS implicit_params (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    doc_id          INTEGER NOT NULL REFERENCES document_versions(id),
+    mappings_json   TEXT NOT NULL DEFAULT '[]',
+    rendered_text   TEXT NOT NULL DEFAULT '',
+    created_at      TEXT DEFAULT (datetime('now')),
+    UNIQUE(doc_id)
+);
+
+CREATE TABLE IF NOT EXISTS parameter_representations (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    doc_id              INTEGER NOT NULL REFERENCES document_versions(id),
+    representations     TEXT NOT NULL DEFAULT '{}',
+    created_at          TEXT DEFAULT (datetime('now')),
+    UNIQUE(doc_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_parameter_representations_doc_id
+    ON parameter_representations(doc_id);

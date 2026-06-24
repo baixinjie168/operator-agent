@@ -57,7 +57,7 @@ class ParamRelation(BaseModel):
     """A coupling relation between two or more parameters."""
 
     relation_type: str
-    precondition: str = "无"
+    platform: str = ""
     description: str
     params: list[str]
     param_optional: dict[str, bool] = {}
