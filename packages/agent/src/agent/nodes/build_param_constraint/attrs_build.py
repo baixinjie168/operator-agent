@@ -124,7 +124,7 @@ async def attrs_build_node(state: BuildParamConstraintState) -> dict[str, Any]:
                 "is_optional": {"value": bool(param.get("is_optional")), "src_text": ""},
                 "is_support_discontinuous": disc,
                 "is_operator_param": {"value": pname in all_sig_set, "src_text": ""},
-                "array_length": param.get("array_length", "N/A") or "N/A",
+                "array_length": {"value": param.get("array_length", "N/A") or "N/A", "src_text": ""},
                 "dtype": {"value": dtypes, "src_text": ""},
                 "_shape_raw": shape_raw,
                 "_is_tensor": is_tensor,

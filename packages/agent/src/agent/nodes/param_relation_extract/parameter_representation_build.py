@@ -13,11 +13,16 @@ mechanical transcription of shape tuples.
 
 Examples (aclnnAlltoAllMatmul):
     - "BS is represented by x1.shape[0]"
-        → expr: ``BS.range_value == x1.shape[0]``
+        → expr: ``x1.shape[0] == BS``
     - "x2.shape[0] is represented by H*rankSize"
-        → expr: ``x2.shape[0] == H.range_value*rankSize.range_value``
+        → expr: ``x2.shape[0] == H*rankSize.range_value``
     - "rankSize on Atlas A2 ∈ {2, 4, 8}"
         → expr: ``rankSize.range_value in [2, 4, 8]``
+
+Dimension variables (BS, H, b, m, k, ...) are referenced directly by name —
+they *are* the symbolic dimension size.  External constants (rankSize, ...)
+keep ``.range_value`` because they have a real platform-dependent value
+range.  Platform-constant membership checks also use ``.range_value``.
 
 Zero LLM calls. Position in subgraph::
 
@@ -57,16 +62,23 @@ def _build_constant_values(mappings: list[dict]) -> dict[str, int]:
 def _slot_expr_to_python(
     slot_expr: str,
     constant_values: dict[str, int],
+    external_const_names: set[str] | None = None,
 ) -> tuple[str, list[str]]:
     """Convert a shape slot expression into a Python expression fragment.
 
     Each identifier is rewritten:
     - excluded words (``int``, ``shape``, ...) → kept as-is
     - known constant → its numeric value (e.g. ``k0`` → ``16``)
-    - named variable → ``var.range_value`` (e.g. ``BS`` → ``BS.range_value``)
+    - external constant → ``var.range_value`` (e.g. ``rankSize`` →
+      ``rankSize.range_value``) — external constants have a real
+      platform-dependent range_value attribute
+    - dimension variable → ``var`` (e.g. ``b`` → ``b``, ``H`` → ``H``)
+      — a dimension variable *is* the symbolic dimension size, so it is
+      referenced directly by name without ``.range_value``
 
     Returns ``(python_expr, ordered_var_names)``.
     """
+    ext_set = external_const_names or set()
     var_names: list[str] = []
 
     def _replace(match: re.Match[str]) -> str:
@@ -77,7 +89,11 @@ def _slot_expr_to_python(
             return str(constant_values[name])
         if name not in var_names:
             var_names.append(name)
-        return f"{name}.range_value"
+        # External constants have a real range_value (platform-dependent
+        # values); dimension variables are used directly by name.
+        if name in ext_set:
+            return f"{name}.range_value"
+        return name
 
     python_expr = _DIM_VAR_RE.sub(_replace, slot_expr)
     return python_expr, var_names
@@ -93,10 +109,14 @@ def _build_tensor_representations(
 
         {tensor}.shape[{dim}] == {python_expr}
 
-    where ``python_expr`` is the slot expression rewritten with
-    ``var.range_value`` substitutions and constant values.
+    where ``python_expr`` is the slot expression rewritten with direct
+    variable names (dimension variables), ``.range_value`` (external
+    constants), and substituted constant values.
     """
     constant_values = _build_constant_values(mappings)
+    external_const_names = {
+        m["var_name"] for m in mappings if m.get("is_external_constant")
+    }
     reps: list[dict[str, Any]] = []
     seen_slots: set[tuple[str, int]] = set()
 
@@ -120,7 +140,9 @@ def _build_tensor_representations(
             continue
         seen_slots.add(slot_key)
 
-        python_expr, var_names = _slot_expr_to_python(slot_expr, constant_values)
+        python_expr, var_names = _slot_expr_to_python(
+            slot_expr, constant_values, external_const_names,
+        )
 
         # Skip slots that reduced to a pure number (no variable references)
         if not var_names:

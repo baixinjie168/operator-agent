@@ -1,26 +1,23 @@
 """ImplicitParamExtract node: extract non-operator (implicit) parameters from document text.
 
-Extracts named dimension variables (e.g. BS, H, N, b, m, k, n1) from
-shape tuples in parameter tables.  These named variables are treated as
-implicit (non-operator) parameters: they appear in constraint expressions
-by name, not substituted with tensor.shape[i].
+Two-stage architecture (Plan A — "generate then filter"):
 
-Supports:
-- Slot-aware parsing for compound expressions (e.g. H*rankSize, BS/rankSize)
-- Non-tensor parameter row filtering (e.g. bool transposeX2)
-- External constant detection (e.g. rankSize = NPU card count)
-- Platform constant value extraction from constraint sections
+Phase 0 (deterministic): Identify tensor parameters from HTML table rows.
+Phase 1 (deterministic): Regex coarse-sieve — collect ALL candidate named
+    identifiers from shape tuples, including context (±100 chars) for the
+    Agent to inspect.  No classification judgment is made here; false
+    positives (e.g. "Reduce" in "Reduce维度") are expected and tolerated.
+Phase 2 (LLM Agent):   Validate and classify each candidate.  The Agent
+    confirms true dimension variables, removes concept terms / operation
+    names, reclassifies constants and external constants, and can supplement
+    missed parameters discovered in constraint text.
+Phase 3 (deterministic): Extract platform-specific values for external
+    constants (e.g. "Atlas A2：支持2、4、8卡").
+Phase 4 (deterministic): Always inject the quantization_type implicit
+    parameter (char-typed enum).
 
-For example, for aclnnAlltoAllMatmul:
-  BS -> x1.shape[0]
-  H  -> x1.shape[1]
-  N  -> x2.shape[1] | biasOptional.shape[0]
-  rankSize -> external constant (platform-dependent values)
-
-The result is persisted to DB (implicit_params table) for traceability,
-and passed to downstream nodes via state["implicit_params"].
-
-Zero LLM calls - purely deterministic regex-based extraction.
+If the Agent fails (timeout, parse error, etc.), the system degrades
+gracefully to the Phase 1 regex results — the pipeline never breaks.
 
 Position in subgraph:
     fetch_sections -> **this node** -> [extract_ws || extract_exe]
@@ -30,6 +27,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 from typing import Any
 
@@ -48,20 +46,17 @@ _mcp_client = MCPClient()
 # ---------------------------------------------------------------------------
 
 # Match shape tuples: Chinese or ASCII parentheses
-_SHAPE_TUPLE_RE = re.compile(r"[（(]\s*([^)）]+)\s*[）)]")
+_SHAPE_TUPLE_RE = re.compile(r"[（(\[]\s*([^）)\]]+)\s*[）)\]]")
 
-# Named dimension variable: any-case identifier (supports BS, H, N, rankSize, b, m, k, etc.)
+# Named dimension variable: any-case identifier
 _DIM_VAR_RE = re.compile(r"\b([A-Za-z][A-Za-z0-9]*(?:_[A-Za-z][A-Za-z0-9]*)*)\b")
 
 # Words that look like dimension variables but are not.
-#
-# Organised by category.  When adding new entries, keep them sorted
-# within each group so duplicates are easy to spot.
+# Used as a *coarse pre-filter* in Phase 1 — the Agent makes the final call.
 _EXCLUDE_WORDS = frozenset({
     # -- Python / JSON literals --
     "true", "false", "none", "null",
     "True", "False", "None",
-
     # -- Common non-dimension terms --
     "shape", "dtype", "format", "type",
     "input", "output", "tensor", "optional",
@@ -69,19 +64,16 @@ _EXCLUDE_WORDS = frozenset({
     "Shape", "Dtype", "Format", "Type",
     "Input", "Output", "Tensor", "Optional",
     "ND", "ACL",
-
-    # -- C base type keywords (no digit suffix) --
+    # -- C base type keywords --
     "float", "double", "void", "char", "int", "long", "short",
     "signed", "unsigned", "struct", "union", "enum",
     "Float", "Double", "Void", "Char", "Int", "Long", "Short",
     "Signed", "Unsigned", "Struct", "Union", "Enum",
-
-    # -- C fixed-width type keywords (with _t suffix) --
+    # -- C fixed-width type keywords --
     "int8_t", "int16_t", "int32_t", "int64_t",
     "uint8_t", "uint16_t", "uint32_t", "uint64_t",
     "size_t", "ptrdiff_t",
-
-    # -- Bare data-type names (with digit suffix, already existed) --
+    # -- Bare data-type names --
     "float16", "float32", "float64",
     "int8", "int16", "int32", "int64",
     "uint8", "uint16", "uint32", "uint64",
@@ -90,14 +82,12 @@ _EXCLUDE_WORDS = frozenset({
     "INT8", "INT16", "INT32", "INT64",
     "UINT8", "UINT16", "UINT32", "UINT64",
     "BOOL", "STRING",
-
     # -- Common non-variable identifiers from Markdown / URLs --
     "common", "md", "html", "http", "https", "www",
     "aclnn", "aclrt", "device", "host",
     "Common", "Md", "Html", "Http", "Https", "Www",
     "Aclnn", "Aclrt", "Device", "Host",
-
-    # -- English stop-words / logical operators --
+    # -- English stop-words --
     "or", "and", "if", "else", "when",
     "the", "for", "not", "with", "from",
     "Or", "And", "If", "Else", "When",
@@ -108,9 +98,6 @@ _EXCLUDE_WORDS = frozenset({
 # Quantization type (default implicit parameter)
 # ---------------------------------------------------------------------------
 
-# The fixed universe of quantization granularity modes.  The parameter's
-# allowed_range_value is the subset of these that actually appear in the
-# operator's section text (preserving this canonical order, de-duplicated).
 _QUANTIZATION_CANDIDATES = (
     "per-channel",
     "per-group",
@@ -120,15 +107,19 @@ _QUANTIZATION_CANDIDATES = (
 
 _QUANTIZATION_PARAM_NAME = "quantization_type"
 
+# ---------------------------------------------------------------------------
+# Context window for surrounding_text (chars on each side of the match)
+# ---------------------------------------------------------------------------
+
+_CONTEXT_RADIUS = 100
+
+# ---------------------------------------------------------------------------
+# Deterministic helpers (retained from original implementation)
+# ---------------------------------------------------------------------------
+
 
 def _is_markdown_url(content: str) -> bool:
-    """Return True if *content* looks like a Markdown hyperlink URL.
-
-    ``_SHAPE_TUPLE_RE`` happily matches the ``(url)`` part of
-    ``[text](url)`` links.  Such matches are never shape tuples and
-    should be skipped to avoid extracting spurious identifiers like
-    ``common`` or ``md`` from paths such as ``../common/xxx.md``.
-    """
+    """Return True if *content* looks like a Markdown hyperlink URL."""
     stripped = content.strip()
     if "/" in stripped:
         return True
@@ -138,18 +129,9 @@ def _is_markdown_url(content: str) -> bool:
         return True
     return False
 
-# ---------------------------------------------------------------------------
-# Helper functions
-# ---------------------------------------------------------------------------
-
 
 def _camel_to_snake(name: str) -> str:
-    """Convert camelCase to snake_case.
-
-    Examples:
-        numLayers -> num_layers
-        batchSizeOptional -> batch_size_optional
-    """
+    """Convert camelCase to snake_case."""
     s1 = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\g<1>_\g<2>", name)
     return re.sub(r"([a-z0-9])([A-Z])", r"\g<1>_\g<2>", s1).lower()
 
@@ -167,11 +149,7 @@ def _collect_signature_params(signatures: list[dict]) -> set[str]:
 
 
 def _find_nearby_param_name(text: str, pos: int) -> str:
-    """Find the parameter name from the HTML table row containing pos.
-
-    Looks backward for the nearest <tr tag, then extracts text from the
-    first <td> cell in that row.
-    """
+    """Find the parameter name from the HTML table row containing *pos*."""
     tr_start = text.rfind("<tr", 0, pos)
     if tr_start < 0:
         return ""
@@ -187,7 +165,7 @@ def _find_nearby_param_name(text: str, pos: int) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Phase 0: Tensor parameter identification
+# Phase 0: Tensor parameter identification (deterministic)
 # ---------------------------------------------------------------------------
 
 
@@ -197,13 +175,10 @@ def _identify_tensor_params(
 ) -> set[str]:
     """Collect names of tensor-type parameters from HTML table rows.
 
-    A parameter is considered a tensor if:
-    1. Its row contains a non-dash shape column value (e.g. "2维，shape为(BS, H)")
-    2. Or its type column contains tensor data types (FLOAT16, BFLOAT16, etc.)
+    A parameter is a tensor if its row has shape info or tensor data types.
     """
     tensor_params: set[str] = set()
 
-    # Scan HTML table rows: <tr><td>param_name</td>...<td>shape_info</td>...
     for row_match in re.finditer(
         r"<tr>\s*<td>(\w+)</td>(.*?)</tr>",
         sections_text,
@@ -216,11 +191,9 @@ def _identify_tensor_params(
         cells = re.findall(r"<td>(.*?)</td>", row_content, re.DOTALL)
         for cell in cells:
             clean = re.sub(r"<[^>]+>", "", cell).strip()
-            # Has shape info (not just "-")
             if "shape" in clean.lower() and clean != "-":
                 tensor_params.add(param_name)
                 break
-            # Has tensor data types
             if any(
                 dt in clean
                 for dt in ("FLOAT16", "BFLOAT16", "FLOAT32", "INT8", "INT32", "INT64")
@@ -232,15 +205,12 @@ def _identify_tensor_params(
 
 
 # ---------------------------------------------------------------------------
-# Phase 1: Slot-aware dimension parsing
+# Phase 1 helpers: slot-aware parsing (deterministic)
 # ---------------------------------------------------------------------------
 
 
 def _parse_shape_slots(tuple_content: str) -> list[dict]:
     """Parse a shape tuple into slot-aware dimension mappings.
-
-    Splits by comma first to identify dimension slots, then extracts
-    named variables within each slot.
 
     Example: "H*rankSize, N" returns:
     [
@@ -268,98 +238,97 @@ def _parse_shape_slots(tuple_content: str) -> list[dict]:
     return result
 
 
-# ---------------------------------------------------------------------------
-# Phase 2: Non-tensor parameter row filtering
-# ---------------------------------------------------------------------------
-
-
 def _should_skip_shape_tuple(
     nearby_param: str,
     tensor_params: set[str],
 ) -> bool:
-    """Return True if this shape tuple should be skipped.
-
-    Skip when the nearby parameter is NOT a tensor type.
-    For example, transposeX2 is a bool parameter whose description
-    mentions "(N, rankSize*H)" — this shape describes x2's conditional
-    form, not transposeX2's own shape.
-    """
+    """Return True if this shape tuple should be skipped (non-tensor param)."""
     return nearby_param not in tensor_params
 
-
 # ---------------------------------------------------------------------------
-# Phase 3: External constant detection
+# Phase 1: Regex coarse-sieve candidate collection (deterministic)
 # ---------------------------------------------------------------------------
 
 
-def _detect_external_constants(
-    mappings: list[dict],
+def _collect_candidates(
     sections_text: str,
+    signatures: list[dict],
+    tensor_params: set[str] | None = None,
 ) -> list[dict]:
-    """Identify variables that are external constants, not tensor dimensions.
+    """Collect ALL candidate named identifiers from shape tuples.
 
-    A variable is an external constant if:
-    1. It ONLY appears in compound slots (never as a standalone dimension)
-    2. It is not already marked as a known constant (e.g. k0=16)
+    This is the "generate" stage of generate-then-filter.  It deliberately
+    has **high recall** and tolerates false positives (e.g. "Reduce" in
+    "Reduce维度").  The Agent (Phase 2) will filter them out.
 
-    Returns a list of external constant mapping records.
+    Each candidate record includes:
+    - candidate_id: unique identifier for Agent reference
+    - var_name: the extracted identifier
+    - tensor_param: the nearby tensor parameter name
+    - dim_index / slot_index: dimension slot position
+    - slot_expr / is_compound / compound_expr: slot metadata
+    - shape_text: the original shape tuple
+    - surrounding_text: ±100 chars of context around the shape tuple
     """
-    # Collect variables that have standalone (non-compound) mappings
-    standalone_vars: set[str] = set()
-    compound_vars: set[str] = set()
+    sig_params = _collect_signature_params(signatures)
+    _tensor_params = tensor_params or set()
+    candidates: list[dict] = []
+    cand_counter = 0
 
-    for m in mappings:
-        if m.get("is_constant"):
+    for match in _SHAPE_TUPLE_RE.finditer(sections_text):
+        tuple_content = match.group(1)
+        if _is_markdown_url(tuple_content):
             continue
-        if not m.get("is_compound"):
-            standalone_vars.add(m["var_name"])
-        else:
-            compound_vars.add(m["var_name"])
 
-    # Candidates: only in compound slots, never standalone
-    candidates = compound_vars - standalone_vars
+        nearby_param = _find_nearby_param_name(sections_text, match.start())
+        if not nearby_param:
+            continue
 
-    external_constants: list[dict] = []
-    for var in sorted(candidates):
-        # Collect which params reference this constant
-        refs = sorted({
-            m["tensor_param"]
-            for m in mappings
-            if m["var_name"] == var and m.get("tensor_param")
-        })
-
-        # Optional: verify with section text for explicit definition
-        is_confirmed = bool(re.search(
-            r"(?:NPU|GPU|卡数|设备数|并行度)[（(]" + re.escape(var) + r"[）)]",
-            sections_text,
-        ))
-
-        if is_confirmed or refs:
-            external_constants.append({
-                "var_name": var,
-                "is_external_constant": True,
-                "tensor_param": None,
-                "dim_index": None,
-                "shape_text": None,
-                "is_constant": False,
-                "constant_value": None,
-                "slot_index": None,
-                "slot_expr": None,
-                "is_compound": False,
-                "compound_expr": None,
-                "referenced_in": refs,
-            })
+        if _tensor_params and _should_skip_shape_tuple(
+            nearby_param, _tensor_params,
+        ):
             logger.debug(
-                "ImplicitParamExtract: detected external constant '%s' "
-                "(referenced_in=%s, confirmed_by_text=%s)",
-                var, refs, is_confirmed,
+                "ImplicitParamExtract: skipping shape tuple in non-tensor "
+                "param row '%s': (%s)",
+                nearby_param, tuple_content,
             )
+            continue
 
-    return external_constants
+        # Extract ±100 chars of surrounding context for the Agent
+        ctx_start = max(0, match.start() - _CONTEXT_RADIUS)
+        ctx_end = min(len(sections_text), match.end() + _CONTEXT_RADIUS)
+        surrounding = sections_text[ctx_start:ctx_end]
+
+        slots = _parse_shape_slots(tuple_content)
+        for slot in slots:
+            for var in slot["vars"]:
+                if var in sig_params:
+                    continue
+                cand_counter += 1
+                candidates.append({
+                    "candidate_id": f"cand_{cand_counter:03d}",
+                    "var_name": var,
+                    "tensor_param": nearby_param,
+                    "dim_index": slot["slot_index"],
+                    "slot_index": slot["slot_index"],
+                    "slot_expr": slot["slot_expr"],
+                    "is_compound": slot["is_compound"],
+                    "compound_expr": (
+                        slot["slot_expr"] if slot["is_compound"] else None
+                    ),
+                    "shape_text": f"({tuple_content.strip()})",
+                    "surrounding_text": surrounding,
+                })
+
+    logger.info(
+        "ImplicitParamExtract: Phase 1 collected %d candidates",
+        len(candidates),
+    )
+    return candidates
 
 
 # ---------------------------------------------------------------------------
-# Phase 4: Platform constant value extraction
+# Phase 3: Platform constant value extraction (deterministic, retained)
 # ---------------------------------------------------------------------------
 
 
@@ -372,13 +341,9 @@ def _extract_platform_constant_values(
 
     Scans constraint section for patterns like:
     - "Atlas A2 ...：支持2、4、8卡"
-    - "Atlas 350 加速卡：支持2、4、8、16卡"
-
-    Returns a list of {"platform", "values", "source_citation"} dicts.
     """
     results: list[dict] = []
     for platform in supported_platforms:
-        # Pattern: platform name ... 支持 ... digit list ... 卡
         pattern = re.compile(
             re.escape(platform) + r"[：:].*?支持\s*([\d、,，\s]+)\s*卡",
         )
@@ -400,151 +365,17 @@ def _extract_platform_constant_values(
 
 
 # ---------------------------------------------------------------------------
-# Constant detection (existing, enhanced)
-# ---------------------------------------------------------------------------
-
-
-def _detect_constants(
-    sections_text: str,
-    mappings: list[dict],
-) -> None:
-    """Post-process mappings to detect constant dimension variables.
-
-    Scans the section text for patterns like "其中k0 = 16" or "n0为16"
-    and marks the corresponding mapping entries as constants.
-
-    Modifies *mappings* in place.
-    """
-    if not mappings:
-        return
-
-    # Collect all var names that need checking
-    var_names = {m["var_name"] for m in mappings if not m.get("is_constant")}
-    if not var_names:
-        return
-
-    for var in var_names:
-        # Pattern: "k0 = 16", "k0为16", "k0 等于 16", "k0 is 16"
-        pattern = re.compile(
-            r"\b" + re.escape(var) + r"\s*(?:[=为]|等于|is)\s*(\d+)",
-            re.IGNORECASE,
-        )
-        match = pattern.search(sections_text)
-        if match:
-            const_val = int(match.group(1))
-            for m in mappings:
-                if m["var_name"] == var:
-                    m["is_constant"] = True
-                    m["constant_value"] = const_val
-            logger.debug(
-                "ImplicitParamExtract: detected constant %s = %d", var, const_val,
-            )
-
-
-# ---------------------------------------------------------------------------
-# Shape dimension mapping extraction
-# ---------------------------------------------------------------------------
-
-
-def _build_implicit_params(
-    sections_text: str,
-    signatures: list[dict],
-    tensor_params: set[str] | None = None,
-) -> list[dict]:
-    """Build shape dimension mappings from section text.
-
-    Uses slot-aware parsing to correctly handle compound expressions
-    (e.g. H*rankSize, BS/rankSize) and filters out non-tensor parameter rows.
-
-    Returns a list of mapping dicts, each containing:
-    - var_name: the named dimension variable (e.g. "b", "n1")
-    - tensor_param: the tensor parameter it belongs to (e.g. "self", "mat2")
-    - dim_index: the index in the tensor's shape tuple (= slot_index)
-    - slot_index: comma-delimited slot position
-    - slot_expr: the full expression text of this slot (e.g. "H*rankSize")
-    - is_compound: whether this slot contains arithmetic operators
-    - compound_expr: the compound expression (None if not compound)
-    - shape_text: the original shape tuple text
-    - is_constant: whether this is a known constant (e.g. k0=16)
-    - constant_value: the constant value (only when is_constant=True)
-    """
-    sig_params = _collect_signature_params(signatures)
-    _tensor_params = tensor_params or set()
-    mappings: list[dict] = []
-
-    for match in _SHAPE_TUPLE_RE.finditer(sections_text):
-        tuple_content = match.group(1)
-        # Skip Markdown hyperlink URLs like (../common/xxx.md)
-        if _is_markdown_url(tuple_content):
-            continue
-
-        # Find the tensor parameter name this shape tuple belongs to
-        nearby_param = _find_nearby_param_name(sections_text, match.start())
-        if not nearby_param:
-            continue
-
-        # Phase 2: Skip shape tuples in non-tensor parameter rows
-        if _tensor_params and _should_skip_shape_tuple(
-            nearby_param, _tensor_params,
-        ):
-            logger.debug(
-                "ImplicitParamExtract: skipping shape tuple in non-tensor "
-                "param row '%s': (%s)",
-                nearby_param, tuple_content,
-            )
-            continue
-
-        # Phase 1: Slot-aware parsing
-        slots = _parse_shape_slots(tuple_content)
-        for slot in slots:
-            for var in slot["vars"]:
-                if var in sig_params:
-                    continue
-                mappings.append({
-                    "var_name": var,
-                    "tensor_param": nearby_param,
-                    "dim_index": slot["slot_index"],
-                    "shape_text": f"({tuple_content.strip()})",
-                    "is_constant": False,
-                    "constant_value": None,
-                    "slot_index": slot["slot_index"],
-                    "slot_expr": slot["slot_expr"],
-                    "is_compound": slot["is_compound"],
-                    "compound_expr": (
-                        slot["slot_expr"] if slot["is_compound"] else None
-                    ),
-                })
-
-    # Detect constants (e.g. k0=16, n0=16)
-    _detect_constants(sections_text, mappings)
-
-    return mappings
-
-# ---------------------------------------------------------------------------
-# Phase 5: Quantization type extraction (default implicit parameter)
+# Phase 4: Quantization type extraction (deterministic, retained)
 # ---------------------------------------------------------------------------
 
 
 def _extract_quantization_modes(
     sections_text: str,
 ) -> tuple[list[str], str]:
-    """Scan section text for quantization granularity modes.
-
-    Searches for each candidate in :data:`_QUANTIZATION_CANDIDATES` using
-    word-boundary matching (case-sensitive) and returns those that appear,
-    preserving the canonical candidate order and de-duplicating.
-
-    Returns ``(matched_modes, source_citation)`` where *source_citation* is
-    a short snippet around the first match (empty when nothing matches).
-    """
+    """Scan section text for quantization granularity modes."""
     matched: list[str] = []
     first_citation = ""
     for candidate in _QUANTIZATION_CANDIDATES:
-        # Use ASCII-letter lookbehind/lookahead instead of \b: Python's \b
-        # treats Chinese characters as word chars (Unicode \w), which would
-        # prevent matching candidates adjacent to Chinese text (e.g.
-        # "支持per-channel" or "per-channel下").  The lookbehind still rejects
-        # false positives like "super-channel" → "per-channel".
         pattern = re.compile(
             r"(?<![A-Za-z])" + re.escape(candidate) + r"(?![A-Za-z])"
         )
@@ -561,13 +392,7 @@ def _extract_quantization_modes(
 def _build_quantization_type_mapping(
     sections_text: str,
 ) -> dict[str, Any]:
-    """Build the default ``quantization_type`` implicit parameter mapping.
-
-    Always returns a mapping (even when no modes are found — in which case
-    ``allowed_range_value`` is an empty list).  The parameter is a
-    ``char``-typed enum constrained to the quantization granularity modes
-    mentioned in the document.
-    """
+    """Build the default quantization_type implicit parameter mapping."""
     modes, citation = _extract_quantization_modes(sections_text)
     return {
         "var_name": _QUANTIZATION_PARAM_NAME,
@@ -576,8 +401,6 @@ def _build_quantization_type_mapping(
         "allowed_range_value": modes,
         "allowed_range_type": "enum",
         "source_citation": citation,
-        # Compatibility fields (kept consistent with shape-dim mappings so
-        # that downstream consumers can treat it uniformly).
         "tensor_param": None,
         "dim_index": None,
         "shape_text": None,
@@ -591,6 +414,356 @@ def _build_quantization_type_mapping(
         "referenced_in": [],
     }
 
+
+# ---------------------------------------------------------------------------
+# Phase 2: Agent validation and classification (LLM — core)
+# ---------------------------------------------------------------------------
+
+_PROJECT_ROOT = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "..", "..")
+)
+
+_implicit_params_agent: Any = None
+
+
+def _load_implicit_params_knowledge() -> str:
+    """Eager-load all .md files under knowledge/implicit_params/."""
+    kb_dir = os.path.join(_PROJECT_ROOT, "knowledge", "implicit_params")
+    if not os.path.isdir(kb_dir):
+        logger.warning("ImplicitParamsAgent: knowledge dir not found: %s", kb_dir)
+        return ""
+    parts: list[str] = []
+    for root, _dirs, files in os.walk(kb_dir):
+        for fname in sorted(files):
+            if not fname.endswith(".md"):
+                continue
+            fpath = os.path.join(root, fname)
+            try:
+                with open(fpath, encoding="utf-8") as f:
+                    parts.append(f.read().strip())
+            except OSError:
+                logger.warning("ImplicitParamsAgent: cannot read %s", fpath)
+    return "\n\n---\n\n".join(parts)
+
+
+_AGENT_SYSTEM_PROMPT_TEMPLATE = (
+    "You are an implicit parameter validation expert for CANN operator documents.\n\n"
+    "Your task: review candidate named identifiers that were regex-extracted from "
+    "shape tuples, and judge whether each one is a real named dimension variable "
+    "or a concept term / operation name that should be removed.\n\n"
+    "## Your Input\n\n"
+    "1. candidates: a JSON array of candidate records, each containing:\n"
+    "   - candidate_id, var_name, tensor_param, dim_index\n"
+    "   - slot_expr, is_compound, shape_text\n"
+    "   - surrounding_text (plus/minus 100 chars of context)\n\n"
+    "2. section_text: the full section text for context lookup\n"
+    "3. signature_params: function signature parameter names (already excluded)\n"
+    "4. tensor_params: tensor parameter names identified in Phase 0\n\n"
+    "## Validation Rules\n\n"
+    "### Rule 1: Named dimension variable (confirm)\n"
+    "An identifier is a named dimension variable when:\n"
+    "- It appears in a shape tuple representing a dimension **size value**\n"
+    "- It is a symbolic variable name (e.g. N, C, H, W, BS, batchSize, k0)\n"
+    "- It can be referenced in constraint expressions (e.g. BS.range_value)\n\n"
+    "### Rule 2: Concept term (remove)\n"
+    "Remove an identifier if it belongs to any of these categories:\n\n"
+    "a) Dimension concept name: in X维度, X describes the dimension meaning,\n"
+    "   not a variable. Examples: Reduce维度, GEMV维度, Attention维度.\n"
+    "b) Operation/algorithm name: Conv, Softmax, ReLU, Sigmoid, GELU,\n"
+    "   LayerNorm, BatchNorm, Matmul, Transpose, Reshape, etc.\n"
+    "c) Data type name: float16, int32, bool, bfloat16, etc.\n"
+    "d) Generic descriptor: shape, dtype, format, input, output, tensor, etc.\n\n"
+    "### Rule 3: Constant (reclassify)\n"
+    "If the text has an explicit assignment like k0 = 16, k0为16,\n"
+    "k0等于16, mark as classification=constant, constant_value=number.\n\n"
+    "### Rule 4: External constant (reclassify)\n"
+    "If an identifier ONLY appears in compound expressions (e.g. H*rankSize)\n"
+    "and never as a standalone dimension slot, mark as\n"
+    "classification=external_constant. These typically depend on platform config.\n\n"
+    "### Rule 5: Supplement missed parameters (additions)\n"
+    "If you find a named dimension variable in section_text NOT captured\n"
+    "by the regex, add it to the additions list.\n\n"
+    "## Output Format\n"
+    "Return ONLY a JSON object (no other text):\n"
+    "{\n"
+    '  "actions": [\n'
+    '    {\n'
+    '      "candidate_id": "cand_001",\n'
+    '      "action": "confirm" | "remove" | "reclassify",\n'
+    '      "classification": "dimension_variable" | "constant" | "external_constant",\n'
+    '      "var_name": "BS",\n'
+    '      "tensor_param": "x1",\n'
+    '      "dim_index": 0,\n'
+    '      "constant_value": null,\n'
+    '      "referenced_in": [],\n'
+    '      "reason": "why this judgment was made"\n'
+    '    }\n'
+    '  ],\n'
+    '  "additions": [\n'
+    '    {\n'
+    '      "var_name": "rankSize",\n'
+    '      "classification": "external_constant",\n'
+    '      "tensor_param": null,\n'
+    '      "dim_index": null,\n'
+    '      "constant_value": null,\n'
+    '      "referenced_in": ["x1"],\n'
+    '      "reason": "found in constraint text"\n'
+    '    }\n'
+    '  ]\n'
+    "}\n"
+)
+
+
+def _get_implicit_params_agent() -> Any:
+    """Lazily create and cache the LLM for implicit param validation."""
+    global _implicit_params_agent
+    if _implicit_params_agent is not None:
+        return _implicit_params_agent
+
+    from agent.utils.llm_common import create_llm
+
+    kb = _load_implicit_params_knowledge()
+    system_prompt = _AGENT_SYSTEM_PROMPT_TEMPLATE
+    if kb:
+        system_prompt = system_prompt + "\n\n## Knowledge Base\n\n" + kb
+
+    _implicit_params_agent = create_llm()
+    _implicit_params_agent._implicit_params_system_prompt = system_prompt
+    logger.info("ImplicitParamsAgent: created (KB=%d chars)", len(kb))
+    return _implicit_params_agent
+
+
+def _build_agent_user_message(
+    candidates: list[dict],
+    section_text: str,
+    sig_params: set[str],
+    tensor_params: set[str],
+) -> str:
+    """Build the user message for the Agent with all context."""
+    return json.dumps({
+        "candidates": candidates,
+        "section_text": section_text,
+        "signature_params": sorted(sig_params),
+        "tensor_params": sorted(tensor_params),
+    }, ensure_ascii=False)
+
+
+def _parse_agent_response(text: str) -> dict[str, list] | None:
+    """Parse the Agent JSON response into actions and additions.
+
+    Returns None if parsing fails (triggers fallback).
+    """
+    text = text.strip()
+
+    code_match = re.search(r"```(?:json)?\s*([\s\S]*?)```", text, re.IGNORECASE)
+    if code_match:
+        text = code_match.group(1).strip()
+
+    try:
+        data = json.loads(text)
+        if isinstance(data, dict):
+            actions = data.get("actions", [])
+            additions = data.get("additions", [])
+            if isinstance(actions, list) and isinstance(additions, list):
+                return {"actions": actions, "additions": additions}
+    except json.JSONDecodeError:
+        pass
+
+    obj_match = re.search(r"\{[\s\S]*\}", text)
+    if obj_match:
+        try:
+            data = json.loads(obj_match.group(0))
+            if isinstance(data, dict):
+                return {
+                    "actions": data.get("actions", []),
+                    "additions": data.get("additions", []),
+                }
+        except json.JSONDecodeError:
+            pass
+
+    logger.warning("ImplicitParamsAgent: failed to parse response: %s", text[:200])
+    return None
+
+
+def _candidate_to_mapping(candidate: dict) -> dict:
+    """Convert a candidate record to the final mapping structure."""
+    return {
+        "var_name": candidate["var_name"],
+        "tensor_param": candidate["tensor_param"],
+        "dim_index": candidate["dim_index"],
+        "shape_text": candidate["shape_text"],
+        "is_constant": False,
+        "constant_value": None,
+        "slot_index": candidate["slot_index"],
+        "slot_expr": candidate["slot_expr"],
+        "is_compound": candidate["is_compound"],
+        "compound_expr": candidate.get("compound_expr"),
+        "is_external_constant": False,
+        "is_quantization_type": False,
+        "referenced_in": [],
+    }
+
+
+def _apply_agent_actions(
+    candidates: list[dict],
+    parsed: dict[str, list],
+) -> list[dict]:
+    """Apply Agent actions (confirm/remove/reclassify) and additions to candidates.
+
+    Returns the final list of mapping dicts.
+    """
+    cand_by_id = {c["candidate_id"]: c for c in candidates}
+    handled_ids: set[str] = set()
+    mappings: list[dict] = []
+
+    for action in parsed.get("actions", []):
+        cid = action.get("candidate_id", "")
+        act = action.get("action", "")
+        reason = action.get("reason", "")
+
+        if cid not in cand_by_id:
+            logger.warning("ImplicitParamsAgent: unknown candidate_id %s", cid)
+            continue
+
+        handled_ids.add(cid)
+        candidate = cand_by_id[cid]
+
+        if act == "remove":
+            logger.debug(
+                "ImplicitParamsAgent: removed %s - %s",
+                candidate["var_name"], reason,
+            )
+            continue
+
+        if act in ("confirm", "reclassify"):
+            mapping = _candidate_to_mapping(candidate)
+            classification = action.get("classification", "dimension_variable")
+
+            if classification == "constant":
+                mapping["is_constant"] = True
+                mapping["constant_value"] = action.get("constant_value")
+            elif classification == "external_constant":
+                mapping["is_external_constant"] = True
+                mapping["tensor_param"] = None
+                mapping["dim_index"] = None
+                mapping["shape_text"] = None
+                mapping["slot_index"] = None
+                mapping["slot_expr"] = None
+                mapping["is_compound"] = False
+                mapping["compound_expr"] = None
+                mapping["referenced_in"] = action.get("referenced_in", [])
+
+            mappings.append(mapping)
+            logger.debug(
+                "ImplicitParamsAgent: %s %s as %s - %s",
+                act, candidate["var_name"], classification, reason,
+            )
+            continue
+
+        logger.warning(
+            "ImplicitParamsAgent: unknown action %s for %s",
+            act, candidate["var_name"],
+        )
+
+    # Add additions (missed parameters discovered by Agent)
+    for addition in parsed.get("additions", []):
+        var = addition.get("var_name", "")
+        if not var:
+            continue
+        classification = addition.get("classification", "dimension_variable")
+        mapping = {
+            "var_name": var,
+            "tensor_param": addition.get("tensor_param"),
+            "dim_index": addition.get("dim_index"),
+            "shape_text": None,
+            "is_constant": classification == "constant",
+            "constant_value": addition.get("constant_value"),
+            "slot_index": None,
+            "slot_expr": None,
+            "is_compound": False,
+            "compound_expr": None,
+            "is_external_constant": classification == "external_constant",
+            "is_quantization_type": False,
+            "referenced_in": addition.get("referenced_in", []),
+        }
+        mappings.append(mapping)
+        logger.debug(
+            "ImplicitParamsAgent: added %s as %s - %s",
+            var, classification, addition.get("reason", ""),
+        )
+
+    # Degradation: keep unhandled candidates (Agent missed them)
+    unhandled = [c for c in candidates if c["candidate_id"] not in handled_ids]
+    if unhandled:
+        logger.warning(
+            "ImplicitParamsAgent: %d candidates not handled, keeping as-is",
+            len(unhandled),
+        )
+        for c in unhandled:
+            mappings.append(_candidate_to_mapping(c))
+
+    return mappings
+
+
+async def _validate_via_agent(
+    candidates: list[dict],
+    section_text: str,
+    sig_params: set[str],
+    tensor_params: set[str],
+) -> list[dict]:
+    """Phase 2: Call the Agent to validate and classify candidates.
+
+    Returns the final list of mapping dicts.
+    Falls back to regex candidates on any failure.
+    """
+    if not candidates:
+        return []
+
+    agent = _get_implicit_params_agent()
+    user_msg = _build_agent_user_message(
+        candidates, section_text, sig_params, tensor_params,
+    )
+
+    system_prompt = getattr(agent, "_implicit_params_system_prompt", "")
+    full_prompt = system_prompt + "\n\n## Input Data\n\n" + user_msg
+
+    try:
+        response = await agent.ainvoke(full_prompt)
+        ai_text = response.content if hasattr(response, "content") else str(response)
+    except Exception:
+        logger.warning(
+            "ImplicitParamsAgent: invocation failed, falling back to regex results",
+            exc_info=True,
+        )
+        return [_candidate_to_mapping(c) for c in candidates]
+
+    parsed = _parse_agent_response(ai_text)
+    if parsed is None:
+        logger.warning(
+            "ImplicitParamsAgent: unparseable response, falling back to regex results",
+        )
+        return [_candidate_to_mapping(c) for c in candidates]
+
+    mappings = _apply_agent_actions(candidates, parsed)
+
+    # Degradation 3: too few results — merge with regex fallback
+    if len(mappings) < len(candidates) * 0.3:
+        logger.warning(
+            "ImplicitParamsAgent: too few results (%d/%d), merging with fallback",
+            len(mappings), len(candidates),
+        )
+        existing_vars = {m["var_name"] for m in mappings}
+        for c in candidates:
+            if c["var_name"] not in existing_vars:
+                mappings.append(_candidate_to_mapping(c))
+
+    logger.info(
+        "ImplicitParamsAgent: validated %d candidates -> %d mappings",
+        len(candidates), len(mappings),
+    )
+    return mappings
+
+
 # ---------------------------------------------------------------------------
 # Node entry point
 # ---------------------------------------------------------------------------
@@ -599,20 +772,17 @@ def _build_quantization_type_mapping(
 async def implicit_param_extract_node(
     state: RelationExtractState,
 ) -> dict[str, Any]:
-    """Build shape dimension mappings and persist to DB for traceability.
+    """Extract implicit (non-operator) parameters from document sections.
 
-    Reads section content from subgraph state (already fetched by
-    fetch_sections_node), scans for named dimension variables not present
-    in any function signature, and builds a mapping table.
+    Two-stage architecture (Plan A — generate then filter):
+    - Phase 0 (deterministic): Identify tensor parameters
+    - Phase 1 (deterministic): Regex coarse-sieve — collect candidates
+    - Phase 2 (LLM Agent): Validate and classify candidates
+    - Phase 3 (deterministic): Extract platform constant values
+    - Phase 4 (deterministic): Inject quantization_type parameter
 
-    Enhanced with:
-    - Phase 0: Tensor parameter identification
-    - Phase 1: Slot-aware dimension parsing (compound expressions)
-    - Phase 2: Non-tensor parameter row filtering
-    - Phase 3: External constant detection
-    - Phase 4: Platform constant value extraction
-
-    Does NOT inject synthetic parameters into the parameters table.
+    If the Agent fails, the system degrades gracefully to Phase 1 regex
+    results — the pipeline never breaks.
     """
     doc_id = state.get("doc_id", 0)
     operator_name = state.get("operator_name", "")
@@ -647,29 +817,31 @@ async def implicit_param_extract_node(
         sigs = await _mcp_client.query_function_signatures_by_doc_id(doc_id)
         sig_params = _collect_signature_params(sigs)
 
-        # Phase 0: Identify tensor parameters
+        # Phase 0: Identify tensor parameters (deterministic)
         tensor_params = _identify_tensor_params(sections_text, sig_params)
         logger.debug(
-            "ImplicitParamExtract: identified %d tensor params: %s",
+            "ImplicitParamExtract: Phase 0 identified %d tensor params: %s",
             len(tensor_params), sorted(tensor_params),
         )
 
-        # Phase 1+2: Build mappings with slot-aware parsing + tensor filtering
-        mappings = _build_implicit_params(
+        # Phase 1: Regex coarse-sieve — collect candidates (deterministic)
+        candidates = _collect_candidates(
             sections_text, sigs, tensor_params,
         )
 
-        # Phase 5: Always inject the default quantization_type implicit param.
-        # It is a char-typed enum whose allowed_range_value is the subset of
-        # _QUANTIZATION_CANDIDATES that appear in the document (possibly empty).
+        # Phase 2: Agent validation and classification (LLM)
+        if candidates:
+            mappings = await _validate_via_agent(
+                candidates, sections_text, sig_params, tensor_params,
+            )
+        else:
+            mappings = []
+
+        # Phase 4: Always inject the default quantization_type implicit param.
         quant_mapping = _build_quantization_type_mapping(sections_text)
         mappings.append(quant_mapping)
 
-        # Phase 3: Detect external constants
-        ext_constants = _detect_external_constants(mappings, sections_text)
-        mappings.extend(ext_constants)
-
-        # Phase 4: Extract platform constant values
+        # Phase 3: Extract platform constant values for external constants
         platforms = await _mcp_client.query_platform_support_by_doc_id(doc_id)
         supported = [
             p["platform_name"]
@@ -677,16 +849,17 @@ async def implicit_param_extract_node(
         ]
 
         platform_constants: list[dict] = []
-        for ec in ext_constants:
-            pv = _extract_platform_constant_values(
-                sections_text, ec["var_name"], supported,
-            )
-            if pv:
-                platform_constants.append({
-                    "const_name": ec["var_name"],
-                    "description": "",
-                    "platform_values": pv,
-                })
+        for m in mappings:
+            if m.get("is_external_constant"):
+                pv = _extract_platform_constant_values(
+                    sections_text, m["var_name"], supported,
+                )
+                if pv:
+                    platform_constants.append({
+                        "const_name": m["var_name"],
+                        "description": "",
+                        "platform_values": pv,
+                    })
 
         # Persist implicit_params to DB
         rendered = format_implicit_params_context(
@@ -752,5 +925,5 @@ async def implicit_param_extract_node(
         }
 
     except Exception as e:
-        logger.exception("ShapeDimMapping failed for %s", operator_name)
+        logger.exception("ImplicitParamExtract failed for %s", operator_name)
         return {"error": str(e)}

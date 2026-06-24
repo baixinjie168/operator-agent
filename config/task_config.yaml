@@ -1,0 +1,27 @@
+# ============================================================
+# 算子解析任务配置文件
+# ============================================================
+# 用法：
+#   python -m agent.run_task                          # 使用本文件
+#   python -m agent.run_task config/my_tasks.yaml     # 使用自定义文件
+# ============================================================
+
+# 并行执行配置
+parallel:
+  max_workers: 1          # 同时解析的算子数量（1=顺序，默认3，最大20）
+  max_retries: 1          # 失败算子自动重试次数（0=不重试，默认1，最大5）
+
+# 任务列表（可定义多个任务，同一时间只执行一个任务）
+tasks:
+  - name: "batch-trans-operators"
+    file_paths:
+      - operators/trans/aclnnAlltoAllMatmul.md
+      - operators/trans/aclnnFFNV3.md
+      - operators/trans/aclnnAlltoAllvGroupedMatMul.md
+      - operators/trans/aclnnSwinAttentionScoreQuant.md
+
+  # 可追加更多任务：
+  # - name: "batch-other-operators"
+  #   file_paths:
+  #     - operators/other/aclnnXxx.md
+  #     - operators/other/aclnnYyy.md

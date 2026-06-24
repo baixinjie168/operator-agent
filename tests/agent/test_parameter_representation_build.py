@@ -26,25 +26,25 @@ from agent.nodes.param_relation_extract.parameter_representation_build import ( 
 
 def test_slot_expr_single_var():
     py, vars_ = _slot_expr_to_python("BS", {})
-    assert py == "BS.range_value"
+    assert py == "BS"
     assert vars_ == ["BS"]
 
 
 def test_slot_expr_compound_multiply():
     py, vars_ = _slot_expr_to_python("H*rankSize", {})
-    assert py == "H.range_value*rankSize.range_value"
+    assert py == "H*rankSize"
     assert vars_ == ["H", "rankSize"]
 
 
 def test_slot_expr_compound_divide():
     py, vars_ = _slot_expr_to_python("BS/rankSize", {})
-    assert py == "BS.range_value/rankSize.range_value"
+    assert py == "BS/rankSize"
     assert vars_ == ["BS", "rankSize"]
 
 
 def test_slot_expr_constant_substitution():
     py, vars_ = _slot_expr_to_python("k1*k0", {"k0": 16})
-    assert py == "k1.range_value*16"
+    assert py == "k1*16"
     assert vars_ == ["k1"]
 
 
@@ -52,6 +52,18 @@ def test_slot_expr_excludes_keywords():
     py, vars_ = _slot_expr_to_python("shape", {})
     assert py == "shape"
     assert vars_ == []
+
+
+def test_slot_expr_external_const_keeps_range_value():
+    """External constants keep .range_value; dimension variables do not."""
+    ext = {"rankSize"}
+    py, vars_ = _slot_expr_to_python("H*rankSize", {}, ext)
+    assert py == "H*rankSize.range_value"
+    assert vars_ == ["H", "rankSize"]
+
+    py, vars_ = _slot_expr_to_python("BS/rankSize", {}, ext)
+    assert py == "BS/rankSize.range_value"
+    assert vars_ == ["BS", "rankSize"]
 
 
 # ---------------------------------------------------------------------------
@@ -118,14 +130,14 @@ def test_alltoall_tensor_representations():
     assert len(reps) == 9, "expected 9 reps, got " + str(len(reps))
 
     exprs = [r["expr"] for r in reps]
-    assert "x1.shape[0] == BS.range_value" in exprs
-    assert "output.shape[0] == BS.range_value/rankSize.range_value" in exprs
+    assert "x1.shape[0] == BS" in exprs
+    assert "output.shape[0] == BS/rankSize.range_value" in exprs
     assert (
-        "alltoAllOutOptional.shape[0] == BS.range_value/rankSize.range_value"
+        "alltoAllOutOptional.shape[0] == BS/rankSize.range_value"
         in exprs
     )
     assert (
-        "alltoAllOutOptional.shape[1] == H.range_value*rankSize.range_value"
+        "alltoAllOutOptional.shape[1] == H*rankSize.range_value"
         in exprs
     )
 

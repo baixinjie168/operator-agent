@@ -120,6 +120,16 @@ RELATION_OBJECT_BUILD_PROMPT = """\
 - "shape size" 指维数（rank），用 len(x.shape) 表示
 - 不是各维大小的乘积，不要写成 out.shape[0]*out.shape[1]*... 的形式
 
+### 示例 11: presence_dependency（存在性依赖）
+输入: description="expertTokensOptional 不为空时 bias2Optional 必须存在",
+      params=["expertTokensOptional", "bias2Optional"]
+输出: {{"expr_type": "presence_dependency", "expr": "(bias2Optional is not None) if (expertTokensOptional is not None) else True"}}
+注意：A 存在时 B 必须存在，用 (B) if (A) else True 表达蕴含
+
+### 示例 12: type_equality（双向类型一致）
+输入: description="self 与 x1 的数据类型必须一致", params=["self", "x1"]
+输出: {{"expr_type": "type_equality", "expr": "self.dtype == x1.dtype"}}
+
 ## 函数签名上下文
 {signatures_text}
 

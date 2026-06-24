@@ -1,6 +1,6 @@
 """Semantic value range inference rules loader.
 
-Loads rules from ``semantic_value_rules.yaml`` at the project root and
+Loads rules from ``config/semantic_value_rules.yaml`` and
 provides utilities for:
 - Matching parameter descriptions against keyword rules
 - Generating allowed_range_value for scalar parameters (Layer 1)
@@ -26,16 +26,19 @@ from typing import Any
 
 import yaml
 
+from agent.core.config import settings
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
 
-# Project root: this file is at packages/agent/src/agent/utils/
-# so project root is parents[5] (utils → agent → src → agent → packages → root)
-_PROJECT_ROOT = Path(__file__).resolve().parents[5]
-_RULES_PATH = _PROJECT_ROOT / "semantic_value_rules.yaml"
+# Path to the semantic rules YAML file. Configurable via ``settings`` so it
+# can be overridden with the ``SEMANTIC_RULES_FILE`` env var. CWD-relative by
+# default, consistent with ``task_config_file`` and other project paths
+# (operators_dir, database_path, etc.).
+_RULES_PATH = Path(settings.semantic_rules_file)
 
 
 # ---------------------------------------------------------------------------

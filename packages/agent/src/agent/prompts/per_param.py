@@ -106,17 +106,56 @@ ALLOWED_RANGE_EXTRACT_PROMPT = """\
 3. 如果约束有平台限制（如"Atlas A2 下"、"Atlas A3"等），需要标注 platform 字段
 4. 如果约束没有平台限制（通用约束），platform 设为空字符串 ""
 5. 如果完全没有该参数的取值范围信息，返回空数组 []
-6. allowed_range_value 保留原文的关键描述，简洁但完整
-7. 不要提取 shape、数据类型、数据格式等其他约束，只提取取值范围/取值约束
-8. type 字段区分两种语义：
+6. 不要提取 shape、数据类型、数据格式等其他约束，只提取取值范围/取值约束
+7. type 字段区分两种语义：
    - "range"（默认）：连续数值范围，如 "0-100"、"[-1, 1]"
-   - "enum"：参数取值是特定的完整数组值（通常是 aclIntArray 类型），
-     如 "支持配置空或者[-2,-1]" 中 [-2,-1] 是一个完整数组而非范围
-   如果参数类型是 aclIntArray 且约束描述的是特定数组值，type 设为 "enum"
+   - "enum"：参数取值是特定的离散枚举值（如激活函数名、模式名称），
+     也包括 aclIntArray 类型的特定数组值，如 "支持配置空或者[-2,-1]"
+
+## allowed_range_value 格式规则（重要）
+
+### type="range" 时
+allowed_range_value 为字符串，保留原文描述，如 "0-100"、"[-1, 1]"
+
+### type="enum" 时（关键变化）
+allowed_range_value 必须是**逗号分隔的独立枚举值**，不能将原文整体保留。
+必须将原文中的枚举值拆分为独立项，分隔符包括：/ 、 、 以及 和 and
+
+拆分示例：
+- 原文 "fastgelu/gelu/relu/silu" → allowed_range_value: "fastgelu,gelu,relu,silu"
+- 原文 "fastgelu/gelu/relu/silu以及geglu/swiglu/reglu"
+  → allowed_range_value: "fastgelu,gelu,relu,silu,geglu,swiglu,reglu"
+- 原文 "支持配置空或者[-2,-1]" → allowed_range_value: "空,[-2,-1]"
+
+不要将 "fastgelu/gelu/relu/silu" 作为一个整体保留，必须拆分。
+
+## 完整示例
+
+示例 1（enum 类型，有平台区分）:
+文档内容:
+  Atlas A2 训练系列产品：当前支持fastgelu/gelu/relu/silu以及geglu/swiglu/reglu。
+  Atlas 推理系列加速卡产品：当前支持fastgelu/gelu/relu/silu。
+
+正确输出:
+[
+  {{"platform": "Atlas A2 训练系列产品/Atlas A2 推理系列产品", "allowed_range_value": "fastgelu,gelu,relu,silu,geglu,swiglu,reglu", "type": "enum"}},
+  {{"platform": "Atlas 推理系列加速卡产品", "allowed_range_value": "fastgelu,gelu,relu,silu", "type": "enum"}}
+]
+
+示例 2（range 类型，无平台区分）:
+文档内容: innerPrecise取值范围为0或1。
+
+正确输出:
+[
+  {{"platform": "", "allowed_range_value": "0或1", "type": "range"}}
+]
+
+示例 3（无约束）:
+正确输出: []
 
 严格按以下 JSON 数组格式返回，不要添加任何其他文字:
 [
-  {{"platform": "平台名称或空字符串", "allowed_range_value": "取值范围描述", "type": "range或enum"}}
+  {{"platform": "平台名称或空字符串", "allowed_range_value": "取值范围描述或逗号分隔的枚举值", "type": "range或enum"}}
 ]
 
 type 为 "range" 时可省略（默认 range）。无约束时返回: []

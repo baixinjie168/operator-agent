@@ -503,32 +503,53 @@ async def build_single_param_constraint_node(
             len(layer1_results),
         )
 
-        # Step 3: Layer 2 — LLM long-tail (optional, controlled by config)
+        # Step 3: Layer 2 — Agent + skill.md (replaces disabled LLM)
+        # Type 3: self-constraints for uncovered params via DeepAgent
         layer2_results: list[dict] = []
-        if getattr(settings, "enable_single_param_llm", False):
+        covered_params: set[str] = set()
+        for r in layer0_results + layer1_results:
+            for p in r.get("params", []):
+                covered_params.add(p)
+        uncovered = [
+            p for p in params
+            if p.get("param_name", "") not in covered_params
+        ]
+        if uncovered:
+            from agent.nodes.build_param_constraint.complex_relation_agent import (
+                generate_self_constraints_via_agent,
+            )
+
+            # Build context for Agent (reuse existing helpers)
+            sigs = await _mcp_client.query_function_signatures_by_doc_id(doc_id)
+            all_params = await _mcp_client.query_params_by_doc_id(doc_id)
+            from agent.nodes.build_param_relations import (
+                _format_signatures,
+                _build_param_shapes_text,
+            )
+            from agent.nodes.param_relation_extract.prompts import (
+                format_implicit_params_context,
+            )
+            mappings = state.get("implicit_params", [])
+            sig_text = _format_signatures(sigs, all_params or [])
+            shapes_text = _build_param_shapes_text(all_params or [])
+            implicit_text = (
+                format_implicit_params_context(mappings) if mappings else ""
+            )
+
             try:
-                llm = create_llm()
+                layer2_results = await generate_self_constraints_via_agent(
+                    uncovered, sig_text, shapes_text, implicit_text,
+                )
+                logger.info(
+                    "SingleParamConstraint: Layer 2 (Agent) extracted %d constraints "
+                    "from %d uncovered params",
+                    len(layer2_results), len(uncovered),
+                )
             except Exception:
                 logger.exception(
-                    "SingleParamConstraint: failed to create LLM, "
-                    "skipping Layer 2",
+                    "SingleParamConstraint: Layer 2 Agent failed, skipping",
                 )
-                llm = None
-
-            if llm is not None:
-                sem = asyncio.Semaphore(CONCURRENCY_LIMIT)
-                tasks = [
-                    _extract_long_tail(p, existing, llm, sem)
-                    for p in params
-                ]
-                gathered = await asyncio.gather(*tasks)
-                for rels in gathered:
-                    layer2_results.extend(rels)
-
-                logger.info(
-                    "SingleParamConstraint: Layer 2 extracted %d constraints",
-                    len(layer2_results),
-                )
+                layer2_results = []
 
         # Step 5: Merge and deduplicate
         all_new = _dedup(layer0_results + layer1_results + layer2_results)
@@ -539,7 +560,7 @@ async def build_single_param_constraint_node(
             result = await _mcp_client.save_param_relations(doc_id, merged)
             logger.info(
                 "SingleParamConstraint: saved %d total relations "
-                "(%d existing + %d new [%d yaml + %d regex + %d llm])",
+                "(%d existing + %d new [%d yaml + %d regex + %d agent])",
                 result.get("saved", 0),
                 len(existing),
                 len(all_new),

@@ -8,7 +8,6 @@ Implements three-layer protection for expression generation accuracy:
 
 from __future__ import annotations
 
-import ast
 import asyncio
 import json
 import logging
@@ -22,19 +21,14 @@ from agent.mcp_client import MCPClient
 from agent.nodes.state import PipelineState
 from agent.prompts import RELATION_OBJECT_BUILD_PROMPT
 from agent.core.llm import create_llm
+from agent.utils.expr_validation import validate_expr as _validate_expr
+from agent.utils.expr_validation import validate_expr_refs as _validate_expr_refs
+from agent.utils.expr_validation import validate_expr_syntax as _validate_expr_syntax
 from agent.utils.llm_common import CONCURRENCY_LIMIT, JSON_BLOCK_RE
 
 logger = logging.getLogger(__name__)
 
 _mcp_client = MCPClient()
-
-# Phase 0: Allowed attributes and builtin names for reference validation
-_ALLOWED_ATTRS = {"shape", "dtype", "format", "range_value"}
-_BUILTIN_NAMES = {
-    "True", "False", "None", "len", "range",
-    "all", "any", "int", "float", "str", "bool", "set",
-    "min", "max", "list",
-}
 
 # Phase 2a: Few-shot examples for enhanced retry
 FEW_SHOT_EXAMPLES = {
@@ -210,91 +204,9 @@ def _parse_relation_object_response(text: str) -> dict[str, str]:
 
 
 # ---------------------------------------------------------------------------
-# Phase 0: Deterministic validation (zero LLM cost)
+# Phase 0 validation is now in agent.utils.expr_validation
+# (imported as _validate_expr, _validate_expr_refs, _validate_expr_syntax)
 # ---------------------------------------------------------------------------
-
-
-def _validate_expr_syntax(expr: str) -> tuple[bool, str]:
-    """Phase 0a: Validate expr is a legal Python expression.
-
-    Returns:
-        (is_valid, error_message)
-    """
-    if not expr:
-        return True, ""  # Empty expression is allowed
-    try:
-        ast.parse(expr, mode="eval")
-        return True, ""
-    except SyntaxError as e:
-        return False, f"SyntaxError at line {e.lineno}: {e.msg}"
-
-
-def _validate_expr_refs(
-    expr: str,
-    params: list[str],
-    external_constants: set[str] | None = None,
-    implicit_param_names: set[str] | None = None,
-) -> tuple[bool, str]:
-    """Phase 0b: Validate parameter names and attributes in expr.
-
-    Checks:
-    1. All Name nodes must be in params, Python builtins, external_constants, or implicit_param_names
-    2. All Attribute nodes must be in _ALLOWED_ATTRS
-    3. Comprehension variables (e.g., 'd' in 'all(d > 0 for d in x.shape)') are allowed
-    """
-    if not expr:
-        return True, ""
-    try:
-        tree = ast.parse(expr, mode="eval")
-    except SyntaxError:
-        return False, "Invalid syntax"
-
-    param_set = set(params)
-    ext_set = external_constants or set()
-    implicit_set = implicit_param_names or set()
-
-    # Collect all comprehension variables (bound by for loops in comprehensions)
-    comprehension_vars: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, (ast.GeneratorExp, ast.ListComp, ast.SetComp, ast.DictComp)):
-            for generator in node.generators:
-                if isinstance(generator.target, ast.Name):
-                    comprehension_vars.add(generator.target.id)
-                elif isinstance(generator.target, ast.Tuple):
-                    for elt in generator.target.elts:
-                        if isinstance(elt, ast.Name):
-                            comprehension_vars.add(elt.id)
-
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Name):
-            if (
-                node.id not in param_set
-                and node.id not in _BUILTIN_NAMES
-                and node.id not in comprehension_vars
-                and node.id not in ext_set
-                and node.id not in implicit_set
-            ):
-                return False, f"Unknown parameter: '{node.id}'"
-        if isinstance(node, ast.Attribute):
-            if node.attr not in _ALLOWED_ATTRS:
-                return False, f"Unknown attribute: '.{node.attr}'"
-    return True, ""
-
-
-def _validate_expr(
-    expr: str,
-    params: list[str],
-    external_constants: set[str] | None = None,
-    implicit_param_names: set[str] | None = None,
-) -> tuple[bool, str]:
-    """Phase 0: Comprehensive validation (syntax + references)."""
-    is_valid, error = _validate_expr_syntax(expr)
-    if not is_valid:
-        return False, error
-    is_valid, error = _validate_expr_refs(expr, params, external_constants, implicit_param_names)
-    if not is_valid:
-        return False, error
-    return True, ""
 
 
 # ---------------------------------------------------------------------------
@@ -567,22 +479,44 @@ async def _batch_extract_relation_objects(
         return [{"expr_type": "", "expr": ""}] * len(relations)
 
     async def _process_one(rel: dict) -> dict[str, str]:
-        # Phase 1 + 2a: Generate with enhanced retry
-        result = await _extract_with_retry(
-            llm, rel, signatures_text, param_shapes_text, sem,
-            implicit_params_text=implicit_params_text,
-            external_constants=external_constants,
-            implicit_param_names=implicit_param_names,
-        )
+        from agent.nodes.build_param_constraint.complexity_classify import is_complex_relation
+        from agent.nodes.build_param_constraint.complex_relation_agent import generate_expr_via_agent
 
-        # Check if semantic verification is needed (Phase 2b)
-        confidence = result.get("confidence", "high")
-        if confidence == "low" and result.get("expr"):
-            # Force semantic verification for low confidence
-            result = await _verify_and_fix(llm, rel, result, param_shapes_text, sem)
-        # For medium confidence, verification is optional (disabled by default)
-        # Uncomment below to enable:
-        # elif confidence == "medium" and result.get("expr"):
+        if is_complex_relation(rel):
+            # Type 4: complex conditional -> DeepAgent + skill.md
+            result = await generate_expr_via_agent(
+                rel, signatures_text, param_shapes_text, implicit_params_text,
+            )
+            # Phase 0 safety net (Agent has no tools; validate in Python)
+            expr = result.get("expr", "")
+            if expr:
+                is_valid, error = _validate_expr(
+                    expr, rel.get("params", []),
+                    external_constants, implicit_param_names,
+                )
+                if not is_valid:
+                    logger.warning(
+                        "ComplexRelationAgent expr invalid for id=%s: %s",
+                        rel.get("id", "?"), error,
+                    )
+                    result["expr"] = ""
+        else:
+            # Type 1: simple param relation -> current single-shot LLM
+            result = await _extract_with_retry(
+                llm, rel, signatures_text, param_shapes_text, sem,
+                implicit_params_text=implicit_params_text,
+                external_constants=external_constants,
+                implicit_param_names=implicit_param_names,
+            )
+
+            # Check if semantic verification is needed (Phase 2b)
+            confidence = result.get("confidence", "high")
+            if confidence == "low" and result.get("expr"):
+                # Force semantic verification for low confidence
+                result = await _verify_and_fix(llm, rel, result, param_shapes_text, sem)
+            # For medium confidence, verification is optional (disabled by default)
+            # Uncomment below to enable:
+            # elif confidence == "medium" and result.get("expr"):
         #     result = await _verify_and_fix(llm, rel, result, param_shapes_text, sem)
 
         return result

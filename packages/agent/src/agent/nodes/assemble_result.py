@@ -310,7 +310,7 @@ def _build_implicit_param_constraint(info: dict) -> dict:
             "is_support_discontinuous": {"value": "N/A", "src_text": ""},
             "is_operator_param": {"value": False, "src_text": ""},
             "dimensions": {"value": [], "src_text": ""},
-            "array_length": "N/A",
+            "array_length": {"value": "N/A", "src_text": ""},
             "dtype": {"value": [], "src_text": ""},
             "allowed_range_value": {
                 "value": info.get("allowed_range_value", []),
@@ -332,7 +332,7 @@ def _build_implicit_param_constraint(info: dict) -> dict:
         "is_support_discontinuous": {"value": "N/A", "src_text": ""},
         "is_operator_param": {"value": False, "src_text": ""},
         "dimensions": {"value": [], "src_text": ""},
-        "array_length": "N/A",
+        "array_length": {"value": "N/A", "src_text": ""},
         "dtype": {"value": [], "src_text": ""},
         "allowed_range_value": {"value": [], "type": "range", "src_text": ""},
     }
