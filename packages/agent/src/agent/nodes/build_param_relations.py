@@ -774,13 +774,6 @@ async def build_param_relations_node(state: PipelineState) -> dict[str, Any]:
         platforms = await _mcp_client.query_platform_support_by_doc_id(doc_id)
         params = await _mcp_client.query_params_by_doc_id(doc_id)
 
-        # 原始 dump: 不要拼装，按字段直接输出
-        print(f"[Backend][BuildParamRelations] query_results: relations.count={len(relations) if relations else 0}")
-        print(f"[Backend][BuildParamRelations] relations_raw={json.dumps(relations, ensure_ascii=False, default=str)[:2000]}")
-        print(f"[Backend][BuildParamRelations] signatures_count={len(sigs) if sigs else 0}")
-        print(f"[Backend][BuildParamRelations] platforms_count={len(platforms) if platforms else 0}")
-        print(f"[Backend][BuildParamRelations] params_count={len(params) if params else 0}")
-
         if not relations:
             logger.info("BuildParamRelations: no relations, skipping")
             return {"error": None}
@@ -841,31 +834,8 @@ async def build_param_relations_node(state: PipelineState) -> dict[str, Any]:
             if (r.get("_validation_phases") or {}).get("semantic", {}).get("status") == "skipped"
         )
 
-        # 原始 dump: 把每条 LLM 提取结果完整输出（不做拼装）
-        print(f"[Backend][BuildParamRelations] ========== LLM EXTRACTION RESULTS ==========")
-        print(f"[Backend][BuildParamRelations] total_relations={len(relations)} valid_expr={valid_count} corrected={corrected_count} validation_errors={error_count}")
-        print(f"[Backend][BuildParamRelations] phase_ast_failed={ast_failed} phase_ref_failed={ref_failed} "
-              f"phase_semantic_passed={semantic_passed} phase_semantic_corrected={semantic_corrected} "
-              f"phase_semantic_failed={semantic_failed} phase_semantic_skipped={semantic_skipped}")
-        for _i, (_rel, _r) in enumerate(zip(relations, llm_results)):
-            _phases = _r.get("_validation_phases") or {}
-            print(f"[Backend][BuildParamRelations] llm_result[{_i}]:")
-            print(f"  relation_id={_rel.get('id', '?')}")
-            print(f"  relation_type={_rel.get('relation_type', '')}")
-            print(f"  params={json.dumps(_rel.get('params', []), ensure_ascii=False)}")
-            print(f"  description={(_rel.get('description', '') or '')[:200]}")
-            print(f"  source_citation={(_rel.get('source_citation', '') or '')[:200]}")
-            print(f"  → expr_type={_r.get('expr_type', '')}")
-            print(f"  → expr={_r.get('expr', '')}")
-            print(f"  → confidence={_r.get('confidence', '')}")
-            print(f"  → uncertainty_reason={_r.get('uncertainty_reason', '')}")
-            print(f"  → _validation_error={_r.get('_validation_error', '')}")
-            print(f"  → _corrected={_r.get('_corrected', False)}")
-            print(f"  → _correction_reason={_r.get('_correction_reason', '')}")
-            print(f"  → phase_ast_syntax={_phases.get('ast_syntax', {})}")
-            print(f"  → phase_param_refs={_phases.get('param_refs', {})}")
-            print(f"  → phase_semantic={_phases.get('semantic', {})}")
-        print(f"[Backend][BuildParamRelations] ========== END LLM RESULTS ==========")
+        # LLM 提取结果总览（汇总，不展开每条）
+        print(f"[Backend][BuildParamRelations] LLM extract: total={len(relations)} valid={valid_count} corrected={corrected_count} errors={error_count}")
 
         _emit(EventType.NODE_PROGRESS, {
             "message": f"表达式提取完成: {valid_count}/{len(relations)} 有效, "
@@ -914,16 +884,7 @@ async def build_param_relations_node(state: PipelineState) -> dict[str, Any]:
             result.get("updated", 0), len(updates), doc_id,
         )
 
-        print(f"[Backend][BuildParamRelations] ========== ASSEMBLED RELATION_OBJECTS ==========")
-        for _i, (_rel, _upd) in enumerate(zip(relations, updates)):
-            _obj = json.loads(_upd["relation_object"])
-            print(f"[Backend][BuildParamRelations] relation_object[{_i}]:")
-            print(f"  id={_upd['id']} platform={_rel.get('platform', '')}")
-            print(f"  expr_type={_obj.get('expr_type', '')}")
-            print(f"  expr={_obj.get('expr', '')}")
-            print(f"  relation_params={json.dumps(_obj.get('relation_params', []), ensure_ascii=False)}")
-            print(f"  src_text={(_obj.get('src_text', '') or '')[:150]}")
-        print(f"[Backend][BuildParamRelations] ========== END RELATION_OBJECTS ==========")
+        # 关系对象已组装并持久化（详细 dump 已省略）
 
         # Step 5: Group by platform
         from agent.utils.platform_utils import resolve_target_platforms
@@ -945,12 +906,7 @@ async def build_param_relations_node(state: PipelineState) -> dict[str, Any]:
             len(grouped), doc_id,
         )
 
-        print(f"[Backend][BuildParamRelations] ========== GROUPED BY PLATFORM ==========")
-        for _plat, _objs in grouped.items():
-            print(f"[Backend][BuildParamRelations] platform='{_plat}' count={len(_objs)}")
-            for _j, _o in enumerate(_objs):
-                print(f"  [{_j}] expr_type={_o.get('expr_type','')} expr={_o.get('expr','')} params={json.dumps(_o.get('relation_params',[]), ensure_ascii=False)}")
-        print(f"[Backend][BuildParamRelations] ========== END GROUPED ==========")
+        # 平台分组已完成（详细 dump 已省略）
 
         _emit(EventType.NODE_PROGRESS, {
             "message": f"已按平台分组: {len(grouped)} 个平台, {len(relations)} 条关系",
