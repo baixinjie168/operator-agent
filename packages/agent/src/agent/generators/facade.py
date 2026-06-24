@@ -51,22 +51,35 @@ logger = logging.getLogger(__name__)
 # 正式生成代码依赖 ``common_utils.logger_util.init_logger`` 创建文件 logger。
 # 当上层（节点 / 路由 / MCP 工具）首次调用时，若主流程还没初始化过 logger，
 # 这里自动惰性初始化一次，避免出现 ``Log file don't init`` 异常。
-_logger_initialized = False
+#
+# 由于 ``init_logger`` 会覆盖全局 ``_global_logger``，而不同算子需要独立的
+# 日志文件（``generate_case_{operator_name}.log``），这里用集合记录已初始化过的
+# 算子名，使同一算子只切换一次 logger，避免每次生成都重建 handler。
+_logger_initialized_operators: set[str] = set()
+# 当算子名缺失时使用的兜底日志文件名（不含扩展名）。
+_FALLBACK_LOG_NAME = "operator_generator"
 
 
-def _ensure_formal_logger_initialized() -> None:
-    """Initialize the formal-generator file logger if no one has done so yet."""
-    global _logger_initialized
-    if _logger_initialized:
+def _ensure_formal_logger_initialized(operator_name: str = "") -> None:
+    """Initialize the formal-generator file logger for ``operator_name``.
+
+    日志文件命名为 ``generate_case_{operator_name}.log``；当 ``operator_name``
+    为空时回退到 ``operator_generator.log``。同一算子名只会初始化一次，
+    重复调用直接返回。
+    """
+    key = operator_name.strip() if isinstance(operator_name, str) else ""
+    if key in _logger_initialized_operators:
         return
+    log_name = f"generate_case_{key}" if key else _FALLBACK_LOG_NAME
     try:
         from agent.generators.common_utils.logger_util import init_logger
-        init_logger(log_name="operator_generator", log_dir="./logs/generator")
-        _logger_initialized = True
+        init_logger(log_name=log_name, log_dir="./logs")
+        _logger_initialized_operators.add(key)
     except Exception as init_err:  # pragma: no cover - 防呆
         # 不要因为 logger 初始化失败就阻塞用例生成；保留 traceback 供排查。
         logging.getLogger(__name__).debug(
-            "init_logger for formal generator skipped: %s", init_err,
+            "init_logger for formal generator skipped (operator=%s): %s",
+            key or "<fallback>", init_err,
         )
 
 DEFAULT_COUNT = 10
@@ -174,7 +187,8 @@ class TestCaseGenerator:
             return []
 
         # 正式生成代码依赖 ``init_logger`` 初始化文件 logger，这里做一次惰性兜底。
-        _ensure_formal_logger_initialized()
+        # 按算子名初始化，日志文件为 ``generate_case_{operator_name}.log``。
+        _ensure_formal_logger_initialized(self._operator_name)
         self._apply_seed()
 
         try:
