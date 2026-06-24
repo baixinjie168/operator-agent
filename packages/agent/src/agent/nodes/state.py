@@ -36,6 +36,16 @@ class PipelineState(TypedDict, total=False):
     single_param_constraints: list[dict[str, Any]]
     implicit_params: list[dict[str, Any]]
     platform_constants: list[dict[str, Any]]
+    # ── ExtractorAgent frontend-facing outputs ──
+    # build_param_relations emits these for the ExtractorAgent constraint
+    # detail panel (cd-rel-check / cd-cst-check 三段式校验视图).
+    validation_results: list[dict[str, Any]]  # build_param_relations output
+    cst_validation_results: list[dict[str, Any]]  # build_param_constraint output
+    relations_count: int
+    platforms_count: int
+    params_count: int
+    dimensions_count: int
+    range_count: int
     error: Annotated[str | None, merge_errors]
     # ── GeneratorAgent output (set by case_subgraph nodes) ──
     # Loaded by case_match_model
