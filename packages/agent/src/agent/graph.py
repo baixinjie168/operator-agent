@@ -90,8 +90,148 @@ from agent.nodes.executer_subgraph import (
 
 # -- Runtime tracing --
 from agent.runtime import traced_node
+from agent.runtime.decorators import _AGENT_MAP, _node_done_msg, _node_meta, _node_progress_pct
+from agent.runtime.context import get_context, set_context
+from agent.runtime.events import EventType, SpanStatus, SpanType
 
 logger = logging.getLogger(__name__)
+
+
+def traced_subgraph(node_id: str):
+    """Wrap a compiled LangGraph subgraph with the same SSE/span lifecycle as
+    :func:`traced_node`.
+
+    The default ``StateGraph.add_node(name, subgraph)`` pattern invokes the
+    subgraph directly, which means **no** ``NODE_START`` / ``NODE_SUCCESS``
+    events are emitted and the parent graph state mutations are invisible to
+    the runtime observability system. The frontend ExtractorAgent constraint
+    detail panel relies on ``node.completed`` events with
+    ``d.data.output.validation_results`` to populate the
+    ``cd-cst-check`` 三段式校验视图, so the subgraph must be wrapped.
+
+    Usage::
+
+        bpc_subgraph = create_build_param_constraint_subgraph()
+        graph.add_node(
+            "build_param_constraint",
+            traced_subgraph("build_param_constraint")(bpc_subgraph),
+        )
+    """
+    import asyncio
+
+    def decorator(subgraph):
+        # NOTE: do NOT use @functools.wraps here — CompiledStateGraph exposes
+        # ``__call__`` as a non-callable descriptor (since it's an instance
+        # of a class with a metaclass), and ``functools.wraps`` ends up
+        # invoking ``type.__call__`` on the subgraph, which raises
+        # ``TypeError: descriptor '__call__' for 'type' objects doesn't
+        # apply to a 'CompiledStateGraph' object``. The wrapper below is a
+        # plain async function, which is what LangGraph expects for a node.
+        async def wrapper(state, config=None):
+            ctx = get_context()
+            if ctx is None:
+                # No runtime context — run unwrapped, preserve original
+                # behaviour for back-compat (e.g. unit tests).
+                return await subgraph.ainvoke(state, config=config)
+
+            run = ctx.manager.get_run(ctx.run_id)
+            if not run:
+                return await subgraph.ainvoke(state, config=config)
+
+            agent_id = _AGENT_MAP.get(node_id, "doc")
+            span = ctx.manager.open_span(
+                run_id=ctx.run_id,
+                parent_span_id=ctx.current_span_id,
+                span_type=SpanType.NODE,
+                name=node_id,
+            )
+            ctx.manager.emit(EventType.NODE_START, ctx.run_id, span, {
+                "agent_id": agent_id,
+                "node_id": node_id,
+                "message": f"{node_id} 开始...",
+                "step_index": 0,
+                "progress_pct": 0,
+                "progress_text": "开始",
+            })
+
+            try:
+                # Subgraph runs with the current node context so internal
+                # progress events share the same span hierarchy.
+                node_ctx = ctx.__class__(ctx.run_id, ctx.manager)
+                node_ctx.trace_id = ctx.trace_id
+                node_ctx.current_span_id = span.span_id
+                node_ctx.current_node_id = node_id
+                set_context(node_ctx)
+
+                result = await subgraph.ainvoke(state, config=config)
+
+                node_status = result.get("status", "") if isinstance(result, dict) else ""
+                node_error = result.get("error") if isinstance(result, dict) else None
+
+                if node_status == "unchanged":
+                    ctx.manager.close_span(ctx.run_id, span, SpanStatus.SUCCESS, output=result)
+                    ctx.manager.emit(EventType.NODE_SKIPPED, ctx.run_id, span, {
+                        "agent_id": agent_id,
+                        "node_id": node_id,
+                        "message": "文档未变更，跳过解析",
+                        "progress_pct": 100,
+                        "progress_text": "跳过",
+                    })
+                elif node_status == "error" or (node_error and isinstance(node_error, str)):
+                    err_msg = node_error or "节点执行失败"
+                    ctx.manager.close_span(ctx.run_id, span, SpanStatus.ERROR, output=result, error=err_msg)
+                    ctx.manager.emit(EventType.NODE_ERROR, ctx.run_id, span, {
+                        "agent_id": agent_id,
+                        "node_id": node_id,
+                        "message": err_msg,
+                        "error": err_msg,
+                    })
+                else:
+                    ctx.manager.close_span(ctx.run_id, span, SpanStatus.SUCCESS, output=result)
+                    ctx.manager.emit(EventType.NODE_SUCCESS, ctx.run_id, span, {
+                        "agent_id": agent_id,
+                        "node_id": node_id,
+                        "message": _node_done_msg(node_id, result),
+                        "step_index": 99,
+                        "progress_pct": _node_progress_pct(node_id),
+                        "progress_text": "完成",
+                        "meta": _node_meta(node_id, result),
+                        "output": result,
+                    })
+
+                # Restore parent context so subsequent sibling nodes see
+                # the original span as their parent.
+                set_context(ctx)
+                await asyncio.sleep(0)
+                return result
+
+            except asyncio.CancelledError:
+                ctx.manager.close_span(ctx.run_id, span, SpanStatus.ERROR, error="cancelled")
+                ctx.manager.emit(EventType.NODE_ERROR, ctx.run_id, span, {
+                    "agent_id": agent_id,
+                    "node_id": node_id,
+                    "message": "节点执行被取消",
+                    "error": "cancelled",
+                })
+                set_context(ctx)
+                raise
+
+            except Exception as e:
+                logger.exception("Subgraph %s failed", node_id)
+                ctx.manager.close_span(ctx.run_id, span, SpanStatus.ERROR, error=str(e))
+                ctx.manager.emit(EventType.NODE_ERROR, ctx.run_id, span, {
+                    "agent_id": agent_id,
+                    "node_id": node_id,
+                    "message": str(e),
+                    "error": str(e),
+                })
+                set_context(ctx)
+                await asyncio.sleep(0)
+                return {"error": str(e)}
+
+        return wrapper
+
+    return decorator
 
 
 # -------------------------------------------------------------------
@@ -184,7 +324,7 @@ def _build_extract(graph: StateGraph, *, is_first: bool, is_last: bool) -> None:
     graph.add_node("function_signature_extract", traced_node("function_signature_extract")(_function_signature_extract))
     graph.add_node("function_explanation_extract", traced_node("function_explanation_extract")(_function_explanation_extract))
     graph.add_node("table_column_extract", traced_node("table_column_extract")(_table_column_extract))
-    graph.add_node("llm_description_extract", create_description_extract_subgraph())
+    graph.add_node("llm_description_extract", traced_subgraph("llm_description_extract")(create_description_extract_subgraph()))
     graph.add_node("shape_extract", traced_node("shape_extract")(_shape_extract))
     graph.add_node("dtype_extract", traced_node("dtype_extract")(_dtype_extract))
     graph.add_node("dformat_extract", traced_node("dformat_extract")(_dformat_extract))
@@ -194,11 +334,11 @@ def _build_extract(graph: StateGraph, *, is_first: bool, is_last: bool) -> None:
     graph.add_node("return_code_extract", traced_node("return_code_extract")(_return_code_extract))
     graph.add_node("determinism_extract", traced_node("determinism_extract")(_determinism_extract))
     graph.add_node("dtype_combo_extract", traced_node("dtype_combo_extract")(_dtype_combo_extract))
-    graph.add_node("param_relation_extract", create_param_relation_subgraph())
+    graph.add_node("param_relation_extract", traced_subgraph("param_relation_extract")(create_param_relation_subgraph()))
     graph.add_node("build_param_relations", traced_node("build_param_relations")(_build_param_relations))
     graph.add_node("build_single_param_constraint", traced_node("build_single_param_constraint")(_build_single_param_constraint))
     bpc_subgraph = create_build_param_constraint_subgraph()
-    graph.add_node("build_param_constraint", bpc_subgraph)
+    graph.add_node("build_param_constraint", traced_subgraph("build_param_constraint")(bpc_subgraph))
     graph.add_node("assemble_result", traced_node("assemble_result")(_assemble_result))
 
     if is_first:
