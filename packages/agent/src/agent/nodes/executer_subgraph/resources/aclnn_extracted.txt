@@ -1,0 +1,12 @@
+# aclnn Operator Full Signature Table
+# Format: api_name | full_signature | return_type
+aclnnAdaLayerNorm | aclnnAdaLayerNorm(const aclTensor* x, const aclTensor* weight, const aclTensor* bias, float eps, aclTensor* yOut) | aclError
+aclnnAdd | aclnnAdd(const aclTensor* x1, const aclTensor* x2, const aclScalar* alpha, aclTensor* yOut) | aclError
+aclnnRelu | aclnnRelu(const aclTensor* x, aclTensor* yOut) | aclError
+aclnnSoftmax | aclnnSoftmax(const aclTensor* x, int64_t dim, aclTensor* yOut) | aclError
+aclnnMatmul | aclnnMatmul(const aclTensor* x1, const aclTensor* x2, aclTensor* yOut) | aclError
+aclnnConv2d | aclnnConv2d(const aclTensor* input, const aclTensor* weight, const aclTensor* bias, int64_t* stride, int64_t* padding, int64_t* dilation, int64_t groups, aclTensor* yOut) | aclError
+aclnnBatchNorm | aclnnBatchNorm(const aclTensor* x, const aclTensor* runningMean, const aclTensor* runningVar, const aclTensor* weight, const aclTensor* bias, bool training, float momentum, float eps, aclTensor* yOut) | aclError
+aclnnLayerNorm | aclnnLayerNorm(const aclTensor* x, int64_t* normalizedShape, const aclTensor* weight, const aclTensor* bias, float eps, aclTensor* yOut) | aclError
+aclnnGelu | aclnnGelu(const aclTensor* x, aclTensor* yOut) | aclError
+aclnnSigmoid | aclnnSigmoid(const aclTensor* x, aclTensor* yOut) | aclError

@@ -1,8 +1,4 @@
-"""MCP Tools for document management: version checking, saving, and parsing.
-
-This module retains core document operations and re-exports all domain-specific
-functions from their dedicated modules for backward compatibility.
-"""
+"""MCP Tools for document management: version checking, saving, and parsing."""
 
 from __future__ import annotations
 
@@ -11,63 +7,6 @@ import json
 
 from mcp_server.db import get_db
 from mcp_server.parsers.document_parser import parse_operator_document
-
-# Re-export from domain-specific modules for backward compatibility
-from mcp_server.tools.parameter_tools import (  # noqa: F401
-    batch_update_param_field,
-    query_params_by_doc_id,
-    query_parameters,
-    save_parameters,
-    update_llm_descriptions,
-    update_param_allowed_range,
-    update_param_array_length,
-    update_param_attrs,
-    update_param_constraint,
-    update_param_desc,
-    update_param_direction,
-    update_param_dformat,
-    update_param_dtype,
-    update_param_optional,
-    update_param_platform_attributes,
-    update_param_shape,
-    update_param_usage_notes,
-)
-from mcp_server.tools.relation_tools import (  # noqa: F401
-    query_param_relations,
-    query_param_relations_by_operator,
-    save_param_relations,
-    update_param_relation_objects,
-)
-from mcp_server.tools.signature_tools import (  # noqa: F401
-    query_function_signatures,
-    query_function_signatures_by_doc_id,
-    save_function_signatures,
-)
-from mcp_server.tools.platform_tools import (  # noqa: F401
-    query_determinism_by_operator,
-    query_platform_constants_by_doc_id,
-    query_platform_support,
-    query_platform_support_by_doc_id,
-    save_determinism,
-    save_platform_constants,
-    save_platform_support,
-)
-from mcp_server.tools.constraint_tools import (  # noqa: F401
-    get_json_constraints,
-    query_constraints_result,
-    query_dtype_combos_by_doc_id,
-    query_dtype_combos_by_operator,
-    query_return_codes_by_doc_id,
-    query_return_codes_by_operator,
-    query_implicit_params_by_doc_id,
-    query_parameter_representations_by_doc_id,
-    save_constraints_result,
-    save_dtype_combinations,
-    save_json_constraints,
-    save_return_codes,
-    save_implicit_params,
-    save_parameter_representations,
-)
 
 
 def _compute_hash(content: str) -> str:
@@ -308,18 +247,1305 @@ def list_all_operators() -> list[dict]:
     conn = db.conn
 
     rows = conn.execute(
-        "SELECT o.name, o.source_url, o.created_at, "
+        "SELECT o.id, o.name, o.source_url, o.created_at, "
         "  (SELECT MAX(dv.version) FROM document_versions dv WHERE dv.operator_id = o.id) AS latest_version "
         "FROM operators o ORDER BY o.name"
     ).fetchall()
 
     return [
         {
-            "name": r[0],
-            "source_url": r[1],
-            "created_at": r[2],
-            "latest_version": r[3],
+            "id": r[0],
+            "name": r[1],
+            "source_url": r[2],
+            "created_at": r[3],
+            "latest_version": r[4],
         }
         for r in rows
     ]
 
+
+def save_parameters(doc_id: int, parameters: list[dict]) -> dict:
+    """Save parsed parameters for a specific document version.
+
+    Uses INSERT OR REPLACE for idempotency (upsert on unique constraint).
+
+    Args:
+        doc_id: Primary key of document_versions table.
+        parameters: List of parameter dicts.
+
+    Returns:
+        dict with count of saved parameters.
+    """
+    db = get_db()
+    conn = db.conn
+
+    for param in parameters:
+        conn.execute(
+            "INSERT OR REPLACE INTO parameters "
+            "(doc_id, function_name, param_name, param_type, "
+            "direction, src_content, dtype_desc, dformat_desc, shape) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                doc_id,
+                param.get("function_name", ""),
+                param.get("param_name", ""),
+                param.get("param_type", ""),
+                param.get("direction", ""),
+                param.get("src_content", ""),
+                param.get("data_type", ""),
+                param.get("data_format", ""),
+                param.get("shape", ""),
+            ),
+        )
+
+    conn.commit()
+    return {"saved": len(parameters)}
+
+
+def query_params_by_doc_id(doc_id: int) -> list[dict]:
+    """Query parameters for a specific document version by doc_id.
+
+    Args:
+        doc_id: Primary key of document_versions table.
+
+    Returns:
+        List of parameter dicts for the given doc_id.
+    """
+    db = get_db()
+    conn = db.conn
+    rows = conn.execute(
+        "SELECT id, function_name, param_name, param_type, direction, "
+        "src_content, dtype_desc, dformat_desc, shape, is_optional, "
+        "is_support_discontinuous, array_length, param_desc, allowed_range_value, "
+        "param_constraint, llm_description "
+        "FROM parameters WHERE doc_id = ? ORDER BY function_name, direction, param_name",
+        (doc_id,),
+    ).fetchall()
+    return [
+        {
+            "id": r[0],
+            "function_name": r[1],
+            "param_name": r[2],
+            "param_type": r[3],
+            "direction": r[4],
+            "src_content": r[5],
+            "data_type": r[6],
+            "data_format": r[7],
+            "shape": r[8],
+            "is_optional": r[9],
+            "is_support_discontinuous": r[10],
+            "array_length": r[11],
+            "param_desc": r[12],
+            "allowed_range_value": r[13],
+            "param_constraint": r[14],
+            "llm_description": r[15],
+        }
+        for r in rows
+    ]
+
+
+def update_param_shape(doc_id: int, updates: list[dict]) -> dict:
+    """Batch update only the shape field of parameters.
+
+    Args:
+        doc_id: Primary key of document_versions table.
+        updates: List of dicts with keys: function_name, param_name, shape.
+
+    Returns:
+        dict with count of updated parameters.
+    """
+    db = get_db()
+    conn = db.conn
+    count = 0
+    for u in updates:
+        cursor = conn.execute(
+            "UPDATE parameters SET shape = ? "
+            "WHERE doc_id = ? AND function_name = ? AND param_name = ?",
+            (u.get("shape", ""), doc_id, u.get("function_name", ""), u.get("param_name", "")),
+        )
+        count += cursor.rowcount
+    conn.commit()
+    return {"updated": count}
+
+
+def update_param_dtype(doc_id: int, updates: list[dict]) -> dict:
+    """Batch update only the dtype_desc field of parameters.
+
+    Args:
+        doc_id: Primary key of document_versions table.
+        updates: List of dicts with keys: function_name, param_name, dtype.
+
+    Returns:
+        dict with count of updated parameters.
+    """
+    db = get_db()
+    conn = db.conn
+    count = 0
+    for u in updates:
+        cursor = conn.execute(
+            "UPDATE parameters SET dtype_desc = ? "
+            "WHERE doc_id = ? AND function_name = ? AND param_name = ?",
+            (u.get("dtype", ""), doc_id, u.get("function_name", ""), u.get("param_name", "")),
+        )
+        count += cursor.rowcount
+    conn.commit()
+    return {"updated": count}
+
+
+def update_param_dformat(doc_id: int, updates: list[dict]) -> dict:
+    """Batch update only the dformat_desc field of parameters.
+
+    Args:
+        doc_id: Primary key of document_versions table.
+        updates: List of dicts with keys: function_name, param_name, dformat.
+
+    Returns:
+        dict with count of updated parameters.
+    """
+    db = get_db()
+    conn = db.conn
+    count = 0
+    for u in updates:
+        cursor = conn.execute(
+            "UPDATE parameters SET dformat_desc = ? "
+            "WHERE doc_id = ? AND function_name = ? AND param_name = ?",
+            (u.get("dformat", ""), doc_id, u.get("function_name", ""), u.get("param_name", "")),
+        )
+        count += cursor.rowcount
+    conn.commit()
+    return {"updated": count}
+
+
+def update_param_optional(doc_id: int, updates: list[dict]) -> dict:
+    """Batch update only the is_optional field of parameters.
+
+    Args:
+        doc_id: Primary key of document_versions table.
+        updates: List of dicts with keys: function_name, param_name, is_optional.
+
+    Returns:
+        dict with count of updated parameters.
+    """
+    db = get_db()
+    conn = db.conn
+    count = 0
+    for u in updates:
+        cursor = conn.execute(
+            "UPDATE parameters SET is_optional = ? "
+            "WHERE doc_id = ? AND function_name = ? AND param_name = ?",
+            (u.get("is_optional", 0), doc_id, u.get("function_name", ""), u.get("param_name", "")),
+        )
+        count += cursor.rowcount
+    conn.commit()
+    return {"updated": count}
+
+
+def update_param_attrs(doc_id: int, updates: list[dict]) -> dict:
+    """Batch update is_support_discontinuous field of parameters.
+
+    Args:
+        doc_id: Primary key of document_versions table.
+        updates: List of dicts with keys: function_name, param_name,
+                 is_support_discontinuous.
+
+    Returns:
+        dict with count of updated parameters.
+    """
+    db = get_db()
+    conn = db.conn
+    count = 0
+    for u in updates:
+        cursor = conn.execute(
+            "UPDATE parameters SET is_support_discontinuous = ? "
+            "WHERE doc_id = ? AND function_name = ? AND param_name = ?",
+            (
+                u.get("is_support_discontinuous", '{"value":"N/A","src_text":""}'),
+                doc_id,
+                u.get("function_name", ""),
+                u.get("param_name", ""),
+            ),
+        )
+        count += cursor.rowcount
+    conn.commit()
+    return {"updated": count}
+
+
+def update_param_desc(doc_id: int, updates: list[dict]) -> dict:
+    """Batch update param_desc field of parameters.
+
+    Args:
+        doc_id: Primary key of document_versions table.
+        updates: List of dicts with keys: function_name, param_name, param_desc.
+
+    Returns:
+        dict with count of updated parameters.
+    """
+    db = get_db()
+    conn = db.conn
+    count = 0
+    for u in updates:
+        cursor = conn.execute(
+            "UPDATE parameters SET param_desc = ? "
+            "WHERE doc_id = ? AND function_name = ? AND param_name = ?",
+            (
+                u.get("param_desc", ""),
+                doc_id,
+                u.get("function_name", ""),
+                u.get("param_name", ""),
+            ),
+        )
+        count += cursor.rowcount
+    conn.commit()
+    return {"updated": count}
+
+
+def update_param_direction(doc_id: int, updates: list[dict]) -> dict:
+    """Batch update direction field of parameters.
+
+    Args:
+        doc_id: Primary key of document_versions table.
+        updates: List of dicts with keys: function_name, param_name, direction.
+
+    Returns:
+        dict with count of updated parameters.
+    """
+    db = get_db()
+    conn = db.conn
+    count = 0
+    for u in updates:
+        cursor = conn.execute(
+            "UPDATE parameters SET direction = ? "
+            "WHERE doc_id = ? AND function_name = ? AND param_name = ?",
+            (
+                u.get("direction", ""),
+                doc_id,
+                u.get("function_name", ""),
+                u.get("param_name", ""),
+            ),
+        )
+        count += cursor.rowcount
+    conn.commit()
+    return {"updated": count}
+
+
+def update_llm_descriptions(doc_id: int, updates: list[dict]) -> dict:
+    """Batch update llm_description, src_content, direction, is_support_discontinuous, and description_audit.
+
+    Args:
+        doc_id: Primary key of document_versions table.
+        updates: List of dicts with keys: function_name, param_name,
+                 llm_description, src_content, direction, is_support_discontinuous,
+                 description_audit.
+
+    Returns:
+        dict with count of updated parameters.
+    """
+    db = get_db()
+    conn = db.conn
+    count = 0
+    for u in updates:
+        # Serialize description_audit to JSON string if it's a dict/list.
+        # Without this, SQLite would receive a Python dict and raise
+        # InterfaceError for unsupported types.
+        audit = u.get("description_audit", "")
+        if isinstance(audit, (dict, list)):
+            audit = json.dumps(audit, ensure_ascii=False)
+
+        cursor = conn.execute(
+            "UPDATE parameters SET llm_description = ?, src_content = ?, "
+            "direction = ?, is_support_discontinuous = ?, "
+            "description_audit = ? "
+            "WHERE doc_id = ? AND function_name = ? AND param_name = ?",
+            (
+                u.get("llm_description", ""),
+                u.get("src_content", ""),
+                u.get("direction", ""),
+                u.get("is_support_discontinuous", '{"value":"N/A","src_text":""}'),
+                audit,
+                doc_id,
+                u.get("function_name", ""),
+                u.get("param_name", ""),
+            ),
+        )
+        count += cursor.rowcount
+    conn.commit()
+    return {"updated": count}
+
+
+def update_param_array_length(doc_id: int, updates: list[dict]) -> dict:
+    """Batch update only the array_length field of parameters.
+
+    Args:
+        doc_id: Primary key of document_versions table.
+        updates: List of dicts with keys: function_name, param_name, array_length.
+
+    Returns:
+        dict with count of updated parameters.
+    """
+    db = get_db()
+    conn = db.conn
+    count = 0
+    for u in updates:
+        cursor = conn.execute(
+            "UPDATE parameters SET array_length = ? "
+            "WHERE doc_id = ? AND function_name = ? AND param_name = ?",
+            (u.get("array_length", "N/A"), doc_id, u.get("function_name", ""), u.get("param_name", "")),
+        )
+        count += cursor.rowcount
+    conn.commit()
+    return {"updated": count}
+
+
+def update_param_allowed_range(doc_id: int, updates: list[dict]) -> dict:
+    """Batch update only the allowed_range_value field of parameters.
+
+    Args:
+        doc_id: Primary key of document_versions table.
+        updates: List of dicts with keys: function_name, param_name, allowed_range_value.
+
+    Returns:
+        dict with count of updated parameters.
+    """
+    db = get_db()
+    conn = db.conn
+    count = 0
+    for u in updates:
+        cursor = conn.execute(
+            "UPDATE parameters SET allowed_range_value = ? "
+            "WHERE doc_id = ? AND function_name = ? AND param_name = ?",
+            (u.get("allowed_range_value", "[]"), doc_id, u.get("function_name", ""), u.get("param_name", "")),
+        )
+        count += cursor.rowcount
+    conn.commit()
+    return {"updated": count}
+
+
+def update_param_constraint(doc_id: int, updates: list[dict]) -> dict:
+    """Batch update only the param_constraint field of parameters.
+
+    Args:
+        doc_id: Primary key of document_versions table.
+        updates: List of dicts with keys: function_name, param_name, param_constraint.
+
+    Returns:
+        dict with count of updated parameters.
+    """
+    db = get_db()
+    conn = db.conn
+    count = 0
+    for u in updates:
+        cursor = conn.execute(
+            "UPDATE parameters SET param_constraint = ? "
+            "WHERE doc_id = ? AND function_name = ? AND param_name = ?",
+            (
+                u.get("param_constraint", "{}"),
+                doc_id,
+                u.get("function_name", ""),
+                u.get("param_name", ""),
+            ),
+        )
+        count += cursor.rowcount
+    conn.commit()
+    return {"updated": count}
+
+
+def update_param_relation_objects(doc_id: int, updates: list[dict]) -> dict:
+    """Batch update only the relation_object field of param_relations.
+
+    Args:
+        doc_id: Primary key of document_versions table.
+        updates: List of dicts with keys: id, relation_object.
+
+    Returns:
+        dict with count of updated rows.
+    """
+    db = get_db()
+    conn = db.conn
+    count = 0
+    for u in updates:
+        cursor = conn.execute(
+            "UPDATE param_relations SET relation_object = ? "
+            "WHERE id = ? AND doc_id = ?",
+            (
+                u.get("relation_object", "{}"),
+                u["id"],
+                doc_id,
+            ),
+        )
+        count += cursor.rowcount
+    conn.commit()
+    return {"updated": count}
+
+
+def save_param_relations(doc_id: int, relations: list[dict]) -> dict:
+    db = get_db()
+    conn = db.conn
+    conn.execute("DELETE FROM param_relations WHERE doc_id = ?", (doc_id,))
+    for r in relations:
+        conn.execute(
+            "INSERT INTO param_relations "
+            "(doc_id, function_name, relation_type, platform, "
+            "description, params, param_optional, source_citation, relation_object) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                doc_id,
+                r.get("function_name", ""),
+                r.get("relation_type", ""),
+                r.get("platform", ""),
+                r.get("description", ""),
+                json.dumps(r.get("params", []), ensure_ascii=False),
+                json.dumps(r.get("param_optional", {}), ensure_ascii=False),
+                r.get("source_citation", ""),
+                json.dumps(r.get("relation_object", {}), ensure_ascii=False),
+            ),
+        )
+    conn.commit()
+    return {"saved": len(relations)}
+
+
+def query_param_relations(doc_id: int) -> list[dict]:
+    db = get_db()
+    rows = db.conn.execute(
+        "SELECT id, function_name, relation_type, platform, "
+        "description, params, param_optional, source_citation, relation_object "
+        "FROM param_relations WHERE doc_id = ? ORDER BY id",
+        (doc_id,),
+    ).fetchall()
+    return [
+        {
+            "id": r[0],
+            "function_name": r[1],
+            "relation_type": r[2],
+            "platform": r[3],
+            "description": r[4],
+            "params": json.loads(r[5]),
+            "param_optional": json.loads(r[6]),
+            "source_citation": r[7],
+            "relation_object": json.loads(r[8] or "{}"),
+        }
+        for r in rows
+    ]
+
+
+def query_param_relations_by_operator(operator_name: str | None = None) -> list[dict]:
+    """Query parameter relations, optionally filtered by operator name.
+
+    Args:
+        operator_name: Optional operator name filter. If None, returns all relations.
+
+    Returns:
+        List of relation dicts with operator context.
+    """
+    db = get_db()
+    conn = db.conn
+
+    if operator_name:
+        rows = conn.execute(
+            "SELECT pr.id, o.name, dv.version, pr.function_name, pr.relation_type, "
+            "pr.platform, pr.description, pr.params, pr.param_optional, pr.source_citation, "
+            "pr.relation_object "
+            "FROM param_relations pr "
+            "JOIN document_versions dv ON pr.doc_id = dv.id "
+            "JOIN operators o ON dv.operator_id = o.id "
+            "WHERE o.name = ? ORDER BY pr.function_name, pr.id",
+            (operator_name,),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT pr.id, o.name, dv.version, pr.function_name, pr.relation_type, "
+            "pr.platform, pr.description, pr.params, pr.param_optional, pr.source_citation, "
+            "pr.relation_object "
+            "FROM param_relations pr "
+            "JOIN document_versions dv ON pr.doc_id = dv.id "
+            "JOIN operators o ON dv.operator_id = o.id "
+            "ORDER BY o.name, pr.function_name, pr.id",
+        ).fetchall()
+
+    return [
+        {
+            "id": r[0],
+            "operator_name": r[1],
+            "version": r[2],
+            "function_name": r[3],
+            "relation_type": r[4],
+            "platform": r[5],
+            "description": r[6],
+            "params": json.loads(r[7]),
+            "param_optional": json.loads(r[8]),
+            "source_citation": r[9],
+            "relation_object": json.loads(r[10] or "{}"),
+        }
+        for r in rows
+    ]
+
+
+def query_parameters(operator_name: str | None = None) -> list[dict]:
+    """Query parameters from the database, optionally filtered by operator name.
+
+    Args:
+        operator_name: Optional operator name filter. If None, returns all parameters.
+
+    Returns:
+        List of parameter dicts with operator context.
+    """
+    db = get_db()
+    conn = db.conn
+
+    if operator_name:
+        rows = conn.execute(
+            "SELECT p.id, o.name, dv.version, p.function_name, p.param_name, "
+            "p.param_type, p.direction, p.src_content, p.llm_description, "
+            "p.dtype_desc, p.dformat_desc, p.shape, p.is_optional, "
+            "p.is_support_discontinuous, p.array_length, p.param_desc, p.allowed_range_value "
+            "FROM parameters p "
+            "JOIN document_versions dv ON p.doc_id = dv.id "
+            "JOIN operators o ON dv.operator_id = o.id "
+            "WHERE o.name = ? ORDER BY p.function_name, p.direction, p.param_name",
+            (operator_name,),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT p.id, o.name, dv.version, p.function_name, p.param_name, "
+            "p.param_type, p.direction, p.src_content, p.llm_description, "
+            "p.dtype_desc, p.dformat_desc, p.shape, p.is_optional, "
+            "p.is_support_discontinuous, p.array_length, p.param_desc, p.allowed_range_value "
+            "FROM parameters p "
+            "JOIN document_versions dv ON p.doc_id = dv.id "
+            "JOIN operators o ON dv.operator_id = o.id "
+            "ORDER BY o.name, p.function_name, p.direction, p.param_name",
+        ).fetchall()
+
+    return [
+        {
+            "id": r[0],
+            "operator_name": r[1],
+            "version": r[2],
+            "function_name": r[3],
+            "param_name": r[4],
+            "param_type": r[5],
+            "direction": r[6],
+            "src_content": r[7],
+            "llm_description": r[8],
+            "data_type": r[9],
+            "data_format": r[10],
+            "shape": r[11],
+            "is_optional": r[12],
+            "is_support_discontinuous": r[13],
+            "array_length": r[14],
+            "param_desc": r[15],
+            "allowed_range_value": r[16],
+        }
+        for r in rows
+    ]
+
+
+def save_function_signatures(doc_id: int, signatures: list[dict]) -> dict:
+    """Save function signatures for a specific document version.
+
+    Uses DELETE + INSERT for idempotency.
+
+    Args:
+        doc_id: Primary key of document_versions table.
+        signatures: List of signature dicts with keys: function_name, return_type,
+                   parameters (list of {name, type}), full_signature, raw_code.
+
+    Returns:
+        dict with count of saved signatures.
+    """
+    db = get_db()
+    conn = db.conn
+    conn.execute("DELETE FROM function_signatures WHERE doc_id = ?", (doc_id,))
+    for sig in signatures:
+        conn.execute(
+            "INSERT INTO function_signatures "
+            "(doc_id, function_name, return_type, parameters, full_signature, raw_code) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                doc_id,
+                sig.get("function_name", ""),
+                sig.get("return_type", ""),
+                json.dumps(sig.get("parameters", []), ensure_ascii=False),
+                sig.get("full_signature", ""),
+                sig.get("raw_code", ""),
+            ),
+        )
+    conn.commit()
+    return {"saved": len(signatures)}
+
+
+def query_function_signatures(operator_name: str | None = None) -> list[dict]:
+    """Query function signatures, optionally filtered by operator name.
+
+    Args:
+        operator_name: Optional operator name filter. If None, returns all signatures.
+
+    Returns:
+        List of signature dicts with operator context.
+    """
+    db = get_db()
+    conn = db.conn
+
+    if operator_name:
+        rows = conn.execute(
+            "SELECT fs.id, o.name, dv.version, fs.function_name, fs.return_type, "
+            "fs.parameters, fs.full_signature, fs.raw_code "
+            "FROM function_signatures fs "
+            "JOIN document_versions dv ON fs.doc_id = dv.id "
+            "JOIN operators o ON dv.operator_id = o.id "
+            "WHERE o.name = ? ORDER BY fs.function_name",
+            (operator_name,),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT fs.id, o.name, dv.version, fs.function_name, fs.return_type, "
+            "fs.parameters, fs.full_signature, fs.raw_code "
+            "FROM function_signatures fs "
+            "JOIN document_versions dv ON fs.doc_id = dv.id "
+            "JOIN operators o ON dv.operator_id = o.id "
+            "ORDER BY o.name, fs.function_name",
+        ).fetchall()
+
+    return [
+        {
+            "id": r[0],
+            "operator_name": r[1],
+            "version": r[2],
+            "function_name": r[3],
+            "return_type": r[4],
+            "parameters": json.loads(r[5]),
+            "full_signature": r[6],
+            "raw_code": r[7],
+        }
+        for r in rows
+    ]
+
+
+def save_platform_support(doc_id: int, platforms: list[dict]) -> dict:
+    """Save platform support info for a specific document version.
+
+    Uses UPSERT (INSERT ... ON CONFLICT DO UPDATE) for idempotency.
+    Always updates is_supported; only updates deterministic_computing
+    when the incoming value has a non-empty "value" field, to avoid
+    overwriting determinism data already written by determinism_extract_node.
+
+    Args:
+        doc_id: Primary key of document_versions table.
+        platforms: List of platform dicts with keys: platform_name, is_supported,
+                   and optionally deterministic_computing.
+
+    Returns:
+        dict with count of saved platforms.
+    """
+    db = get_db()
+    conn = db.conn
+    default_det = {"value": "", "src_text": ""}
+    for p in platforms:
+        det = p.get("deterministic_computing", default_det)
+        det_json = json.dumps(det, ensure_ascii=False)
+        conn.execute(
+            "INSERT INTO platform_support "
+            "(doc_id, platform_name, is_supported, deterministic_computing) "
+            "VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(doc_id, platform_name) DO UPDATE SET "
+            "is_supported = excluded.is_supported, "
+            "deterministic_computing = CASE "
+            "  WHEN json_extract(excluded.deterministic_computing, '$.value') != '' "
+            "  THEN excluded.deterministic_computing "
+            "  ELSE platform_support.deterministic_computing END",
+            (
+                doc_id,
+                p.get("platform_name", ""),
+                p.get("is_supported", 0),
+                det_json,
+            ),
+        )
+    conn.commit()
+    return {"saved": len(platforms)}
+
+
+def save_return_codes(doc_id: int, return_codes: list[dict]) -> dict:
+    """Save return codes for a specific document version.
+
+    Uses DELETE + INSERT for idempotency.
+
+    Args:
+        doc_id: Primary key of document_versions table.
+        return_codes: List of dicts with keys: function_name, return_value,
+                     error_code, descriptions (list of strings).
+
+    Returns:
+        dict with count of saved return codes.
+    """
+    db = get_db()
+    conn = db.conn
+    conn.execute("DELETE FROM return_codes WHERE doc_id = ?", (doc_id,))
+    for rc in return_codes:
+        conn.execute(
+            "INSERT INTO return_codes "
+            "(doc_id, function_name, return_value, error_code, descriptions, source_citation) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                doc_id,
+                rc.get("function_name", ""),
+                rc.get("return_value", ""),
+                rc.get("error_code", 0),
+                json.dumps(rc.get("descriptions", []), ensure_ascii=False),
+                rc.get("source_citation", ""),
+            ),
+        )
+    conn.commit()
+    return {"saved": len(return_codes)}
+
+
+def query_return_codes_by_operator(operator_name: str | None = None) -> list[dict]:
+    """Query return codes, optionally filtered by operator name.
+
+    Args:
+        operator_name: Optional operator name filter. If None, returns all return codes.
+
+    Returns:
+        List of return code dicts with operator context.
+    """
+    db = get_db()
+    conn = db.conn
+
+    if operator_name:
+        rows = conn.execute(
+            "SELECT rc.id, o.name, dv.version, rc.function_name, rc.return_value, "
+            "rc.error_code, rc.descriptions, rc.source_citation "
+            "FROM return_codes rc "
+            "JOIN document_versions dv ON rc.doc_id = dv.id "
+            "JOIN operators o ON dv.operator_id = o.id "
+            "WHERE o.name = ? ORDER BY rc.function_name, rc.error_code",
+            (operator_name,),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT rc.id, o.name, dv.version, rc.function_name, rc.return_value, "
+            "rc.error_code, rc.descriptions, rc.source_citation "
+            "FROM return_codes rc "
+            "JOIN document_versions dv ON rc.doc_id = dv.id "
+            "JOIN operators o ON dv.operator_id = o.id "
+            "ORDER BY o.name, rc.function_name, rc.error_code",
+        ).fetchall()
+
+    return [
+        {
+            "id": r[0],
+            "operator_name": r[1],
+            "version": r[2],
+            "function_name": r[3],
+            "return_value": r[4],
+            "error_code": r[5],
+            "descriptions": json.loads(r[6]),
+            "source_citation": r[7],
+        }
+        for r in rows
+    ]
+
+
+def query_platform_support(operator_name: str | None = None) -> list[dict]:
+    """Query platform support, optionally filtered by operator name.
+
+    Args:
+        operator_name: Optional operator name filter. If None, returns all platforms.
+
+    Returns:
+        List of platform dicts with operator context, including deterministic_computing.
+    """
+    db = get_db()
+    conn = db.conn
+    _default_det = '{"value":"","src_text":""}'
+
+    if operator_name:
+        rows = conn.execute(
+            "SELECT ps.id, o.name, dv.version, ps.platform_name, ps.is_supported, "
+            "ps.deterministic_computing "
+            "FROM platform_support ps "
+            "JOIN document_versions dv ON ps.doc_id = dv.id "
+            "JOIN operators o ON dv.operator_id = o.id "
+            "WHERE o.name = ? ORDER BY ps.platform_name",
+            (operator_name,),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT ps.id, o.name, dv.version, ps.platform_name, ps.is_supported, "
+            "ps.deterministic_computing "
+            "FROM platform_support ps "
+            "JOIN document_versions dv ON ps.doc_id = dv.id "
+            "JOIN operators o ON dv.operator_id = o.id "
+            "ORDER BY o.name, ps.platform_name",
+        ).fetchall()
+
+    return [
+        {
+            "id": r[0],
+            "operator_name": r[1],
+            "version": r[2],
+            "platform_name": r[3],
+            "is_supported": r[4],
+            "deterministic_computing": json.loads(r[5] or _default_det),
+        }
+        for r in rows
+    ]
+
+
+def save_determinism(doc_id: int, determinism_records: list[dict]) -> dict:
+    """Save determinism records into platform_support.deterministic_computing.
+
+    Uses UPSERT: if a platform_support row exists for (doc_id, product),
+    update only its deterministic_computing column; otherwise insert a new
+    row with is_supported defaulting to 0.
+
+    Args:
+        doc_id: Primary key of document_versions table.
+        determinism_records: List of dicts with keys: product, value, src_text.
+
+    Returns:
+        dict with count of saved records.
+    """
+    db = get_db()
+    conn = db.conn
+    for record in determinism_records:
+        product = record.get("product", "")
+        value_str = "true" if record.get("value") else "false"
+        src_text = record.get("src_text", "")
+        det_json = json.dumps(
+            {"value": value_str, "src_text": src_text},
+            ensure_ascii=False,
+        )
+        conn.execute(
+            "INSERT INTO platform_support "
+            "(doc_id, platform_name, is_supported, deterministic_computing) "
+            "VALUES (?, ?, 0, ?) "
+            "ON CONFLICT(doc_id, platform_name) DO UPDATE SET "
+            "deterministic_computing = excluded.deterministic_computing",
+            (doc_id, product, det_json),
+        )
+    conn.commit()
+    return {"saved": len(determinism_records)}
+
+
+def query_determinism_by_operator(operator_name: str | None = None) -> list[dict]:
+    """Query determinism records from platform_support.deterministic_computing,
+    optionally filtered by operator name.
+
+    Only returns rows where deterministic_computing.value is non-empty.
+    Maps platform_name → product and value string → bool for backward compatibility.
+
+    Args:
+        operator_name: Optional operator name filter. If None, returns all records.
+
+    Returns:
+        List of determinism dicts with operator context.
+    """
+    db = get_db()
+    conn = db.conn
+
+    base_sql = (
+        "SELECT ps.id, o.name, dv.version, ps.platform_name, "
+        "ps.deterministic_computing "
+        "FROM platform_support ps "
+        "JOIN document_versions dv ON ps.doc_id = dv.id "
+        "JOIN operators o ON dv.operator_id = o.id "
+    )
+    filter_clause = "json_extract(ps.deterministic_computing, '$.value') != ''"
+
+    if operator_name:
+        rows = conn.execute(
+            base_sql + "WHERE o.name = ? AND " + filter_clause +
+            " ORDER BY ps.platform_name",
+            (operator_name,),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            base_sql + "WHERE " + filter_clause +
+            " ORDER BY o.name, ps.platform_name",
+        ).fetchall()
+
+    result = []
+    for r in rows:
+        det = json.loads(r[4])
+        raw_val = det.get("value", "")
+        # Support both new ("true"/"false") and legacy ("确定性"/"非确定性") formats
+        is_det = raw_val == "true" or raw_val == "确定性"
+        result.append({
+            "id": r[0],
+            "operator_name": r[1],
+            "version": r[2],
+            "product": r[3],
+            "value": is_det,
+            "src_text": det.get("src_text", ""),
+        })
+    return result
+
+
+def save_dtype_combinations(doc_id: int, combos: list[dict]) -> dict:
+    """Save dtype combination records for a specific document version.
+
+    Uses DELETE + INSERT for idempotency.
+
+    Args:
+        doc_id: Primary key of document_versions table.
+        combos: List of dicts with keys: function_name, platform, combo.
+                combo is a dict like {"x1": "FLOAT32", "x2": "FLOAT16"}.
+
+    Returns:
+        dict with count of saved records.
+    """
+    db = get_db()
+    conn = db.conn
+    conn.execute("DELETE FROM dtype_combinations WHERE doc_id = ?", (doc_id,))
+    for record in combos:
+        combo_data = record.get("combo", {})
+        combo_json = (
+            json.dumps(combo_data, ensure_ascii=False)
+            if isinstance(combo_data, dict)
+            else combo_data
+        )
+        conn.execute(
+            "INSERT INTO dtype_combinations (doc_id, function_name, platform, combo) "
+            "VALUES (?, ?, ?, ?)",
+            (
+                doc_id,
+                record.get("function_name", ""),
+                record.get("platform", "通用"),
+                combo_json,
+            ),
+        )
+    conn.commit()
+    return {"saved": len(combos)}
+
+
+def query_dtype_combos_by_operator(operator_name: str | None = None) -> list[dict]:
+    """Query dtype combination records, optionally filtered by operator name.
+
+    Args:
+        operator_name: Optional operator name filter. If None, returns all records.
+
+    Returns:
+        List of dtype combination dicts with operator context.
+    """
+    db = get_db()
+    conn = db.conn
+
+    if operator_name:
+        rows = conn.execute(
+            "SELECT dc.id, o.name, dv.version, dc.function_name, dc.platform, dc.combo "
+            "FROM dtype_combinations dc "
+            "JOIN document_versions dv ON dc.doc_id = dv.id "
+            "JOIN operators o ON dv.operator_id = o.id "
+            "WHERE o.name = ? ORDER BY dc.function_name, dc.platform, dc.id",
+            (operator_name,),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT dc.id, o.name, dv.version, dc.function_name, dc.platform, dc.combo "
+            "FROM dtype_combinations dc "
+            "JOIN document_versions dv ON dc.doc_id = dv.id "
+            "JOIN operators o ON dv.operator_id = o.id "
+            "ORDER BY o.name, dc.function_name, dc.platform, dc.id",
+        ).fetchall()
+
+    return [
+        {
+            "id": r[0],
+            "operator_name": r[1],
+            "version": r[2],
+            "function_name": r[3],
+            "platform": r[4],
+            "combo": json.loads(r[5]) if r[5] else {},
+        }
+        for r in rows
+    ]
+
+
+def query_function_signatures_by_doc_id(doc_id: int) -> list[dict]:
+    """Query function signatures for a specific document version by doc_id."""
+    db = get_db()
+    rows = db.conn.execute(
+        "SELECT id, function_name, return_type, parameters, full_signature, raw_code "
+        "FROM function_signatures WHERE doc_id = ? ORDER BY function_name",
+        (doc_id,),
+    ).fetchall()
+    return [
+        {
+            "id": r[0],
+            "function_name": r[1],
+            "return_type": r[2],
+            "parameters": json.loads(r[3]) if r[3] else [],
+            "full_signature": r[4],
+            "raw_code": r[5],
+        }
+        for r in rows
+    ]
+
+
+def query_platform_support_by_doc_id(doc_id: int) -> list[dict]:
+    """Query platform support for a specific document version by doc_id."""
+    db = get_db()
+    _default_det = '{"value":"","src_text":""}'
+    rows = db.conn.execute(
+        "SELECT id, platform_name, is_supported, deterministic_computing "
+        "FROM platform_support WHERE doc_id = ? ORDER BY platform_name",
+        (doc_id,),
+    ).fetchall()
+    return [
+        {
+            "id": r[0],
+            "platform_name": r[1],
+            "is_supported": r[2],
+            "deterministic_computing": json.loads(r[3] or _default_det),
+        }
+        for r in rows
+    ]
+
+
+def query_return_codes_by_doc_id(doc_id: int) -> list[dict]:
+    """Query return codes for a specific document version by doc_id."""
+    db = get_db()
+    rows = db.conn.execute(
+        "SELECT id, function_name, return_value, error_code, descriptions, source_citation "
+        "FROM return_codes WHERE doc_id = ? ORDER BY function_name, error_code",
+        (doc_id,),
+    ).fetchall()
+    return [
+        {
+            "id": r[0],
+            "function_name": r[1],
+            "return_value": r[2],
+            "error_code": r[3],
+            "descriptions": json.loads(r[4]) if r[4] else [],
+            "source_citation": r[5],
+        }
+        for r in rows
+    ]
+
+
+def query_dtype_combos_by_doc_id(doc_id: int) -> list[dict]:
+    """Query dtype combinations for a specific document version by doc_id."""
+    db = get_db()
+    rows = db.conn.execute(
+        "SELECT id, function_name, platform, combo "
+        "FROM dtype_combinations WHERE doc_id = ? ORDER BY function_name, platform, id",
+        (doc_id,),
+    ).fetchall()
+    return [
+        {
+            "id": r[0],
+            "function_name": r[1],
+            "platform": r[2],
+            "combo": json.loads(r[3]) if r[3] else {},
+        }
+        for r in rows
+    ]
+
+
+def save_constraints_result(
+    doc_id: int,
+    operator_name: str,
+    product_support: str,
+    function_explanation: str,
+    function_signature: str = "",
+    return_codes: str = "[]",
+    deterministic_computing: str = "{}",
+    inputs: str = "{}",
+    outputs: str = "{}",
+    constraints_in_parameters: str = "{}",
+    dtype_support_description: str = "{}",
+) -> dict:
+    """Save assembled constraints result for a document version.
+
+    Uses INSERT OR REPLACE for idempotency.
+
+    Args:
+        doc_id: Primary key of document_versions table.
+        operator_name: Operator name.
+        product_support: JSON string of supported platform name list.
+        function_explanation: JSON string of function-grouped constraint data.
+        function_signature: full_signature of the GetWorkspaceSize function.
+        return_codes: JSON string of transformed return codes array.
+        deterministic_computing: JSON string of {platform: {value, src_text}}.
+        inputs: JSON string of {param_name: {platform: constraint}}.
+        outputs: JSON string of {param_name: {platform: constraint}}.
+        constraints_in_parameters: JSON string of {platform: [relation_object]}.
+        dtype_support_description: JSON string of {platform: [combo]}.
+
+    Returns:
+        dict with saved flag.
+    """
+    db = get_db()
+    conn = db.conn
+    conn.execute(
+        "INSERT OR REPLACE INTO constraints_result "
+        "(doc_id, operator_name, product_support, "
+        "function_explanation, function_signature, return_codes, "
+        "deterministic_computing, inputs, outputs, constraints_in_parameters, "
+        "dtype_support_description) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (doc_id, operator_name, product_support,
+         function_explanation, function_signature, return_codes,
+         deterministic_computing, inputs, outputs, constraints_in_parameters,
+         dtype_support_description),
+    )
+    conn.commit()
+    return {"saved": True}
+
+
+def query_constraints_result(operator_name: str | None = None) -> list[dict]:
+    """Query constraints results, optionally filtered by operator name."""
+    db = get_db()
+    conn = db.conn
+
+    _cols = (
+        "cr.id, cr.doc_id, cr.operator_name, dv.version, "
+        "cr.product_support, cr.function_explanation, "
+        "cr.function_signature, cr.return_codes, "
+        "cr.deterministic_computing, cr.inputs, cr.outputs, "
+        "cr.constraints_in_parameters, cr.dtype_support_description"
+    )
+    _base = "FROM constraints_result cr JOIN document_versions dv ON cr.doc_id = dv.id"
+
+    if operator_name:
+        rows = conn.execute(
+            f"SELECT {_cols} {_base} WHERE cr.operator_name = ? ORDER BY dv.version DESC",
+            (operator_name,),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            f"SELECT {_cols} {_base} ORDER BY cr.operator_name, dv.version DESC",
+        ).fetchall()
+
+    return [
+        {
+            "id": r[0],
+            "doc_id": r[1],
+            "operator_name": r[2],
+            "version": r[3],
+            "product_support": json.loads(r[4]) if r[4] else [],
+            "function_explanation": (json.loads(r[5]) if r[5] else {}).get("description", ""),
+            "function_detail": json.loads(r[5]) if r[5] else {},
+            "function_signature": r[6] or "",
+            "return_info": json.loads(r[7]) if r[7] else [],
+            "deterministic_computing": json.loads(r[8]) if r[8] else {},
+            "inputs": json.loads(r[9]) if r[9] else {},
+            "outputs": json.loads(r[10]) if r[10] else {},
+            "constraints_in_parameters": json.loads(r[11]) if r[11] else {},
+            "dtype_support_description": json.loads(r[12]) if r[12] else {},
+        }
+        for r in rows
+    ]
+
+
+def save_json_constraints(doc_id: int, json_constraints: str) -> dict:
+    """Save the final result.json structure to document_versions.json_constraints.
+
+    Args:
+        doc_id: Primary key of document_versions table.
+        json_constraints: JSON string of the complete result.json structure.
+
+    Returns:
+        dict with saved flag.
+    """
+    db = get_db()
+    conn = db.conn
+    conn.execute(
+        "UPDATE document_versions SET json_constraints = ? WHERE id = ?",
+        (json_constraints, doc_id),
+    )
+    conn.commit()
+    return {"saved": True}
+
+
+def update_json_constraints_by_name(operator_name: str, json_constraints: str) -> dict:
+    """Update json_constraints for the latest document version of an operator.
+
+    Args:
+        operator_name: Operator name.
+        json_constraints: JSON string of the updated constraints.
+
+    Returns:
+        dict with saved flag and doc_id.
+    """
+    db = get_db()
+    conn = db.conn
+    row = conn.execute(
+        "SELECT dv.id FROM document_versions dv "
+        "JOIN operators o ON dv.operator_id = o.id "
+        "WHERE o.name = ? ORDER BY dv.version DESC LIMIT 1",
+        (operator_name,),
+    ).fetchone()
+    if not row:
+        return {"saved": False, "error": f"Operator '{operator_name}' not found"}
+    doc_id = row[0]
+    conn.execute(
+        "UPDATE document_versions SET json_constraints = ? WHERE id = ?",
+        (json_constraints, doc_id),
+    )
+    conn.commit()
+    return {"saved": True, "doc_id": doc_id}
+
+
+def get_document_content(operator_name: str, version: int | None = None) -> dict | None:
+    """Retrieve raw Markdown content from the latest document version for an operator.
+
+    Args:
+        operator_name: Operator name.
+        version: Version number (defaults to latest).
+
+    Returns:
+        dict with content and version, or None if not found.
+    """
+    db = get_db()
+    conn = db.conn
+
+    operator_row = conn.execute(
+        "SELECT id FROM operators WHERE name = ?", (operator_name,)
+    ).fetchone()
+    if not operator_row:
+        return None
+
+    operator_id = operator_row[0]
+
+    if version is None:
+        row = conn.execute(
+            "SELECT content, version FROM document_versions "
+            "WHERE operator_id = ? ORDER BY version DESC LIMIT 1",
+            (operator_id,),
+        ).fetchone()
+    else:
+        row = conn.execute(
+            "SELECT content, version FROM document_versions "
+            "WHERE operator_id = ? AND version = ?",
+            (operator_id, version),
+        ).fetchone()
+
+    if not row or not row[0]:
+        return None
+
+    return {"content": row[0], "version": row[1], "operator_name": operator_name}
+
+
+def get_json_constraints(operator_name: str) -> dict | None:
+    """Retrieve json_constraints from the latest document version for an operator.
+
+    Args:
+        operator_name: Operator name.
+
+    Returns:
+        Parsed JSON dict, or None if not found.
+    """
+    db = get_db()
+    conn = db.conn
+    row = conn.execute(
+        "SELECT dv.json_constraints FROM document_versions dv "
+        "JOIN operators o ON dv.operator_id = o.id "
+        "WHERE o.name = ? ORDER BY dv.version DESC LIMIT 1",
+        (operator_name,),
+    ).fetchone()
+    if not row or not row[0] or row[0] == "{}":
+        return None
+    try:
+        return json.loads(row[0])
+    except (json.JSONDecodeError, TypeError):
+        return None

@@ -1,11 +1,12 @@
 """MCP stdio client wrapper for the agent main system.
 
-Manages the MCP server subprocess lifecycle and provides
-async methods to call MCP tools.
+Manages a persistent MCP server subprocess and provides async methods
+to call MCP tools with timeout protection.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -18,11 +19,29 @@ from agent.core.config import settings
 
 logger = logging.getLogger(__name__)
 
+# Default timeout for MCP tool calls (seconds)
+_DEFAULT_TIMEOUT = 120
+
 
 class MCPClient:
-    """Async client that communicates with the MCP server via stdio."""
+    """Async client that communicates with the MCP server via stdio.
+
+    Uses a persistent connection (singleton pattern) to avoid the overhead
+    of spawning a new subprocess for every tool call.
+    """
+
+    _instance: MCPClient | None = None
+    _lock: asyncio.Lock | None = None
+
+    def __new__(cls, server_command: str = "") -> MCPClient:
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+            cls._instance._initialized = False
+        return cls._instance
 
     def __init__(self, server_command: str = "") -> None:
+        if self._initialized:
+            return
         if not server_command:
             server_command = settings.mcp_server_command
         parts = server_command.split()
@@ -32,24 +51,90 @@ class MCPClient:
         self._params = StdioServerParameters(
             command=parts[0], args=parts[1:], env=dict(os.environ),
         )
+        self._session: ClientSession | None = None
+        self._read = None
+        self._write = None
+        self._context = None
+        # Create lock lazily to avoid issues with event loop
+        if MCPClient._lock is None:
+            MCPClient._lock = asyncio.Lock()
+        self._initialized = True
 
-    async def _call_tool(self, tool_name: str, arguments: dict[str, Any]) -> Any:
-        """Start MCP server subprocess, call a tool, and return the result."""
-        async with stdio_client(self._params) as (read, write), ClientSession(read, write) as session:
-            await session.initialize()
-            result = await session.call_tool(tool_name, arguments)
+    async def _ensure_session(self) -> ClientSession:
+        """Ensure a persistent MCP session is active."""
+        if self._session is not None:
+            return self._session
 
-            if result.isError:
-                error_msg = result.content[0].text if result.content else "Unknown MCP error"
-                raise RuntimeError(f"MCP tool '{tool_name}' error: {error_msg}")
+        assert MCPClient._lock is not None
+        async with MCPClient._lock:
+            # Double-check after acquiring lock
+            if self._session is not None:
+                return self._session
 
-            if result.content:
-                text = result.content[0].text
+            logger.info("Starting persistent MCP server subprocess...")
+            self._context = stdio_client(self._params)
+            self._read, self._write = await self._context.__aenter__()
+            session_ctx = ClientSession(self._read, self._write)
+            self._session = await session_ctx.__aenter__()
+            await self._session.initialize()
+            logger.info("MCP server session established")
+            return self._session
+
+    async def _call_tool(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any],
+        timeout: float = _DEFAULT_TIMEOUT,
+    ) -> Any:
+        """Call an MCP tool with timeout protection.
+
+        Uses a persistent session to avoid subprocess overhead.
+        """
+        try:
+            session = await self._ensure_session()
+            result = await asyncio.wait_for(
+                session.call_tool(tool_name, arguments),
+                timeout=timeout,
+            )
+        except asyncio.TimeoutError:
+            logger.error("MCP tool '%s' timed out after %ss", tool_name, timeout)
+            raise RuntimeError(f"MCP tool '{tool_name}' timed out after {timeout}s")
+        except Exception as e:
+            # If session is broken, reset it for next call
+            logger.warning("MCP session error: %s, will reconnect", e)
+            await self._reset_session()
+            raise
+
+        if result.isError:
+            error_msg = result.content[0].text if result.content else "Unknown MCP error"
+            raise RuntimeError(f"MCP tool '{tool_name}' error: {error_msg}")
+
+        if result.content:
+            text = result.content[0].text
+            try:
+                return json.loads(text)
+            except (json.JSONDecodeError, TypeError):
+                return text
+        return None
+
+    async def _reset_session(self) -> None:
+        """Reset the MCP session (e.g., after an error)."""
+        assert MCPClient._lock is not None
+        async with MCPClient._lock:
+            self._session = None
+            self._read = None
+            self._write = None
+            if self._context:
                 try:
-                    return json.loads(text)
-                except (json.JSONDecodeError, TypeError):
-                    return text
-            return None
+                    await self._context.__aexit__(None, None, None)
+                except Exception:
+                    pass
+                self._context = None
+
+    async def close(self) -> None:
+        """Close the persistent session and subprocess."""
+        await self._reset_session()
+        MCPClient._instance = None
 
     async def check_version(self, operator_name: str, content_hash: str) -> dict:
         """Check document version status."""
@@ -399,10 +484,24 @@ class MCPClient:
             "json_constraints": json_constraints,
         })
 
+    async def get_document_content(self, operator_name: str, version: int | None = None) -> dict | None:
+        """Retrieve raw Markdown content from the latest document version for an operator."""
+        args: dict[str, Any] = {"operator_name": operator_name}
+        if version is not None:
+            args["version"] = version
+        return await self._call_tool("get_document_content", args)
+
     async def get_json_constraints(self, operator_name: str) -> dict | None:
         """Retrieve json_constraints from the latest document version for an operator."""
         return await self._call_tool("get_json_constraints", {
             "operator_name": operator_name,
+        })
+
+    async def update_json_constraints_by_name(self, operator_name: str, json_constraints: str) -> dict:
+        """Update json_constraints for the latest document version of an operator."""
+        return await self._call_tool("update_json_constraints_by_name", {
+            "operator_name": operator_name,
+            "json_constraints": json_constraints,
         })
 
     async def save_implicit_params(
@@ -461,6 +560,35 @@ class MCPClient:
         if operator_name is not None:
             args["operator_name"] = operator_name
         return await self._call_tool("query_constraints_result", args)
+
+    # ── GeneratorAgent wrappers ─────────────────────────────────────────────
+
+    async def save_test_cases(
+        self,
+        operator_name: str,
+        cases_json: str,
+        source: str = "generated",
+        output_dir: str | None = None,
+    ) -> dict:
+        """Persist generated test cases to DB and ``cases/{op}_cases.json`` on disk."""
+        args: dict[str, Any] = {
+            "operator_name": operator_name,
+            "cases_json": cases_json,
+            "source": source,
+        }
+        if output_dir is not None:
+            args["output_dir"] = output_dir
+        return await self._call_tool("save_test_cases", args)
+
+    async def get_test_cases(self, operator_name: str) -> dict | None:
+        """Return the most recent saved test cases for ``operator_name``."""
+        return await self._call_tool("get_test_cases", {
+            "operator_name": operator_name,
+        })
+
+    async def list_test_case_operators(self) -> list[dict]:
+        """List operator names that have saved test cases, with counts."""
+        return await self._call_tool("list_test_case_operators", {})
 
     # ── Task management tools ────────────────────────────────────────
 

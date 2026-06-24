@@ -4,6 +4,9 @@ Implements three-layer protection for expression generation accuracy:
 - Phase 0: Deterministic validation (AST syntax + reference checks)
 - Phase 1: Prompt enhancement (Few-shot examples + confidence scoring)
 - Phase 2: Failure remediation (enhanced retry + semantic verification)
+
+Emits NODE_PROGRESS events for the frontend constraint detail panel
+(data_ready → extract_done → complete).
 """
 
 from __future__ import annotations
@@ -25,6 +28,8 @@ from agent.utils.expr_validation import validate_expr as _validate_expr
 from agent.utils.expr_validation import validate_expr_refs as _validate_expr_refs
 from agent.utils.expr_validation import validate_expr_syntax as _validate_expr_syntax
 from agent.utils.llm_common import CONCURRENCY_LIMIT, JSON_BLOCK_RE
+from agent.runtime.context import get_context
+from agent.runtime.events import EventType, Span, SpanType
 
 logger = logging.getLogger(__name__)
 
@@ -590,6 +595,28 @@ async def build_param_relations_node(state: PipelineState) -> dict[str, Any]:
             logger.info("BuildParamRelations: no relations, skipping")
             return {"error": None}
 
+        # Setup NODE_PROGRESS emission for the frontend constraint detail panel.
+        ctx = get_context()
+        _progress_span = Span(
+            span_id="progress",
+            parent_span_id=ctx.current_span_id if ctx else None,
+            span_type=SpanType.NODE,
+            name="build_param_relations",
+        )
+        _emit = lambda evt, data: (
+            ctx.manager.emit(evt, ctx.run_id, _progress_span, {
+                "agent_id": "constraint",
+                "node_id": "build_param_relations",
+                **data,
+            }) if ctx and ctx.manager else None
+        )
+
+        _emit(EventType.NODE_PROGRESS, {
+            "message": f"已查询到 {len(relations)} 条参数关系，开始提取表达式",
+            "phase": "data_ready",
+            "relations_count": len(relations),
+        })
+
         # Step 1b: Get shape dimension mappings from state (for prompt + safety net)
         mappings = state.get("implicit_params", [])
         implicit_params_text = ""
@@ -631,6 +658,57 @@ async def build_param_relations_node(state: PipelineState) -> dict[str, Any]:
             external_constants=external_const_names,
             implicit_param_names=implicit_param_names,
         )
+
+        # Aggregate validation phase results for NODE_PROGRESS (extract_done).
+        valid_count = 0
+        corrected_count = 0
+        error_count = 0
+        ast_failed = 0
+        ref_failed = 0
+        semantic_passed = 0
+        semantic_corrected = 0
+        semantic_failed = 0
+        semantic_skipped = 0
+        for r in llm_results:
+            phases = r.get("_validation_phases") or {}
+            ast = phases.get("ast_syntax") or {}
+            ref = phases.get("param_refs") or {}
+            sem = phases.get("semantic") or {}
+            if r.get("_validation_error"):
+                error_count += 1
+            elif r.get("_corrected"):
+                corrected_count += 1
+            else:
+                valid_count += 1
+            if ast.get("status") == "failed":
+                ast_failed += 1
+            if ref.get("status") == "failed":
+                ref_failed += 1
+            s_status = sem.get("status")
+            if s_status == "passed":
+                semantic_passed += 1
+            elif s_status == "corrected":
+                semantic_corrected += 1
+            elif s_status == "failed":
+                semantic_failed += 1
+            elif s_status == "skipped":
+                semantic_skipped += 1
+
+        _emit(EventType.NODE_PROGRESS, {
+            "message": f"表达式提取完成: {valid_count}/{len(relations)} 有效, "
+                       f"{corrected_count} 已修正, {error_count} 有校验错误",
+            "phase": "extract_done",
+            "relations_count": len(relations),
+            "valid_count": valid_count,
+            "corrected_count": corrected_count,
+            "error_count": error_count,
+            "ast_failed_count": ast_failed,
+            "ref_failed_count": ref_failed,
+            "semantic_passed_count": semantic_passed,
+            "semantic_corrected_count": semantic_corrected,
+            "semantic_failed_count": semantic_failed,
+            "semantic_skipped_count": semantic_skipped,
+        })
 
         # Step 4: Assemble relation_object and persist
         updates: list[dict] = []
@@ -704,7 +782,68 @@ async def build_param_relations_node(state: PipelineState) -> dict[str, Any]:
             len(grouped), doc_id,
         )
 
-        return {"error": None}
+        _emit(EventType.NODE_PROGRESS, {
+            "message": f"已按平台分组: {len(grouped)} 个平台, {len(relations)} 条关系",
+            "phase": "complete",
+            "platforms_count": len(grouped),
+            "relations_count": len(relations),
+        })
+
+        # Build per-relation validation_results for the frontend
+        # ExtractorAgent constraint detail panel (cs_relations / cs_check_relations).
+        validation_results: list[dict] = []
+        for rel, llm_out in zip(relations, llm_results):
+            phases = llm_out.get("_validation_phases") or {}
+            ast = phases.get("ast_syntax") or {}
+            ref = phases.get("param_refs") or {}
+            sem = phases.get("semantic") or {}
+
+            # syntax_valid: only False when a phase actually failed.
+            any_failed = (
+                ast.get("status") == "failed"
+                or ref.get("status") == "failed"
+                or sem.get("status") == "failed"
+            )
+            syntax_valid = not any_failed
+
+            # has_validation: any phase actually ran (vs all skipped).
+            has_validation = any(
+                p.get("status") in ("passed", "failed", "corrected", "recovered")
+                for p in (ast, ref, sem)
+            )
+
+            validation_results.append({
+                "relation_id": rel.get("id"),
+                "relation_type": rel.get("relation_type", ""),
+                "params": rel.get("params", []),
+                "expr_type": llm_out.get("expr_type", ""),
+                "expr": llm_out.get("expr", ""),
+                "confidence": llm_out.get("confidence", ""),
+                "syntax_valid": syntax_valid,
+                "validation_error": llm_out.get("_validation_error", ""),
+                "corrected": bool(llm_out.get("_corrected")),
+                "correction_reason": llm_out.get("_correction_reason", ""),
+                "has_validation": has_validation,
+                "phase_ast_syntax": {
+                    "status": ast.get("status", "skipped"),
+                    "error": ast.get("error", ""),
+                },
+                "phase_param_refs": {
+                    "status": ref.get("status", "skipped"),
+                    "error": ref.get("error", ""),
+                },
+                "phase_semantic": {
+                    "status": sem.get("status", "skipped"),
+                    "reason": sem.get("reason", ""),
+                },
+            })
+
+        return {
+            "error": None,
+            "relations_count": len(relations),
+            "platforms_count": len(grouped),
+            "validation_results": validation_results,
+        }
 
     except Exception as e:
         logger.exception("BuildParamRelations failed for %s", operator_name)

@@ -86,3 +86,20 @@ class RelationType(StrEnum):
     DTYPE_DFORMAT_SHAPE = "dtype&dformat&shape"
     PRESENCE = "presence"
     SHAPE_VALUE = "shape&value"
+
+
+class GeneratorParamKind(StrEnum):
+    """Whether a parameter is a tensor or a scalar attribute."""
+
+    TENSOR = "tensor"
+    ATTRS = "attrs"
+
+
+class ConstraintExprType(StrEnum):
+    """expr_type values in constraints_in_parameters entries."""
+
+    SHAPE_EQUALITY = "shape_equality"
+    SHAPE_UNIFICATION = "shape_unification"
+    FIXED_VALUE = "fixed_value"
+    TYPE_DEPENDENCY = "type_dependency"
+    SHAPE_CHOICE = "shape_choice"

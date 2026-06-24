@@ -12,9 +12,15 @@ def merge_errors(current: str | None, new: str | None) -> str | None:
     return f"{current}; {new}"
 
 
+def last_value(current: Any, new: Any) -> Any:
+    """Reducer: last write wins."""
+    return new
+
+
 class PipelineState(TypedDict, total=False):
     """State flowing through the document processing pipeline."""
 
+    run_id: str  # Current task/run ID for database operations
     operator_id: int
     doc_id: int
     operator_name: str
@@ -30,4 +36,34 @@ class PipelineState(TypedDict, total=False):
     single_param_constraints: list[dict[str, Any]]
     implicit_params: list[dict[str, Any]]
     platform_constants: list[dict[str, Any]]
+    # ── ExtractorAgent frontend-facing outputs ──
+    # build_param_relations emits these for the ExtractorAgent constraint
+    # detail panel (cd-rel-check / cd-cst-check 三段式校验视图).
+    validation_results: list[dict[str, Any]]  # build_param_relations output
+    cst_validation_results: list[dict[str, Any]]  # build_param_constraint output
+    relations_count: int
+    platforms_count: int
+    params_count: int
+    dimensions_count: int
+    range_count: int
     error: Annotated[str | None, merge_errors]
+    # ── GeneratorAgent output (set by case_subgraph nodes) ──
+    # Loaded by case_match_model
+    constraints_raw: dict[str, Any] | None
+    # Counters from case_init_static
+    sampled_shapes: int
+    sampled_dtypes: int
+    # Counter from case_solve_constraints
+    valid_combos: int
+    rejected_combos: int
+    # Final outputs from case_generate
+    cases: list[dict[str, Any]]
+    cases_path: str | None
+    cases_count: int | None
+    cases_seed: int | None
+    # ── ExecuterAgent output (set by executer_subgraph nodes) ──
+    atk_executor_path: Annotated[str | None, last_value]
+    atk_executor_code: Annotated[str, last_value]
+    exec_result: dict[str, Any]
+    # ── Server info for remote execution ──
+    server_info: dict[str, Any] | None

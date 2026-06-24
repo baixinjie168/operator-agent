@@ -8,6 +8,9 @@ Two-layer extraction:
 The node runs after BuildParamRelations so it can read existing multi-param
 relations for deduplication. Results are appended to param_relations and
 automatically flow into constraints_in_parameters via AssembleResult.
+
+Emits NODE_PROGRESS events for the frontend constraint detail panel
+(data_ready → layer1_done → merge_done).
 """
 
 from __future__ import annotations
@@ -27,6 +30,8 @@ from agent.nodes.state import PipelineState
 from agent.core.llm import create_llm
 from agent.utils.llm_common import CONCURRENCY_LIMIT
 from agent.utils.semantic_rules import get_expr_for_tensor, load_rules, build_prompt_context
+from agent.runtime.context import get_context
+from agent.runtime.events import EventType, Span, SpanType
 
 logger = logging.getLogger(__name__)
 
@@ -482,6 +487,29 @@ async def build_single_param_constraint_node(
             logger.info("SingleParamConstraint: no parameters, skipping")
             return {"error": None}
 
+        # Setup NODE_PROGRESS emission for the frontend constraint detail panel.
+        ctx = get_context()
+        _progress_span = Span(
+            span_id="progress",
+            parent_span_id=ctx.current_span_id if ctx else None,
+            span_type=SpanType.NODE,
+            name="build_single_param_constraint",
+        )
+        _emit = lambda evt, data: (
+            ctx.manager.emit(evt, ctx.run_id, _progress_span, {
+                "agent_id": "constraint",
+                "node_id": "build_single_param_constraint",
+                **data,
+            }) if ctx and ctx.manager else None
+        )
+
+        _emit(EventType.NODE_PROGRESS, {
+            "message": f"已加载 {len(params)} 个参数, {len(existing)} 条已有多参数关系",
+            "phase": "data_ready",
+            "params_count": len(params),
+            "existing_count": len(existing),
+        })
+
         # Step 2: Layer 0 — YAML semantic rules (Tensor element-level constraints)
         layer0_results: list[dict] = []
         for param in params:
@@ -502,6 +530,12 @@ async def build_single_param_constraint_node(
             "SingleParamConstraint: Layer 1 matched %d constraints",
             len(layer1_results),
         )
+
+        _emit(EventType.NODE_PROGRESS, {
+            "message": f"Layer 1 正则匹配: 命中 {len(layer1_results)} 条单参数约束",
+            "phase": "layer1_done",
+            "layer1_count": len(layer1_results),
+        })
 
         # Step 3: Layer 2 — Agent + skill.md (replaces disabled LLM)
         # Type 3: self-constraints for uncovered params via DeepAgent
@@ -553,6 +587,15 @@ async def build_single_param_constraint_node(
 
         # Step 5: Merge and deduplicate
         all_new = _dedup(layer0_results + layer1_results + layer2_results)
+
+        _emit(EventType.NODE_PROGRESS, {
+            "message": f"合并去重: Layer0({len(layer0_results)}) + Layer1({len(layer1_results)}) + Layer2({len(layer2_results)}) → {len(all_new)} 条新约束",
+            "phase": "merge_done",
+            "layer0_count": len(layer0_results),
+            "layer1_count": len(layer1_results),
+            "layer2_count": len(layer2_results),
+            "new_count": len(all_new),
+        })
 
         # Step 6: Append to param_relations
         if all_new:

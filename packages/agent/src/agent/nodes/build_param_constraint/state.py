@@ -45,5 +45,13 @@ class BuildParamConstraintState(TypedDict, total=False):
     # -- constraint_assemble output --
     constraint_updates: list[dict[str, Any]]
 
+    # Frontend-facing validation results + counts (returned to the parent's
+    # SSE output so the ExtractorAgent constraint detail panel can render
+    # the 三段式 (维度结构 / 维度对齐 / 取值范围结构) 校验视图).
+    validation_results: list[dict[str, Any]]
+    params_count: int
+    dimensions_count: int
+    range_count: int
+
     # error (same reducer as parent)
     error: Annotated[str | None, merge_errors]
