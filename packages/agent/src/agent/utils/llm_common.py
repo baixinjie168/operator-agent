@@ -65,9 +65,9 @@ def parse_json_response(text: str, expected_type: type = dict) -> Any | None:
     except json.JSONDecodeError:
         pass
 
-    # Phase 3: regex fallback
+    # Phase 3: regex fallback (greedy — handles nested structures)
     if expected_type is dict:
-        pattern = r"\{[^{}]*\}"
+        pattern = r"\{[\s\S]*\}"
     elif expected_type is list:
         pattern = r"\[[\s\S]*\]"
     else:

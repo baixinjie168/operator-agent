@@ -11,7 +11,6 @@ import logging
 from typing import Any
 
 from agent.utils.llm_common import JSON_BLOCK_RE
-from agent.utils.semantic_rules import build_prompt_context
 
 logger = logging.getLogger(__name__)
 

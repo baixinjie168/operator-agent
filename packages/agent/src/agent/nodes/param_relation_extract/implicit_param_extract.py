@@ -36,6 +36,7 @@ from agent.nodes.param_relation_extract.prompts import (
     format_implicit_params_context,
 )
 from agent.nodes.param_relation_extract.state import RelationExtractState
+from agent.utils.llm_common import parse_json_response
 
 logger = logging.getLogger(__name__)
 
@@ -570,34 +571,12 @@ def _parse_agent_response(text: str) -> dict[str, list] | None:
 
     Returns None if parsing fails (triggers fallback).
     """
-    text = text.strip()
-
-    code_match = re.search(r"```(?:json)?\s*([\s\S]*?)```", text, re.IGNORECASE)
-    if code_match:
-        text = code_match.group(1).strip()
-
-    try:
-        data = json.loads(text)
-        if isinstance(data, dict):
-            actions = data.get("actions", [])
-            additions = data.get("additions", [])
-            if isinstance(actions, list) and isinstance(additions, list):
-                return {"actions": actions, "additions": additions}
-    except json.JSONDecodeError:
-        pass
-
-    obj_match = re.search(r"\{[\s\S]*\}", text)
-    if obj_match:
-        try:
-            data = json.loads(obj_match.group(0))
-            if isinstance(data, dict):
-                return {
-                    "actions": data.get("actions", []),
-                    "additions": data.get("additions", []),
-                }
-        except json.JSONDecodeError:
-            pass
-
+    data = parse_json_response(text, dict)
+    if data is not None:
+        actions = data.get("actions", [])
+        additions = data.get("additions", [])
+        if isinstance(actions, list) and isinstance(additions, list):
+            return {"actions": actions, "additions": additions}
     logger.warning("ImplicitParamsAgent: failed to parse response: %s", text[:200])
     return None
 

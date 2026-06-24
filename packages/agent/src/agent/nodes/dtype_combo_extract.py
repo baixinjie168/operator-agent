@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import itertools
-import json
 import logging
 import re
 from typing import Any
@@ -13,7 +12,7 @@ from langchain_openai import ChatOpenAI
 from agent.mcp_client import MCPClient
 from agent.nodes.state import PipelineState
 from agent.prompts import DTYPE_COMBO_TABLE_PROMPT, DTYPE_CONSTRAINT_TEXT_PROMPT
-from agent.utils.llm_common import JSON_BLOCK_RE, create_llm, parse_json_response
+from agent.utils.llm_common import create_llm, parse_json_response
 
 logger = logging.getLogger(__name__)
 
@@ -342,29 +341,10 @@ def _normalize_platform(platform: str) -> str:
 
 def _parse_json_array(text: str) -> list[dict]:
     """Extract JSON array from LLM response."""
-    text = text.strip()
-    match = JSON_BLOCK_RE.search(text)
-    if match:
-        text = match.group(1).strip()
-
-    try:
-        data = json.loads(text)
-        if isinstance(data, list):
-            return [item for item in data if isinstance(item, dict)]
-    except json.JSONDecodeError:
-        pass
-
-    arr_match = re.search(r"\[[\s\S]*\]", text)
-    if arr_match:
-        try:
-            data = json.loads(arr_match.group(0))
-            if isinstance(data, list):
-                return [item for item in data if isinstance(item, dict)]
-        except json.JSONDecodeError:
-            pass
-
-    logger.warning("dtype_combo_extract: failed to parse LLM response: %s", text[:200])
-    return []
+    data = parse_json_response(text, list)
+    if not isinstance(data, list):
+        return []
+    return [item for item in data if isinstance(item, dict)]
 
 
 def _infer_function_name(combo: dict, params: list[dict]) -> str:

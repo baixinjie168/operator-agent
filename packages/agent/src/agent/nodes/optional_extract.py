@@ -75,7 +75,14 @@ async def optional_extract_node(state: PipelineState) -> dict[str, Any]:
 
 
 async def _extract_optional(llm: ChatOpenAI, param: dict) -> dict | None:
-    """Call LLM to judge optionality for a single parameter."""
+    """Call LLM to judge optionality for a single parameter.
+
+    Deterministic safety net: if the parameter name contains "Optional"
+    and the LLM returns false, override to true unless the description
+    explicitly says "必选"/"必须"/"不可为空". This handles documents
+    where the direction column says "输入" (not "可选输入") and the
+    description lacks optional keywords — the only signal is the name.
+    """
     param_name = param.get("param_name", "")
     function_name = param.get("function_name", "")
     description = param.get("llm_description", "")
@@ -94,5 +101,18 @@ async def _extract_optional(llm: ChatOpenAI, param: dict) -> dict | None:
     if result:
         result["function_name"] = function_name
         val = result.get("is_optional")
-        result["is_optional"] = 1 if val is True or val == "true" else 0
+        is_optional = 1 if val is True or val == "true" else 0
+
+        # Safety net: name has "Optional" but LLM said false
+        if not is_optional and name_has_optional:
+            required_markers = ("必选", "必须", "不可为空", "不可为空指针")
+            if not any(m in description for m in required_markers):
+                is_optional = 1
+                logger.info(
+                    "OptionalExtract: override %s -> is_optional=true "
+                    "(name has Optional, desc has no 必选 markers)",
+                    param_name,
+                )
+
+        result["is_optional"] = is_optional
     return result

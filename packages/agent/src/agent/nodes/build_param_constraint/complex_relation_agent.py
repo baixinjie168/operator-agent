@@ -16,10 +16,9 @@ from __future__ import annotations
 import json
 import logging
 import os
-import re
 from typing import Any
 
-from agent.utils.llm_common import JSON_BLOCK_RE
+from agent.utils.llm_common import parse_json_response
 
 logger = logging.getLogger(__name__)
 
@@ -101,38 +100,14 @@ def _get_complex_relation_agent() -> Any:
 
 def _parse_agent_response(text: str) -> dict[str, str]:
     """Parse agent output into {expr_type, expr, confidence} dict."""
-    text = text.strip()
-
-    match = JSON_BLOCK_RE.search(text)
-    if match:
-        text = match.group(1).strip()
-
-    try:
-        data = json.loads(text)
-        if isinstance(data, dict):
-            return {
-                "expr_type": data.get("expr_type", ""),
-                "expr": data.get("expr", ""),
-                "confidence": data.get("confidence", "high"),
-                "uncertainty_reason": data.get("uncertainty_reason", ""),
-            }
-    except json.JSONDecodeError:
-        pass
-
-    obj_match = re.search(r"\{[\s\S]*\}", text)
-    if obj_match:
-        try:
-            data = json.loads(obj_match.group(0))
-            if isinstance(data, dict):
-                return {
-                    "expr_type": data.get("expr_type", ""),
-                    "expr": data.get("expr", ""),
-                    "confidence": data.get("confidence", "high"),
-                    "uncertainty_reason": data.get("uncertainty_reason", ""),
-                }
-        except json.JSONDecodeError:
-            pass
-
+    data = parse_json_response(text, dict)
+    if data is not None:
+        return {
+            "expr_type": data.get("expr_type", ""),
+            "expr": data.get("expr", ""),
+            "confidence": data.get("confidence", "high"),
+            "uncertainty_reason": data.get("uncertainty_reason", ""),
+        }
     logger.warning("ComplexRelationAgent: failed to parse response: %s", text[:200])
     return {"expr_type": "", "expr": "", "confidence": "low"}
 
@@ -225,27 +200,7 @@ async def generate_self_constraints_via_agent(
         logger.exception("ComplexRelationAgent: self-constraint invocation failed")
         return []
 
-    text = ai_text.strip()
-    match = JSON_BLOCK_RE.search(text)
-    if match:
-        text = match.group(1).strip()
-
-    try:
-        data = json.loads(text)
-    except json.JSONDecodeError:
-        arr_match = re.search(r"\[[\s\S]*\]", text)
-        if arr_match:
-            try:
-                data = json.loads(arr_match.group(0))
-            except json.JSONDecodeError:
-                logger.warning(
-                    "ComplexRelationAgent: failed to parse self-constraint response: %s",
-                    text[:200],
-                )
-                return []
-        else:
-            return []
-
+    data = parse_json_response(ai_text, list)
     if not isinstance(data, list):
         return []
 

@@ -466,8 +466,3 @@ def build_pipeline(stages: list[PipelineStage | str]) -> CompiledStateGraph:
 
     label = "+".join(s.value for s in unique)
     return graph.compile(name=f"pipeline-{label}")
-
-
-def create_pipeline_graph() -> CompiledStateGraph:
-    """Legacy entry point -- builds the full EXTRACT pipeline."""
-    return build_pipeline([PipelineStage.EXTRACT])

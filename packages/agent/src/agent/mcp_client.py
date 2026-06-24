@@ -217,35 +217,12 @@ class MCPClient:
             "updates": json.dumps(updates, ensure_ascii=False),
         })
 
-    async def update_param_platform_attributes(
-        self, doc_id: int, updates: list[dict]
-    ) -> dict:
-        """Batch update the platform_attributes field of parameters."""
-        return await self._call_tool("update_param_platform_attributes", {
-            "doc_id": doc_id,
-            "updates": json.dumps(updates, ensure_ascii=False),
-        })
-
     async def update_param_usage_notes(
         self, doc_id: int, updates: list[dict]
     ) -> dict:
         """Batch update the usage_notes field of parameters."""
         return await self._call_tool("update_param_usage_notes", {
             "doc_id": doc_id,
-            "updates": json.dumps(updates, ensure_ascii=False),
-        })
-
-    async def batch_update_params(self, doc_id: int, field: str, updates: list[dict]) -> dict:
-        """Generic batch update for any parameter field.
-
-        Args:
-            doc_id: Document version ID.
-            field: Target field name (shape, dtype, dformat, is_optional, etc.).
-            updates: List of dicts with function_name, param_name, and value.
-        """
-        return await self._call_tool("batch_update_params", {
-            "doc_id": doc_id,
-            "field": field,
             "updates": json.dumps(updates, ensure_ascii=False),
         })
 

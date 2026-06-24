@@ -147,16 +147,6 @@ class _HTMLTableParser(HTMLParser):
         return [[cell or empty for cell in row] for row in result]
 
 
-def parse_html_tables(content: str) -> list[list[list[str]]]:
-    """Parse all HTML tables from content, returning list of grids."""
-    parser = _HTMLTableParser()
-    try:
-        parser.feed(content)
-    except Exception:
-        return []
-    return parser.tables
-
-
 def parse_html_tables_with_raw(
     content: str,
 ) -> tuple[list[list[list[str]]], list[list[list[str]]]]:
@@ -314,73 +304,6 @@ def _extract_discontinuous(cell_value: str, param_type: str) -> str:
     return json.dumps({"value": "N/A", "src_text": cell}, ensure_ascii=False)
 
 
-def extract_4_columns_from_table(
-    table_grid: list[list[str]],
-    col_map: dict[str, int],
-    param_name: str,
-    param_type: str,
-    name_col_idx: int = 0,
-) -> dict[str, str]:
-    """Find param_name in a parsed table and extract the 4 target columns."""
-    result: dict[str, str] = {}
-    target_row: list[str] | None = None
-
-    for row in table_grid:
-        if name_col_idx < len(row):
-            cell = row[name_col_idx].strip()
-            if _match_param_name(cell, param_name):
-                target_row = row
-                break
-
-    if target_row is None:
-        return result
-
-    if "shape" in col_map:
-        idx = col_map["shape"]
-        if idx < len(target_row):
-            val = _clean_cell_value(target_row[idx])
-            # "与self一致" etc. is not a real shape — let LLM resolve it.
-            if val and not _is_relative_ref(val):
-                result["shape"] = val
-
-    if "dtype_desc" in col_map:
-        idx = col_map["dtype_desc"]
-        if idx < len(target_row):
-            val = _clean_cell_value(target_row[idx])
-            # "与self一致" etc. is not a real dtype — let LLM resolve it.
-            if val and not _is_relative_ref(val):
-                result["dtype_desc"] = val
-
-    if "dformat_desc" in col_map:
-        idx = col_map["dformat_desc"]
-        if idx < len(target_row):
-            val = _clean_cell_value(target_row[idx])
-            # "与self一致" etc. is not a real format — let LLM resolve it.
-            if val and not _is_relative_ref(val):
-                result["dformat_desc"] = val
-
-    if "is_support_discontinuous" in col_map:
-        idx = col_map["is_support_discontinuous"]
-        if idx < len(target_row):
-            result["is_support_discontinuous"] = _extract_discontinuous(
-                target_row[idx], param_type
-            )
-
-    if "param_desc" in col_map:
-        idx = col_map["param_desc"]
-        if idx < len(target_row):
-            result["param_desc"] = _clean_cell_value(target_row[idx])
-
-    if "direction" in col_map:
-        idx = col_map["direction"]
-        if idx < len(target_row):
-            direction = _extract_direction(target_row[idx])
-            if direction:
-                result["direction"] = direction
-
-    return result
-
-
 def find_param_name_column(header_row: list[str]) -> int:
     """Detect the parameter-name column index.  Falls back to 0."""
     name_headers = {"参数名", "参数名称", "parameter", "parameter name", "参数"}
@@ -460,49 +383,6 @@ def extract_platform_tagged_values(raw_html_cell: str) -> dict[str, str] | None:
     if matches:
         return {platform.strip(): value.strip() for platform, value in matches}
     return None
-
-
-def extract_platform_attributes_from_table(
-    raw_grid: list[list[str]],
-    col_map: dict[str, int],
-    param_name: str,
-    name_col_idx: int = 0,
-) -> dict[str, dict[str, str]]:
-    """Extract platform-tagged values for dtype/shape/format columns.
-
-    Returns a dict like:
-        {"dtype": {"Atlas A2...": "FLOAT16,BFLOAT16", "Atlas 推理...": "FLOAT16"},
-         "shape": {"Atlas A2...": "[M, K1]"}}
-
-    Only includes columns where platform tags were found.
-    Returns {} if no platform-tagged columns exist for this param.
-    """
-    result: dict[str, dict[str, str]] = {}
-    target_row: list[str] | None = None
-
-    for row in raw_grid:
-        if name_col_idx < len(row):
-            # Strip HTML tags to get plain text param name
-            cell_text = re.sub(r"<[^>]+>", "", row[name_col_idx]).strip()
-            if _match_param_name(cell_text, param_name):
-                target_row = row
-                break
-
-    if target_row is None:
-        return result
-
-    # Check each column that supports platform tagging
-    _PLATFORM_AWARE_FIELDS = {"dtype_desc", "shape", "dformat_desc"}
-    for field in _PLATFORM_AWARE_FIELDS:
-        if field not in col_map:
-            continue
-        idx = col_map[field]
-        if idx < len(target_row):
-            tagged = extract_platform_tagged_values(target_row[idx])
-            if tagged:
-                result[field] = tagged
-
-    return result
 
 
 # ---------------------------------------------------------------------------

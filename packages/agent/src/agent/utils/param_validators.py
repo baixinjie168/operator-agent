@@ -6,11 +6,19 @@ Provides zero-LLM-cost pre-filtering helpers:
 - is_ws_function: detect GetWorkspaceSize function names
 - is_bool_type / is_tensor_type: classify parameter types
 - VALID_DTYPES: approved dtype whitelist
+- EXCLUDED_PARAMS: two-stage API common params to skip
 """
 
 from __future__ import annotations
 
 import re
+
+# Two-stage API common parameters (workspace, executor, stream) that are
+# not real operator parameters — excluded from relation extraction and
+# constraint assembly.
+EXCLUDED_PARAMS = frozenset({
+    "workspace", "workspaceSize", "executor", "stream",
+})
 
 # Matches cross-reference patterns like "与self一致", "同input相同",
 # "和xxx保持一致", "与`xxx`一致" etc.

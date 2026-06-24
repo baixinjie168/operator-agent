@@ -3,10 +3,17 @@
 Handles dtype, format, type, is_optional, is_support_discontinuous,
 description, usage_notes, array_length.  No LLM calls.
 
-dtype resolution uses a 3-level fallback chain:
+dtype resolution uses a 2-level fallback chain:
   1. dtype_desc JSON field -> resolve_platform_value per platform
   2. dtype_combinations table -> dtype_by_platform[platform][param_name]
-  3. legacy data_type field -> _split_csv
+
+A 3rd "legacy data_type -> _split_csv" fallback was removed: the DB exposes
+data_type and dtype_desc as aliases of the SAME column, so level 1 already
+covers it. Worse, applying _split_csv directly to a platform-keyed JSON
+string mangles it (splitting on / and 、 chars inside the JSON structure),
+producing garbage like ["Atlas A2 ...\": \"FLOAT16", ...]. For platforms
+absent from the dtype cell (e.g. null-pointer-only), the empty result is now
+preserved instead of being overwritten.
 """
 
 from __future__ import annotations
@@ -29,6 +36,27 @@ logger = logging.getLogger(__name__)
 # Patterns indicating a parameter must be null (empty pointer) on a platform,
 # meaning it has no dtype — effectively N/A.
 _NULL_POINTER_RE = re.compile(r"(只支持传空指针|传空指针|必须为空指针|仅支持空指针|不支持)")
+
+
+def _parse_array_length(raw: str) -> dict:
+    """Parse the stored array_length column value into {value, src_text}.
+
+    New format (from array_length_extract): a JSON string
+    ``{"value": [min, max] | null, "src_text": "..."}``.
+    Legacy / non-array: a plain string like "N/A" or an old text description,
+    wrapped as ``{"value": <raw>, "src_text": ""}``.
+    """
+    if isinstance(raw, str) and raw.startswith("{"):
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, dict) and ("value" in parsed or "src_text" in parsed):
+                return {
+                    "value": parsed.get("value"),
+                    "src_text": parsed.get("src_text", "") or "",
+                }
+        except (json.JSONDecodeError, TypeError):
+            pass
+    return {"value": raw, "src_text": ""}
 
 
 def _is_null_pointer_only(usage_text: str) -> bool:
@@ -73,7 +101,7 @@ async def attrs_build_node(state: BuildParamConstraintState) -> dict[str, Any]:
             # usage_notes (needed for dtype N/A detection below)
             usage_raw = resolve_platform_value(usage_json, plat)
 
-            # dtype: 3-level fallback + platform-asymmetric null-pointer handling
+            # dtype: 2-level fallback + platform-asymmetric null-pointer handling
             dtype_raw = resolve_platform_value(dtype_json, plat)
             if not dtype_raw:
                 # Check if usage_notes indicates "null pointer only" for this
@@ -87,9 +115,6 @@ async def attrs_build_node(state: BuildParamConstraintState) -> dict[str, Any]:
                     dtypes = sorted(dtype_raw_set) if dtype_raw_set else []
             else:
                 dtypes = _split_csv(dtype_raw)
-            if not dtypes:
-                data_type_raw = param.get("data_type", "") or ""
-                dtypes = _split_csv(data_type_raw)
 
             # format
             if not is_tensor:
@@ -124,7 +149,7 @@ async def attrs_build_node(state: BuildParamConstraintState) -> dict[str, Any]:
                 "is_optional": {"value": bool(param.get("is_optional")), "src_text": ""},
                 "is_support_discontinuous": disc,
                 "is_operator_param": {"value": pname in all_sig_set, "src_text": ""},
-                "array_length": {"value": param.get("array_length", "N/A") or "N/A", "src_text": ""},
+                "array_length": _parse_array_length(param.get("array_length", "N/A") or "N/A"),
                 "dtype": {"value": dtypes, "src_text": ""},
                 "_shape_raw": shape_raw,
                 "_is_tensor": is_tensor,

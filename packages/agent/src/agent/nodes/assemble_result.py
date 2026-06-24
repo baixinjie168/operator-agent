@@ -8,6 +8,7 @@ from typing import Any
 
 from agent.mcp_client import MCPClient
 from agent.nodes.state import PipelineState
+from agent.utils.param_validators import EXCLUDED_PARAMS
 
 logger = logging.getLogger(__name__)
 
@@ -406,7 +407,6 @@ def _build_inputs_outputs(
     2. Non-operator (implicit) parameters extracted from shape descriptions
     3. External platform constants (e.g. rankSize) with per-platform value ranges
     """
-    _EXCLUDED_PARAMS = {"workspaceSize", "executor"}
     inputs: dict[str, Any] = {}
     outputs: dict[str, Any] = {}
 
@@ -416,7 +416,7 @@ def _build_inputs_outputs(
         if not fn.endswith("WorkspaceSize"):
             continue
         name = p.get("param_name", "")
-        if name in _EXCLUDED_PARAMS:
+        if name in EXCLUDED_PARAMS:
             continue
         constraint_raw = p.get("param_constraint", "{}") or "{}"
         try:

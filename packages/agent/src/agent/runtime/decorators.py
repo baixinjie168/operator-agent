@@ -8,7 +8,6 @@ from __future__ import annotations
 import asyncio
 import functools
 import logging
-from typing import Any
 
 from agent.runtime.context import RuntimeContext, get_context, set_context
 from agent.runtime.events import EventType, SpanStatus, SpanType

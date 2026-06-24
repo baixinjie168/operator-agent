@@ -5,7 +5,6 @@ Round 4: LLM self-reflection to find missed relations.
 """
 
 import logging
-import re
 from typing import Any
 
 from langchain_openai import ChatOpenAI

@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 
 from agent.runtime.bus import EventBus
 from agent.runtime.context import RuntimeContext, set_context
-from agent.runtime.events import EventType, RuntimeEvent, Span, SpanStatus, SpanType, event_alias
+from agent.runtime.events import EventType, RuntimeEvent, Span, SpanStatus, SpanType
 
 logger = logging.getLogger(__name__)
 

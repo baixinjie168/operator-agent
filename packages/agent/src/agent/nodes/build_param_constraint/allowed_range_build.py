@@ -13,11 +13,10 @@ import re
 from typing import Any
 
 from agent.core.config import settings
-from agent.core.llm import create_llm
 from agent.nodes.build_param_constraint._helpers import _normalize_type
 from agent.nodes.build_param_constraint.state import BuildParamConstraintState
 from agent.prompts import ALLOWED_RANGE_VALUE_BUILD_PROMPT
-from agent.utils.llm_common import CONCURRENCY_LIMIT, JSON_BLOCK_RE
+from agent.utils.llm_common import CONCURRENCY_LIMIT, create_llm, parse_json_response
 from agent.utils.param_validators import is_bool_type, is_tensor_type
 from agent.utils.semantic_rules import (
     get_allowed_range_for_scalar,
@@ -43,6 +42,14 @@ _RANGE_PATTERNS: list[tuple[str, Any]] = [
             if v.strip().lstrip("-").isdigit()
         ],
     ),
+    # "32/64" → enum [[32,32], [64,64]] (slash-separated discrete values)
+    (
+        r"(\d+)\s*/\s*(\d+)",
+        lambda m: [
+            [int(m.group(1)), int(m.group(1))],
+            [int(m.group(2)), int(m.group(2))],
+        ],
+    ),
     # "范围0-100" / "0~100" / "[0, 100]" → [[0, 100]]
     (
         r"\[?\s*(-?\d+)\s*[,，\-~]\s*(-?\d+)\s*\]?",
@@ -66,6 +73,32 @@ def _try_deterministic_range(text: str) -> list | None:
             except (ValueError, IndexError):
                 continue
     return None
+
+
+def _extract_param_sentences(text: str, param_name: str) -> str:
+    """Extract sentences from *text* that mention *param_name*.
+
+    Splits on Chinese/English sentence boundaries (。；;\\n) and
+    returns only sentences containing the parameter name. This
+    prevents the deterministic regex from matching another
+    parameter's range (e.g. picking hWinSize's "7~32" when
+    processing seqLength's "32/64").
+    """
+    if not text or not param_name:
+        return ""
+    # Also match camelCase → snake_case variants
+    variants = {param_name}
+    # Simple camel-to-snake for broader matching
+    snake = re.sub(r"([A-Z])", r"_\1", param_name).lower().lstrip("_")
+    if snake != param_name:
+        variants.add(snake)
+
+    sentences = re.split(r"[。；;。\n]", text)
+    matched = [
+        s.strip() for s in sentences
+        if any(v in s for v in variants) and s.strip()
+    ]
+    return ". ".join(matched)
 
 
 # ---------------------------------------------------------------------------
@@ -178,17 +211,8 @@ def _parse_allowed_range_response(text: str) -> dict[str, Any]:
     Backward compatible: if LLM returns a plain array [[min,max], ...],
     treats it as {"type": "range", "value": [...]}.
     """
-    match = JSON_BLOCK_RE.search(text)
-    if match:
-        text = match.group(1)
-    text = text.strip()
-
-    try:
-        data = json.loads(text)
-    except json.JSONDecodeError:
-        data = None
-
     # Try parsing as JSON object with type+value
+    data = parse_json_response(text, dict)
     if isinstance(data, dict):
         ar_type = data.get("type", "range")
         ar_value = data.get("value", [])
@@ -197,20 +221,10 @@ def _parse_allowed_range_response(text: str) -> dict[str, Any]:
             return {"type": ar_type, "value": ar_value}
 
     # Try parsing as plain array (backward compatible)
+    data = parse_json_response(text, list)
     if isinstance(data, list):
         ar_value = [item if isinstance(item, list) else [] for item in data]
         return {"type": "range", "value": ar_value}
-
-    # Regex fallback for array
-    arr_match = re.search(r"\[[\s\S]*\]", text)
-    if arr_match:
-        try:
-            arr_data = json.loads(arr_match.group(0))
-            if isinstance(arr_data, list):
-                ar_value = [item if isinstance(item, list) else [] for item in arr_data]
-                return {"type": "range", "value": ar_value}
-        except json.JSONDecodeError:
-            pass
 
     logger.warning("BuildParamConstraint: failed to parse allowed_range: %s", text[:200])
     return {"type": "range", "value": []}
@@ -320,7 +334,11 @@ async def allowed_range_build_node(state: BuildParamConstraintState) -> dict[str
 
         deterministic = _try_deterministic_range(llm_desc)
         if deterministic is None:
-            deterministic = _try_deterministic_range(constraints_text)
+            # Search only sentences mentioning this parameter, not the
+            # full constraints text, to avoid matching another param's range
+            param_name = p.get("param_name", "")
+            param_sentences = _extract_param_sentences(constraints_text, param_name)
+            deterministic = _try_deterministic_range(param_sentences)
 
         if deterministic is not None:
             key = f"{p['function_name']}::{p['param_name']}"

@@ -1,6 +1,7 @@
 """ArrayLengthExtract node: extract array length constraints from parameter descriptions via LLM."""
 
 import asyncio
+import json
 import logging
 from typing import Any
 
@@ -100,7 +101,12 @@ async def array_length_extract_node(state: PipelineState) -> dict[str, Any]:
 
 
 async def _extract_array_length(llm: ChatOpenAI, param: dict) -> dict | None:
-    """Call LLM to extract array length for a single parameter."""
+    """Call LLM to extract array length for a single parameter.
+
+    The LLM returns ``{"value": [min, max] | null, "src_text": "..."}``;
+    we serialize it into the ``array_length`` DB column as a JSON string so
+    downstream ``attrs_build`` can recover both ``value`` and ``src_text``.
+    """
     param_name = param.get("param_name", "")
     function_name = param.get("function_name", "")
     description = param.get("llm_description", "")
@@ -112,7 +118,15 @@ async def _extract_array_length(llm: ChatOpenAI, param: dict) -> dict | None:
     text = response.content if hasattr(response, "content") else str(response)
 
     result = parse_json_response(text, dict)
-    if result:
-        result["param_name"] = param_name
-        result["function_name"] = function_name
-    return result
+    if not result:
+        return None
+
+    value = result.get("value")
+    src_text = result.get("src_text", "") or ""
+    return {
+        "function_name": function_name,
+        "param_name": param_name,
+        "array_length": json.dumps(
+            {"value": value, "src_text": src_text}, ensure_ascii=False,
+        ),
+    }

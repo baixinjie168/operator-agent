@@ -74,9 +74,6 @@ from mcp_server.tools.document_tools import (
 from mcp_server.tools.document_tools import (
     save_json_constraints as _save_json_constraints,
 )
-from mcp_server.tools.document_tools import (
-    get_json_constraints as _get_json_constraints,
-)
 from mcp_server.tools.constraint_tools import (
     save_implicit_params as _save_implicit_params,
 )
@@ -96,9 +93,6 @@ from mcp_server.tools.platform_tools import (
     query_platform_constants_by_doc_id as _query_pc_by_doc_id,
 )
 from mcp_server.tools.document_tools import (
-    get_function_explanation_summary as _get_fn_expl_summary,
-)
-from mcp_server.tools.document_tools import (
     save_function_explanation_summary as _save_fn_expl,
 )
 from mcp_server.tools.document_tools import (
@@ -108,13 +102,7 @@ from mcp_server.tools.document_tools import (
     save_dtype_combinations as _save_dtype_combinations,
 )
 from mcp_server.tools.document_tools import (
-    save_function_explanation_summary as _save_fn_expl,
-)
-from mcp_server.tools.document_tools import (
     save_function_signatures as _save_function_signatures,
-)
-from mcp_server.tools.document_tools import (
-    save_json_constraints as _save_json_constraints,
 )
 from mcp_server.tools.document_tools import (
     save_param_relations as _save_param_relations,

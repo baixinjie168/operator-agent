@@ -20,7 +20,7 @@ same.
 from __future__ import annotations
 
 import random
-from typing import Any, Iterable
+from typing import Iterable
 
 from agent.generators.dtype_picker import (
     map_aclnn_dtype_to_pytorch,

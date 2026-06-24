@@ -194,7 +194,7 @@ def _find_h3_splits(lines: list[str], parent_type: SectionType) -> list[dict]:
     Unicode characters around formatting markers.  These must be stripped
     before regex matching to avoid silent failures.
     """
-    H3_MARKER = re.compile(r"^-\s+\*\*(.+?)\*\*")
+    H3_MARKER = re.compile(r"^[-*]\s+\*\*(.+?)\*\*")
     # Strip zero-width and other invisible Unicode formatting characters
     _INVISIBLE_RE = re.compile(r"[​‌‍﻿]")
     splits: list[dict] = []

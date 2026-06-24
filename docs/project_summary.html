@@ -107,7 +107,7 @@
 <button class="sidebar-toggle" onclick="document.querySelector('.sidebar').classList.toggle('open')">&#9776;</button>
 <div class="layout">
 <nav class="sidebar" id="sidebar">
-  <div class="sidebar-title">Operator Agent<small>项目总览 v2026-06-23 (Agent校验)</small></div>
+  <div class="sidebar-title">Operator Agent<small>项目总览 v2026-06-24 (Bug修复+代码清理)</small></div>
   <ul class="nav-list">
     <li><a class="nav-item" data-target="sec-overview"><span class="arrow empty">&rsaquo;</span>项目定位</a></li>
     <li><a class="nav-item" data-target="sec-techstack"><span class="arrow empty">&rsaquo;</span>技术栈</a></li>
@@ -171,10 +171,10 @@
 <div class="main" id="mainContent">
 <section class="content-section" id="sec-overview">
   <h1>Operator Agent 项目总览</h1>
-  <blockquote>生成日期: 2026-05-28 | 更新日期: 2026-06-23 (implicit_param_extract 改为方案A两阶段：正则粗筛 + LLM Agent 校验；新增 knowledge/ 知识库目录（dimensions/implicit_params/relation_skills）；build_param_relations 新增复杂度路由 complexity_classify → complex_relation_agent DeepAgent；新增 expr_validation.py 表达式校验工具；constraint_assemble 新增 bool 收窄；allowed_range_extract Prompt 增强：enum 枚举值拆分；DB 14 表（shape_dim_mappings 已废弃）；67 个 MCP tool；测试 673 个；算子文档 945 篇) | 基于代码实际状态</blockquote>
+  <blockquote>生成日期: 2026-05-28 | 更新日期: 2026-06-24 (Bug修复：①dimensions_agent 方括号符号维度解析 [K1,N1]→[] 修复为 [2,2]；②OPTIONAL_EXTRACT_PROMPT "Optional"后缀参数误判为必选修复；③allowed_range_build 约束全文搜索误取其他参数范围修复 + 新增 / 分隔符枚举模式；④section_splitter H3_MARKER 正则不匹配 * 列表标记修复（影响21篇文档dtype全空）。代码清理：删除4个废弃文件(469行)+5个废弃函数(~150行)+22处未使用import+4组server.py重复import；统一 EXCLUDED_PARAMS 到 param_validators.py；删除 legacy create_pipeline_graph()；9个文件提取通用 parse_json_response；删除 constraint_assemble 旧格式兼容。新增文档：docs/constraints-logic.html 约束提取逻辑梳理、docs/refactor-plan.md 代码清理计划) | 基于代码实际状态</blockquote>
   <h2>项目定位</h2>
   <p>基于 <strong>LangGraph + MCP</strong> 的 CANN 算子文档自动化处理系统。将华为昇腾平台的算子 Markdown 文档解析为结构化数据，经 LLM 提取参数、约束、产品支持信息，最终生成 Python 测试用例。</p>
-  <p><strong>当前完成度</strong>：约 93%，文档解析、数据库层、Pipeline 全部 20 个节点（含 table_column_extract 表格直提节点、llm_description_extract 子图（预过滤 + 属性校验 + verify_and_enhance 审核增强 + is_support_discontinuous 保护）、function_signature 提取（含参数列表生成 + 类型后处理规范化）、function_explanation 提取、shape/dtype/dformat/optional/array_length 提取（含表格直提跳过逻辑）、allowed_range 提取、return_code 提取、determinism 提取、dtype_combo 提取、参数关系提取子图（implicit_param_extract 隐式参数提取（方案A两阶段：正则粗筛候选 + LLM Agent 校验分类，含 knowledge/implicit_params/ 知识库 eager-load） + platform_constants 平台外部常量 + parameter_representation_build 确定性表示关系生成 + Agent 迭代循环：分块提取 + 双重覆盖率 + 针对性提取 + 自反思 + 隐式参数 prompt 增强）、build_param_relations 参数关系表达式构建节点（复杂度路由：complexity_classify 确定性分类 → simple LLM / complex DeepAgent + expr_validation 三层校验 + Phase 5 常量值替换 + 隐式参数白名单）、build_single_param_constraint 单参数约束提取节点（三层防护：确定性正则匹配 ~93% 覆盖 + LLM 长尾提取 ~7% + 复杂关系 DeepAgent 路由，追加到 param_relations 表，配套 single_param_prompt.py 提供 Prompt 和解析器）、build_param_constraint 参数约束构建子图（fetch_param_data → [dimensions_agent DeepAgent ∥ allowed_range_build ∥ attrs_build] → constraint_assemble，含 bool 收窄 + 类型规范化 + dimensions rank 解析修复 + is_operator_param 隐式参数标记）、assemble_result 汇编节点 + json_constraints 写入）可运行。数据质量问题（dtype key 不匹配、const 限定符污染、符号维度解析错误、enum 枚举值未拆分）已修复。人工审核、测试用例生成尚未实现。</p>
+  <p><strong>当前完成度</strong>：约 93%，文档解析、数据库层、Pipeline 全部 20 个节点（含 table_column_extract 表格直提节点、llm_description_extract 子图（预过滤 + 属性校验 + verify_and_enhance 审核增强 + is_support_discontinuous 保护）、function_signature 提取（含参数列表生成 + 类型后处理规范化）、function_explanation 提取、shape/dtype/dformat/optional/array_length 提取（含表格直提跳过逻辑 + Optional 后缀确定性安全网）、allowed_range 提取（含参数作用域约束搜索 + / 分隔符枚举模式）、return_code 提取、determinism 提取、dtype_combo 提取、参数关系提取子图（implicit_param_extract 隐式参数提取（方案A两阶段：正则粗筛候选 + LLM Agent 校验分类，含 knowledge/implicit_params/ 知识库 eager-load） + platform_constants 平台外部常量 + parameter_representation_build 确定性表示关系生成 + Agent 迭代循环：分块提取 + 双重覆盖率 + 针对性提取 + 自反思 + 隐式参数 prompt 增强）、build_param_relations 参数关系表达式构建节点（复杂度路由：complexity_classify 确定性分类 → simple LLM / complex DeepAgent + expr_validation 三层校验 + Phase 5 常量值替换 + 隐式参数白名单）、build_single_param_constraint 单参数约束提取节点（三层防护：确定性正则匹配 ~93% 覆盖 + LLM 长尾提取 ~7% + 复杂关系 DeepAgent 路由，追加到 param_relations 表，配套 single_param_prompt.py 提供 Prompt 和解析器）、build_param_constraint 参数约束构建子图（fetch_param_data → [dimensions_agent DeepAgent ∥ allowed_range_build ∥ attrs_build] → constraint_assemble，含 bool 收窄 + 类型规范化 + dimensions rank 解析修复 + 方括号符号维度修复 + is_operator_param 隐式参数标记）、assemble_result 汇编节点 + json_constraints 写入）可运行。数据质量问题（dtype key 不匹配、const 限定符污染、符号维度解析错误、enum 枚举值未拆分、Optional 后缀误判、allowed_range 误取他参范围、H3 切分不匹配 * 标记）已修复。代码清理完成（4 废弃文件 + 5 废弃函数 + 22 未使用 import + 4 重复 import + 通用 JSON 解析提取 + 旧格式兼容删除）。人工审核、测试用例生成尚未实现。</p>
 </section>
 <section class="content-section" id="sec-techstack">
 <h1>技术栈</h1>
@@ -2271,11 +2271,12 @@ task_items (
 <ol start="3">
 <li><del><code>_parse_json_response</code> 重复</del> &check; 已修复 — 原 <code>parse_params.py</code> 已合并到 <code>function_signature_extract.py</code>，不再存在重复</li>
 <li><del><code>param_desc_extract_node</code> 字段填充不全</del> &check; 已修复 — 原节点已移除，由 <code>llm_description_extract</code> 替代。新节点一次 LLM 调用提取所有字段</li>
-<li><del>节点重复基础设施（<code>_JSON_BLOCK_RE</code> ×16, <code>_create_llm()</code> ×12, <code>_CONCURRENCY_LIMIT</code> ×12, <code>_parse_*_response</code> ×14）</del> &check; 已修复 — 提取为 <code>utils/llm_common.py</code>（JSON_BLOCK_RE, CONCURRENCY_LIMIT, create_llm, parse_json_response）和 <code>utils/param_validators.py</code>（RELATIVE_REF_RE, VALID_DTYPES, is_cross_reference, is_dash, is_ws_function, is_bool_type, is_tensor_type），21 个节点文件使用公共模块</li>
-<li><del><code>prompts/__init__.py</code> 单文件 627 行</del> &check; 已修复 — 拆分为 6 个功能域子模块（basic_info, llm_description, per_param, relations, assembly, extraction），<code>__init__.py</code> 改为 66 行 re-export 层</li>
-<li><del><code>document_tools.py</code> 单文件 1604 行</del> &check; 已修复 — 拆分为 5 个领域文件（parameter_tools 326行, relation_tools 137行, signature_tools 109行, platform_tools 277行, constraint_tools 401行），document_tools.py 缩为 322 行薄代理层。同时引入通用 <code>batch_update_param_field()</code> 替代 10 个单字段更新函数，新增 <code>batch_update_params</code> MCP 工具</li>
+<li><del>节点重复基础设施（<code>_JSON_BLOCK_RE</code> ×16, <code>_create_llm()</code> ×12, <code>_CONCURRENCY_LIMIT</code> ×12, <code>_parse_*_response</code> ×14）</del> &check; 已修复 — 提取为 <code>utils/llm_common.py</code>（JSON_BLOCK_RE, CONCURRENCY_LIMIT, create_llm, parse_json_response）和 <code>utils/param_validators.py</code>（RELATIVE_REF_RE, VALID_DTYPES, EXCLUDED_PARAMS, is_cross_reference, is_dash, is_ws_function, is_bool_type, is_tensor_type），21 个节点文件使用公共模块。<strong>2026-06-24 进一步清理</strong>：9 个文件的 <code>_parse_*_response</code> 函数全部重构为调用 <code>parse_json_response</code>，dict 正则从 <code>\{[^{}]*\}</code> 改为 <code>\{[\s\S]*\}</code>（支持嵌套）</li>
+<li><del><code>prompts/__init__.py</code> 单文件 627 行</del> &check; 已修复 — 拆分为 6 个功能域子模块（basic_info, llm_description, per_param, relations, assembly, extraction），<code>__init__.py</code> 改为 66 行 re-export 层。<strong>2026-06-24</strong>：废弃的 <code>prompts/system.py</code> 已删除</li>
+<li><del><code>document_tools.py</code> 单文件 1604 行</del> &check; 已修复 — 拆分为 5 个领域文件（parameter_tools 326行, relation_tools 137行, signature_tools 109行, platform_tools 277行, constraint_tools 401行），document_tools.py 缩为 322 行薄代理层。同时引入通用 <code>batch_update_param_field()</code> 替代 10 个单字段更新函数。<strong>2026-06-24</strong>：server.py 4 组重复 import 修复；废弃的 <code>batch_update_params</code> 和 <code>update_param_platform_attributes</code> 已删除</li>
 <li><strong>并行节点 Semaphore 独立</strong>：llm_description_extract（子图内 extract_ws/exe 各 Semaphore(5)）、shape_extract、dtype_extract、dformat_extract、optional_extract、array_length_extract、allowed_range_extract、return_code_extract、determinism_extract、dtype_combo_extract、param_relation_extract（Agent 循环内轮次3 使用 Semaphore(5)）、build_single_param_constraint（Layer 2 LLM 使用 Semaphore(5)，默认关闭）、build_param_constraint 各自 Semaphore(5)，并行时实际 LLM 调用峰值可达 50+，可能触发 API 限流。assemble_result 无 LLM 调用，不占 Semaphore。param_relation_extract Agent 循环额外增加 7-15 次 LLM 调用/文档。<em>注：CONCURRENCY_LIMIT 现已集中到 llm_common.py，修改一处即可全局生效</em></li>
-<li><strong><code>_should_continue</code> 路由缺陷</strong>：<code>_should_continue</code> 仅检查 <code>status=="error"</code> 终止 Pipeline，<code>status=="unchanged"</code> 时仍扇出到 product_support + function_signature_extract + function_explanation_extract，导致不必要的 MCP 调用。应改为 <code>status in ("error", "unchanged")</code> 或 <code>unchanged</code> 时直接 END</li>
+<li><del><code>_should_continue</code> 路由缺陷</del> &check; 已修复 — <code>build_pipeline()</code> 统一入口替代 <code>create_pipeline_graph()</code>（2026-06-24 删除 legacy 包装），<code>task_engine.py</code> 直接调用 <code>build_pipeline([PipelineStage.EXTRACT])</code></li>
+<li><del>Dead code 和冗余逻辑</del> &check; 已修复 (2026-06-24) — 删除 4 个废弃文件（dimensions_build.py 325行、generate_cases.py 87行、system.py 3行、section_tools.py 54行）；删除 5 个未使用函数（table_parser.py 3个 + mcp_client.py 2个）；清理 22 处未使用 import；统一 <code>_EXCLUDED_PARAMS</code> 到 <code>param_validators.py</code>（修复 assemble_result 少排除 2 个参数的 bug）；删除 <code>constraint_assemble.py</code> 3 处旧格式兼容分支</li>
 </ol>
 
 
@@ -2304,8 +2305,8 @@ task_items (
 <h1>已知问题：文档/结构</h1>
 
 <ol start="10">
-<li><strong>CLAUDE.md 架构图过时</strong>：描述 <code>src/agent/</code>、<code>src/api/</code> 扁平结构，实际为 <code>packages/*/src/</code> monorepo</li>
-<li><strong>LangGraph Tools 存根</strong>：<code>agent/tools/</code> 下的 <code>@tool</code> 定义未被节点使用（节点直接调 MCPClient）</li>
+<li><del>CLAUDE.md 架构图过时</del> &check; 部分修复 — 仍描述 <code>src/agent/</code>、<code>src/api/</code> 扁平结构，实际为 <code>packages/*/src/</code> monorepo</li>
+<li><del>LangGraph Tools 存根</del> &check; 已修复 (2026-06-24) — 废弃的 <code>agent/tools/section_tools.py</code>（"stubs for future"）已删除</li>
 </ol>
 
 
@@ -2323,6 +2324,10 @@ task_items (
 <li><del>param_constraint 中 dtype 字段为空</del> &check; 已修复 — <code>query_params_by_doc_id()</code> 将 DB 列 <code>dtype_desc</code> 映射为 dict key <code>"data_type"</code>，但 <code>build_param_constraint</code> 使用 <code>param.get("dtype_desc")</code> 读取，key 不匹配导致兜底路径永远返回空。修复：将 <code>"dtype_desc"</code> 改为 <code>"data_type"</code>。</li>
 <li><del>param_constraint.type.value 携带 const 限定符</del> &check; 已修复 — <code>function_signature_extract</code> 的 Prompt 要求 <code>parameters.type</code> "去掉 *" 但未提及 <code>const</code>，导致 LLM 输出 <code>"const aclTensor"</code>，而 <code>build_param_constraint</code> 优先使用该数据源组装 <code>type.value</code>。修复：三层防护 — Prompt 优化 + <code>_normalize_param_types</code> 后处理 + <code>_normalize_type</code> 组装兜底。详见 <a href="param_type.html">docs/param_type.html</a>。</li>
 <li><del>dimensions 符号维度解析错误</del> &check; 已修复 — <code>SHAPE_TO_DIMENSIONS_PROMPT</code> 旧规则将符号维度（如 <code>N</code>、<code>D_out</code>）逐维拆解为 <code>[null,null]</code>，丢失维度数量信息。如 <code>"(N,Dout,Hout,Wout,3)"</code> 被解析为 <code>[[null,null],...,[3,3]]</code> 而非 <code>[5,5]</code>。修复：Prompt 区分符号维度（→ rank spec <code>[N,N]</code>）和纯数字维度（→ 逐维范围 <code>[[min,max],...]</code>），<code>_parse_dimensions_response</code> 支持扁平整数数组。详见 <a href="da-schema.html">docs/da-schema.html</a>。</li>
+<li><del>方括号符号维度解析返回空数组</del> &check; 已修复 (2026-06-24) — <code>dimensions_agent.py</code> 的 <code>_DIMENSION_PATTERNS</code> 中方括号正则 <code>^\[([^\]]+)\]$</code> 匹配 <code>[K1, N1]</code>，但 lambda 只处理数字值（<code>v.strip().isdigit()</code>），符号变量全被过滤后返回 <code>[]</code>（被误认为"标量"）。修复：当方括号内全为符号变量时，计数逗号槽位作为 rank（与圆括号行为一致），<code>[K1, N1]</code> → <code>[2, 2]</code>。</li>
+<li><del>Optional 后缀参数误判为必选</del> &check; 已修复 (2026-06-24) — <code>OPTIONAL_EXTRACT_PROMPT</code> 原指令"如果参数名包含 Optional，请忽略参数名，只看描述内容"导致 LLM 忽略名称信号。当文档中"输入/输出"列写"输入"（非"可选输入"）且描述无可选关键词时，<code>paddingMask1Optional</code> 等被误判为必选。修复：Prompt 改为"如果参数名包含 Optional，默认该参数为可选；除非描述中明确出现'必选'/'必须'/'不可为空'"；<code>optional_extract.py</code> 新增确定性安全网：名字含 Optional 且 LLM 返回 false 时，检查描述是否含必选标记词，无则覆写为 true。</li>
+<li><del>allowed_range 误取其他参数的取值范围</del> &check; 已修复 (2026-06-24) — <code>allowed_range_build.py</code> Phase 1 的 <code>_try_deterministic_range(constraints_text)</code> 搜索整个约束段，正则匹配到第一个范围模式（如 hWinSize 的"7~32"），而非当前参数（seqLength 的"32/64"）。两个修复：①<code>_extract_param_sentences()</code> 只搜索提及当前参数名的句子；②<code>_RANGE_PATTERNS</code> 新增 <code>/</code> 分隔符枚举模式（"32/64" → <code>[[32,32],[64,64]]</code>）。</li>
+<li><del>H3 子节切分不匹配 * 列表标记</del> &check; 已修复 (2026-06-24) — <code>section_splitter.py</code> 的 <code>H3_MARKER</code> 正则 <code>r"^-\s+\*\*(.+?)\*\*"</code> 只匹配 <code>-</code> 列表标记，21 篇文档使用 <code>*</code> 标记（如 <code>* **参数说明**</code>），导致"参数说明"子节未被切分为 <code>params_get_workspace</code> 类型，<code>table_column_extract</code> 找不到对应节，所有 dtype/shape/dformat 全为空。修复：正则改为 <code>r"^[-*]\s+\*\*(.+?)\*\*"</code>。</li>
 </ol>
 </section>
 <section class="content-section" id="sec-refs">
@@ -2352,6 +2357,8 @@ task_items (
 <tr><td>constraints_in_parameters 平台分组</td><td><code>docs/cip-new.html</code></td><td>precondition→platform 字段重构 + 智能平台分组方案（拆分 + 标准化 + 校验）<strong>已实施</strong></td></tr>
 <tr><td>表格直提方案</td><td><code>docs/param-new-schema.html</code></td><td>shape/dtype/dformat/is_support_discontinuous 表格直提方案（HTML 表格 4 列直提 + 三值映射 + 跳过逻辑）<strong>已实施</strong></td></tr>
 <tr><td>语义隐含约束推断方案</td><td><code>docs/llm_range_confirm.html</code></td><td>参数取值范围语义推断方案：三层分流策略（Layer 1: allowed_range_value + Layer 2: self_value_range + Layer 3: value_dependency）+ 四层推断法 + YAML 语义规则库（<code>semantic_value_rules.yaml</code>，8 条规则）+ 代码 6 个集成点<strong>已实施</strong></td></tr>
+<tr><td>约束提取逻辑梳理</td><td><code>docs/constraints-logic.html</code></td><td>参数间约束关系提取完整逻辑梳理（Pipeline 全景 + ParamRelationExtract 子图 + 5 阶段隐式参数提取 + 4 轮 Agent 循环 + 三层防护表达式生成 + 4 种关系类型路由 + 数据结构定义 + 设计模式总结）<strong>新增 2026-06-24</strong></td></tr>
+<tr><td>代码清理与优化计划</td><td><code>docs/refactor-plan.md</code></td><td>Dead code / 冗余逻辑 / 结构优化分析（废弃文件 4 个 + 废弃函数 9 个 + 重复 import + 未使用 import + 重复 JSON 解析模式 + 旧格式兼容）<strong>已执行 Phase 1-8</strong></td></tr>
 </tbody>
 </table>
 </section>

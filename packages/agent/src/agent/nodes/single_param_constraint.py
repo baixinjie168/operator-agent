@@ -16,7 +16,6 @@ Emits NODE_PROGRESS events for the frontend constraint detail panel
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import re
 from dataclasses import dataclass, field
@@ -24,12 +23,9 @@ from typing import Any
 
 from langchain_openai import ChatOpenAI
 
-from agent.core.config import settings
 from agent.mcp_client import MCPClient
 from agent.nodes.state import PipelineState
-from agent.core.llm import create_llm
-from agent.utils.llm_common import CONCURRENCY_LIMIT
-from agent.utils.semantic_rules import get_expr_for_tensor, load_rules, build_prompt_context
+from agent.utils.semantic_rules import get_expr_for_tensor, build_prompt_context
 from agent.runtime.context import get_context
 from agent.runtime.events import EventType, Span, SpanType
 

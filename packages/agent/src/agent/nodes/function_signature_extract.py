@@ -5,14 +5,10 @@ both structured function signatures (for the function_signatures table) and
 a flat parameter list (for the parameters table / state.parameters).
 """
 
-import json
 import logging
 import re
 from typing import Any
 
-from langchain_openai import ChatOpenAI
-
-from agent.core.config import settings
 from agent.mcp_client import MCPClient
 from agent.nodes.state import PipelineState
 from agent.prompts import FUNCTION_SIGNATURE_EXTRACT_PROMPT

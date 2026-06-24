@@ -38,4 +38,4 @@ echo "  URL        = http://127.0.0.1:8000"
 echo "========================================================"
 echo
 
-exec uvicorn agent.main:create_app --factory --host 127.0.0.1 --port 8000
+exec python -m uvicorn agent.main:create_app --factory --host 127.0.0.1 --port 8000

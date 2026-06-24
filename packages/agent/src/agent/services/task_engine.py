@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from agent.core.config import settings
-from agent.graph import create_pipeline_graph
+from agent.graph import PipelineStage, build_pipeline
 from agent.mcp_client import MCPClient
 
 logger = logging.getLogger(__name__)
@@ -122,7 +122,7 @@ async def run_task(task_id: int, max_workers: int | None = None) -> None:
     """
     async with _run_lock:
         mcp = MCPClient()
-        graph = create_pipeline_graph()
+        graph = build_pipeline([PipelineStage.EXTRACT])
         workers = max_workers if max_workers is not None else settings.task_max_workers
         max_retries = settings.task_max_retries
 

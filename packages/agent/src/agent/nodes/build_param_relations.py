@@ -14,7 +14,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import re
 from typing import Any
 
 from langchain_openai import ChatOpenAI
@@ -25,9 +24,7 @@ from agent.nodes.state import PipelineState
 from agent.prompts import RELATION_OBJECT_BUILD_PROMPT
 from agent.core.llm import create_llm
 from agent.utils.expr_validation import validate_expr as _validate_expr
-from agent.utils.expr_validation import validate_expr_refs as _validate_expr_refs
-from agent.utils.expr_validation import validate_expr_syntax as _validate_expr_syntax
-from agent.utils.llm_common import CONCURRENCY_LIMIT, JSON_BLOCK_RE
+from agent.utils.llm_common import CONCURRENCY_LIMIT, parse_json_response
 from agent.runtime.context import get_context
 from agent.runtime.events import EventType, Span, SpanType
 
@@ -172,38 +169,14 @@ def _build_param_shapes_text(params: list[dict]) -> str:
 
 def _parse_relation_object_response(text: str) -> dict[str, str]:
     """Parse LLM response into {expr_type, expr, confidence, uncertainty_reason} dict."""
-    match = JSON_BLOCK_RE.search(text)
-    if match:
-        text = match.group(1)
-    text = text.strip()
-
-    try:
-        data = json.loads(text)
-        if isinstance(data, dict):
-            return {
-                "expr_type": data.get("expr_type", ""),
-                "expr": data.get("expr", ""),
-                "confidence": data.get("confidence", "high"),
-                "uncertainty_reason": data.get("uncertainty_reason", ""),
-            }
-    except json.JSONDecodeError:
-        pass
-
-    # Regex fallback
-    obj_match = re.search(r"\{[\s\S]*\}", text)
-    if obj_match:
-        try:
-            data = json.loads(obj_match.group(0))
-            if isinstance(data, dict):
-                return {
-                    "expr_type": data.get("expr_type", ""),
-                    "expr": data.get("expr", ""),
-                    "confidence": data.get("confidence", "high"),
-                    "uncertainty_reason": data.get("uncertainty_reason", ""),
-                }
-        except json.JSONDecodeError:
-            pass
-
+    data = parse_json_response(text, dict)
+    if data is not None:
+        return {
+            "expr_type": data.get("expr_type", ""),
+            "expr": data.get("expr", ""),
+            "confidence": data.get("confidence", "high"),
+            "uncertainty_reason": data.get("uncertainty_reason", ""),
+        }
     logger.warning("BuildParamRelations: failed to parse LLM response: %s", text[:200])
     return {"expr_type": "", "expr": "", "confidence": "high", "uncertainty_reason": ""}
 
@@ -374,25 +347,9 @@ async def _call_verify_llm(
         )
         response = await llm.ainvoke(prompt)
         text = response.content if hasattr(response, "content") else str(response)
-        # Parse JSON response
-        match = JSON_BLOCK_RE.search(text)
-        if match:
-            text = match.group(1)
-        text = text.strip()
-        try:
-            data = json.loads(text)
-            if isinstance(data, dict):
-                return data
-        except json.JSONDecodeError:
-            pass
-        obj_match = re.search(r"\{[\s\S]*\}", text)
-        if obj_match:
-            try:
-                data = json.loads(obj_match.group(0))
-                if isinstance(data, dict):
-                    return data
-            except json.JSONDecodeError:
-                pass
+        data = parse_json_response(text, dict)
+        if isinstance(data, dict):
+            return data
         logger.warning("BuildParamRelations: failed to parse verify response: %s", text[:200])
         return {"is_correct": True, "reason": "parse_failed, accepting original"}
 

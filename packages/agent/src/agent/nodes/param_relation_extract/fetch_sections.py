@@ -5,15 +5,11 @@ from typing import Any
 
 from agent.mcp_client import MCPClient
 from agent.nodes.param_relation_extract.state import RelationExtractState
+from agent.utils.param_validators import EXCLUDED_PARAMS as _EXCLUDED_PARAMS
 
 logger = logging.getLogger(__name__)
 
 _mcp_client = MCPClient()
-
-# Public parameters to exclude (two-phase API common params)
-_EXCLUDED_PARAMS = frozenset({
-    "workspace", "workspaceSize", "executor", "stream",
-})
 
 
 async def fetch_sections_node(state: RelationExtractState) -> dict[str, Any]:

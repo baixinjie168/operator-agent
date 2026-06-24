@@ -66,17 +66,8 @@ def _narrow_bool_allowed_range(
         pname = p.get("param_name", "")
         key = f"{fn}::{pname}"
         ar_data = ar_map.get(key)
-        # Support both old format (list) and new format (dict with type+value)
-        if isinstance(ar_data, dict):
-            if ar_data.get("value") == [True, False] and key in constrained:
-                ar_data["value"] = [constrained[key]]
-                narrowed += 1
-                logger.debug(
-                    "ConstraintAssemble: narrowed %s.%s allowed_range to [%s]",
-                    fn, pname, constrained[key],
-                )
-        elif ar_data == [True, False] and key in constrained:
-            ar_map[key] = {"type": "range", "value": [constrained[key]]}
+        if isinstance(ar_data, dict) and ar_data.get("value") == [True, False] and key in constrained:
+            ar_data["value"] = [constrained[key]]
             narrowed += 1
             logger.debug(
                 "ConstraintAssemble: narrowed %s.%s allowed_range to [%s]",
@@ -135,8 +126,8 @@ async def constraint_assemble_node(state: BuildParamConstraintState) -> dict[str
 
             # allowed_range_value (with usage_notes enum fallback)
             ar_data = ar_map.get(map_key, {"type": "range", "value": []})
-            ar_value = ar_data.get("value", []) if isinstance(ar_data, dict) else ar_data
-            ar_type = ar_data.get("type", "range") if isinstance(ar_data, dict) else "range"
+            ar_value = ar_data.get("value", [])
+            ar_type = ar_data.get("type", "range")
             usage_val = attrs.get("usage_notes", {}).get("value", "")
             if not ar_value and usage_val and not is_tensor:
                 enum_values = _extract_enum_from_text(usage_val)
@@ -209,7 +200,7 @@ async def constraint_assemble_node(state: BuildParamConstraintState) -> dict[str
                 plat_data = assembled.get(plat, {})
                 dims = plat_data.get("dimensions", {}).get("value", [])
                 ar_data = plat_data.get("allowed_range_value", {})
-                ar_value = ar_data.get("value", []) if isinstance(ar_data, dict) else ar_data or []
+                ar_value = ar_data.get("value", []) if isinstance(ar_data, dict) else []
                 ar_type = ar_data.get("type", "range") if isinstance(ar_data, dict) else "range"
                 shape_raw = plat_data.get("dimensions", {}).get("src_text", "")
 

@@ -8,7 +8,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import re
 from typing import Any
 
 from langchain_openai import ChatOpenAI
@@ -16,7 +15,7 @@ from langchain_openai import ChatOpenAI
 from agent.nodes.context_utils import _is_ws_function, extract_param_context
 from agent.nodes.llm_description_extract.state import DescriptionExtractState
 from agent.prompts import LLM_DESCRIPTION_EXTRACT_PROMPT
-from agent.utils.llm_common import CONCURRENCY_LIMIT, JSON_BLOCK_RE, create_llm
+from agent.utils.llm_common import CONCURRENCY_LIMIT, create_llm, parse_json_response
 
 logger = logging.getLogger(__name__)
 
@@ -54,28 +53,7 @@ def _build_discontinuous_json(raw_val: Any, param_type: str) -> str:
 
 def _parse_llm_response(text: str) -> dict | None:
     """Parse an LLM JSON response, tolerating code fences and surrounding text."""
-    match = JSON_BLOCK_RE.search(text)
-    if match:
-        text = match.group(1)
-    text = text.strip()
-
-    try:
-        data = json.loads(text)
-        if isinstance(data, dict):
-            return data
-    except json.JSONDecodeError:
-        pass
-
-    obj_match = re.search(r"\{[\s\S]*\}", text)
-    if obj_match:
-        try:
-            data = json.loads(obj_match.group(0))
-            if isinstance(data, dict):
-                return data
-        except json.JSONDecodeError:
-            pass
-
-    return None
+    return parse_json_response(text, dict)
 
 
 # ---------------------------------------------------------------------------

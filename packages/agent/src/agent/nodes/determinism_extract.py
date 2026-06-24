@@ -2,11 +2,8 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from typing import Any
-
-from langchain_openai import ChatOpenAI
 
 from agent.mcp_client import MCPClient
 from agent.nodes.state import PipelineState
@@ -84,29 +81,18 @@ async def determinism_extract_node(state: PipelineState) -> dict[str, Any]:
 
 def _parse_llm_response(raw_text: str) -> list[dict]:
     """Parse LLM JSON response, handling code blocks and bare JSON."""
-    text = raw_text.strip()
-    # Strip code block
-    if text.startswith("```"):
-        lines = text.split("\n")
-        # Remove first and last lines (```json and ```)
-        lines = [line for line in lines if not line.strip().startswith("```")]
-        text = "\n".join(lines).strip()
-
-    try:
-        data = json.loads(text)
-        if isinstance(data, list):
-            return [
-                {
-                    "product": item.get("product", ""),
-                    "value": bool(item.get("value", False)),
-                    "src_text": item.get("src_text", ""),
-                }
-                for item in data
-                if isinstance(item, dict)
-            ]
-    except json.JSONDecodeError:
-        logger.warning("determinism_extract: failed to parse LLM response: %s", text[:200])
-    return []
+    data = parse_json_response(raw_text, list)
+    if not isinstance(data, list):
+        return []
+    return [
+        {
+            "product": item.get("product", ""),
+            "value": bool(item.get("value", False)),
+            "src_text": item.get("src_text", ""),
+        }
+        for item in data
+        if isinstance(item, dict)
+    ]
 
 
 def _expand_platforms(records: list[dict], supported_platforms: list[str]) -> list[dict]:

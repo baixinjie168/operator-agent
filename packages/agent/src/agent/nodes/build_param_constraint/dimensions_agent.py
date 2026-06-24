@@ -13,7 +13,6 @@ Fallback: if DeepAgent fails, returns empty dimensions for unparseable shapes.
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import re
@@ -21,6 +20,7 @@ from typing import Any
 
 from agent.nodes.build_param_constraint._helpers import _parse_json_field
 from agent.nodes.build_param_constraint.state import BuildParamConstraintState
+from agent.utils.llm_common import parse_json_response
 
 logger = logging.getLogger(__name__)
 
@@ -138,11 +138,15 @@ _DIMENSION_PATTERNS: list[tuple[str, Any]] = [
     (r"^\(([^)]+)\)$", lambda m: [len(m.group(1).split(","))] * 2),
     (
         r"^\[([^\]]+)\]$",
-        lambda m: [
-            [int(v.strip()), int(v.strip())]
-            for v in m.group(1).split(",")
-            if v.strip().isdigit()
-        ],
+        lambda m: (
+            # Numeric values → per-dimension format
+            [[int(v.strip()), int(v.strip())]
+             for v in m.group(1).split(",")
+             if v.strip().isdigit()]
+            if any(v.strip().isdigit() for v in m.group(1).split(","))
+            # Symbolic values (e.g. [K1, N1]) → count slots as rank
+            else [len([s for s in m.group(1).split(",") if s.strip()])] * 2
+        ),
     ),
     (r"^(与输入相同|同输入|same as input)$", []),
 ]
@@ -333,50 +337,20 @@ async def _parse_shapes_individually(shapes: list[str]) -> list[list]:
 
 def _parse_dimensions_response(text: str) -> list[list]:
     """Parse LLM/Agent response into a list of dimensions arrays."""
-    text = text.strip()
-
-    code_match = re.search(r"```(?:json)?\s*([\s\S]*?)```", text, re.IGNORECASE)
-    if code_match:
-        text = code_match.group(1).strip()
-
-    try:
-        data = json.loads(text)
-        if isinstance(data, list):
-            # Normalize: non-list items become [] (rank specs stay as flat ints)
-            result: list = []
-            for item in data:
-                if isinstance(item, list):
-                    result.append(item)
-                elif isinstance(item, (int, float)):
-                    # Single number -- could be a rank spec element
-                    result.append(item)
-                else:
-                    result.append([])
-            return result
-    except json.JSONDecodeError:
-        pass
-
-    arr_match = re.search(r"\[[\s\S]*\]", text)
-    if arr_match:
-        try:
-            data = json.loads(arr_match.group(0))
-            if isinstance(data, list):
-                result = []
-                for item in data:
-                    if isinstance(item, list):
-                        result.append(item)
-                    elif isinstance(item, (int, float)):
-                        result.append(item)
-                    else:
-                        result.append([])
-                return result
-        except json.JSONDecodeError:
-            pass
-
-    logger.warning(
-        "DimensionsAgent: failed to parse response: %s", text[:200],
-    )
-    return []
+    data = parse_json_response(text, list)
+    if not isinstance(data, list):
+        logger.warning("DimensionsAgent: failed to parse response: %s", text[:200])
+        return []
+    # Normalize: non-list items become [] (rank specs stay as flat ints)
+    result: list = []
+    for item in data:
+        if isinstance(item, list):
+            result.append(item)
+        elif isinstance(item, (int, float)):
+            result.append(item)
+        else:
+            result.append([])
+    return result
 
 
 # ---------------------------------------------------------------------------
