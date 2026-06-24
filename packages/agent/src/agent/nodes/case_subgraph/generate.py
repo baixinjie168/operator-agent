@@ -12,7 +12,7 @@ import logging
 import re
 from typing import Any
 
-from agent.generators import TestCaseGenerator, parse_result_json
+from agent.generators import TestCaseGenerator
 from agent.mcp_client import MCPClient
 from agent.nodes.state import PipelineState
 
@@ -52,27 +52,24 @@ async def case_generate_node(state: PipelineState) -> dict[str, Any]:
     )
 
     try:
-        context = parse_result_json(constraints)
+        # 直接透传原始 ``json_constraints`` dict，不再做 ``parse_result_json``
+        # 或任何 ``GeneratorContext`` 中间层转换；按平台分组的用例由 facade
+        # 的 ``generate_by_platform`` 直接给出。
+        gen = TestCaseGenerator(constraints, seed=seed)
         logger.info(
             "case_generate: operator=%s, requested count=%d, platforms=%d",
-            operator_name, count, len(context.supported_platforms) if context.supported_platforms else 1,
+            operator_name, count, len(gen.supported_platforms) or 1,
         )
-        cases = TestCaseGenerator(context, seed=seed).generate(count=count)
-
-        # Group cases by supported_product
-        cases_by_product: dict[str, list] = {}
-        for c in cases:
-            case_data = c.model_dump()
-            product = case_data.get("supported_product", "") or "default"
-            if product not in cases_by_product:
-                cases_by_product[product] = []
-            cases_by_product[product].append(case_data)
+        cases_by_product = gen.generate_by_platform(count=count)
 
         # Save per-product files
         output_paths = []
+        all_case_dicts: list[dict[str, Any]] = []
         for product, product_cases in cases_by_product.items():
             safe_product = _sanitize_product_name(product)
-            cases_json = json.dumps(product_cases, ensure_ascii=False)
+            product_case_dicts = [c.model_dump() for c in product_cases]
+            all_case_dicts.extend(product_case_dicts)
+            cases_json = json.dumps(product_case_dicts, ensure_ascii=False)
 
             # Save via MCP with product-specific filename
             save_result = await _mcp_client.save_test_cases(
@@ -99,10 +96,10 @@ async def case_generate_node(state: PipelineState) -> dict[str, Any]:
                 db_save_test_cases(
                     task_id=task_id,
                     operator_name=operator_name,
-                    cases=[c.model_dump() for c in cases],
+                    cases=all_case_dicts,
                     constraint_doc_id=state.get("doc_id"),
                 )
-                logger.info("Saved %d test cases to DB for task %s", len(cases), task_id)
+                logger.info("Saved %d test cases to DB for task %s", len(all_case_dicts), task_id)
             else:
                 logger.warning("No run_id in state, skipping DB save in node")
         except Exception as db_err:
@@ -110,12 +107,12 @@ async def case_generate_node(state: PipelineState) -> dict[str, Any]:
 
         logger.info(
             "case_generate: %s → %d total cases across %d products",
-            operator_name, len(cases), len(cases_by_product),
+            operator_name, len(all_case_dicts), len(cases_by_product),
         )
         return {
-            "cases": [c.model_dump() for c in cases],
+            "cases": all_case_dicts,
             "cases_path": out_path,
-            "cases_count": len(cases),
+            "cases_count": len(all_case_dicts),
             "error": None,
         }
     except Exception as e:

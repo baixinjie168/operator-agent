@@ -16,6 +16,7 @@ uploads
 data
 batch_results
 operators
+logs
 
 # Data files
 /uploads/
