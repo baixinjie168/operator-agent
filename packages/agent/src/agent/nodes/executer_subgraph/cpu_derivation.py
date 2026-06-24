@@ -1,6 +1,6 @@
 """Step 2 of ExecuterAgent: enhance ATK executor with CPU golden reference.
 
-Uses LLM with ``aclnn_cpu_golden_derivation.md`` as skill context to update
+Uses LLM with ``aclnn-cpu-golden-derivation.md`` as skill context to update
 the generated ``{operator_name}_atk_executor.py`` with CPU reference implementation.
 """
 
@@ -18,7 +18,7 @@ from agent.nodes.state import PipelineState
 logger = logging.getLogger(__name__)
 
 _RESOURCES_DIR = Path(__file__).resolve().parent / "resources"
-_CPU_DERIVATION_SKILL = _RESOURCES_DIR / "aclnn_cpu_golden_derivation.md"
+_CPU_DERIVATION_SKILL = _RESOURCES_DIR / "aclnn-cpu-golden-derivation.md"
 
 _SYSTEM_PROMPT = """\
 你是一个昇腾算子测试专家。根据提供的算子文档、CPU Golden Reference 推导指南，\
@@ -64,7 +64,7 @@ async def exec_cpu_derivation_node(state: PipelineState) -> dict[str, Any]:
             doc_section = f"## 算子文档\n{operator_doc}\n\n"
 
         user_prompt = (
-            f"请根据以下算子文档和 aclnn_cpu_golden_derivation.md 推导指南，"
+            f"请根据以下算子文档和 aclnn-cpu-golden-derivation.md 推导指南，"
             f"帮我修改更新 ATK 的 {operator_name}_atk_executor.py 算子测试执行 py 文件 CPU后端执行算子部分的代码。\n\n"
             f"{doc_section}"
             f"## 推导指南\n{skill_content}\n\n"
