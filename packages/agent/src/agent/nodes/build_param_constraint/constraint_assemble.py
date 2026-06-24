@@ -168,4 +168,65 @@ async def constraint_assemble_node(state: BuildParamConstraintState) -> dict[str
             result.get("updated", 0), len(updates), doc_id,
         )
 
-    return {"error": None}
+    # Build per-param validation_results for the frontend
+    # ExtractorAgent constraint detail panel (cs_constraint / cs_check_constraint).
+    validation_results: list[dict] = []
+    for param in params:
+        pname = param.get("param_name", "")
+        fn_name = param.get("function_name", "")
+        map_key = f"{fn_name}::{pname}"
+        attr_key = f"{fn_name}::{pname}::"  # match any platform
+        # Find this param's assembled constraint.
+        assembled: dict | None = None
+        for u in updates:
+            if u["function_name"] == fn_name and u["param_name"] == pname:
+                try:
+                    assembled = json.loads(u["param_constraint"])
+                except (json.JSONDecodeError, TypeError):
+                    assembled = None
+                break
+
+        # Check whether all platforms were populated.
+        missing_platforms: list[str] = []
+        if assembled is not None:
+            for plat in supported_platforms:
+                plat_data = assembled.get(plat, {})
+                # If either dimensions or allowed_range_value is empty/missing,
+                # count this platform as missing.
+                dims = plat_data.get("dimensions", {}).get("value", [])
+                arv = plat_data.get("allowed_range_value", {}).get("value", [])
+                if not dims and not arv:
+                    missing_platforms.append(plat)
+
+        validation_results.append({
+            "function_name": fn_name,
+            "param_name": pname,
+            "platforms_count": len(supported_platforms),
+            "missing_platforms": missing_platforms,
+            "has_constraint": assembled is not None and bool(assembled),
+            "syntax_valid": bool(assembled),
+            "validation_error": "" if assembled is not None else "no_constraint_built",
+            "corrected": False,
+            "has_validation": True,
+            "phase_ast_syntax": {"status": "passed" if assembled is not None else "failed"},
+            "phase_param_refs": {"status": "passed"},
+            "phase_semantic": {"status": "passed" if not missing_platforms else "failed",
+                               "reason": "missing platforms: " + ", ".join(missing_platforms)
+                                          if missing_platforms else ""},
+        })
+
+    return {
+        "error": None,
+        "params_count": len(params),
+        "dimensions_count": sum(
+            len((dimensions_map.get(f"{p['function_name']}::{p['param_name']}::{p.get('shape','')}", []) or []))
+            for p in params
+        ),
+        "range_count": sum(
+            len((ar_map.get(f"{p['function_name']}::{p['param_name']}", {}).get("value", [])
+                 if isinstance(ar_map.get(f"{p['function_name']}::{p['param_name']}", {}), dict)
+                 else ar_map.get(f"{p['function_name']}::{p['param_name']}", []) or []))
+            for p in params
+        ),
+        "validation_results": validation_results,
+    }

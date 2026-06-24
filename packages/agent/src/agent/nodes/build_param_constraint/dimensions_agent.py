@@ -471,4 +471,26 @@ async def dimensions_agent_node(state: BuildParamConstraintState) -> dict[str, A
         "DimensionsAgent: parsed %d dimensions (%d deterministic, %d agent)",
         len(result), deterministic_count, len(llm_needed),
     )
+
+    # NODE_PROGRESS: dimensions_done — frontend ExtractorAgent panel
+    from agent.runtime.context import get_context
+    from agent.runtime.events import EventType, Span, SpanType
+    ctx = get_context()
+    if ctx and ctx.manager:
+        span = Span(
+            span_id="progress",
+            parent_span_id=ctx.current_span_id if ctx else None,
+            span_type=SpanType.NODE,
+            name="build_param_constraint",
+        )
+        ctx.manager.emit(EventType.NODE_PROGRESS, ctx.run_id, span, {
+            "agent_id": "constraint",
+            "node_id": "build_param_constraint",
+            "message": f"维度解析完成: {len(result)} 个 shape 已转 dimensions",
+            "phase": "dimensions_done",
+            "dimensions_count": len(result),
+            "deterministic_count": deterministic_count,
+            "agent_count": len(llm_needed),
+        })
+
     return {"dimensions_map": result}

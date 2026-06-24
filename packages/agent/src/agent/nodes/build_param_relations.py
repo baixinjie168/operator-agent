@@ -789,7 +789,61 @@ async def build_param_relations_node(state: PipelineState) -> dict[str, Any]:
             "relations_count": len(relations),
         })
 
-        return {"error": None}
+        # Build per-relation validation_results for the frontend
+        # ExtractorAgent constraint detail panel (cs_relations / cs_check_relations).
+        validation_results: list[dict] = []
+        for rel, llm_out in zip(relations, llm_results):
+            phases = llm_out.get("_validation_phases") or {}
+            ast = phases.get("ast_syntax") or {}
+            ref = phases.get("param_refs") or {}
+            sem = phases.get("semantic") or {}
+
+            # syntax_valid: only False when a phase actually failed.
+            any_failed = (
+                ast.get("status") == "failed"
+                or ref.get("status") == "failed"
+                or sem.get("status") == "failed"
+            )
+            syntax_valid = not any_failed
+
+            # has_validation: any phase actually ran (vs all skipped).
+            has_validation = any(
+                p.get("status") in ("passed", "failed", "corrected", "recovered")
+                for p in (ast, ref, sem)
+            )
+
+            validation_results.append({
+                "relation_id": rel.get("id"),
+                "relation_type": rel.get("relation_type", ""),
+                "params": rel.get("params", []),
+                "expr_type": llm_out.get("expr_type", ""),
+                "expr": llm_out.get("expr", ""),
+                "confidence": llm_out.get("confidence", ""),
+                "syntax_valid": syntax_valid,
+                "validation_error": llm_out.get("_validation_error", ""),
+                "corrected": bool(llm_out.get("_corrected")),
+                "correction_reason": llm_out.get("_correction_reason", ""),
+                "has_validation": has_validation,
+                "phase_ast_syntax": {
+                    "status": ast.get("status", "skipped"),
+                    "error": ast.get("error", ""),
+                },
+                "phase_param_refs": {
+                    "status": ref.get("status", "skipped"),
+                    "error": ref.get("error", ""),
+                },
+                "phase_semantic": {
+                    "status": sem.get("status", "skipped"),
+                    "reason": sem.get("reason", ""),
+                },
+            })
+
+        return {
+            "error": None,
+            "relations_count": len(relations),
+            "platforms_count": len(grouped),
+            "validation_results": validation_results,
+        }
 
     except Exception as e:
         logger.exception("BuildParamRelations failed for %s", operator_name)
