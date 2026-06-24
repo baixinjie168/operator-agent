@@ -92,18 +92,25 @@ async def assemble_result_node(state: PipelineState) -> dict[str, Any]:
         implicit_params_data = await _mcp_client.query_implicit_params_by_doc_id(doc_id)
         mappings = implicit_params_data.get("mappings", []) if implicit_params_data else []
 
-        inputs_dict, outputs_dict = _build_inputs_outputs(params, implicit_params=mappings)
+        # Fetch platform constants (external constants like rankSize) early:
+        # needed both to define them in inputs (per-platform allowed_range_value)
+        # and to inject into constraints_in_parameters.
+        platform_consts_data = await _mcp_client.query_platform_constants_by_doc_id(doc_id)
+        platform_constants = (
+            platform_consts_data.get("constants", []) if platform_consts_data else []
+        )
+
+        inputs_dict, outputs_dict = _build_inputs_outputs(
+            params, implicit_params=mappings, platform_constants=platform_constants,
+        )
         constraints_ip = _build_constraints_in_parameters(
             relations, product_support_list, params,
         )
         dtype_support = _build_dtype_support(dtype_combos)
 
         # Step 3f: Inject platform_constants into constraints_in_parameters
-        platform_consts_data = await _mcp_client.query_platform_constants_by_doc_id(doc_id)
-        if platform_consts_data and platform_consts_data.get("constants"):
-            _inject_platform_constants(
-                constraints_ip, platform_consts_data["constants"],
-            )
+        if platform_constants:
+            _inject_platform_constants(constraints_ip, platform_constants)
 
         # Step 3g: Inject parameter_representation records into constraints_in_parameters
         param_reprs_data = await _mcp_client.query_parameter_representations_by_doc_id(doc_id)
@@ -339,15 +346,65 @@ def _build_implicit_param_constraint(info: dict) -> dict:
     return {"common": constraint}
 
 
+def _build_external_constant_constraints(
+    platform_constants: list[dict],
+) -> dict[str, dict[str, dict]]:
+    """Build per-platform input constraints for external constants (e.g. rankSize).
+
+    External constants have platform-specific value ranges (e.g. rankSize is
+    [2, 4, 8] on Atlas A2 but [2, 4, 8, 16] on Atlas A3), so they cannot use
+    the platform-agnostic ``"common"`` key — each platform gets its own
+    constraint entry with ``allowed_range_value`` populated from the values
+    extracted from the document context.
+
+    Returns ``{const_name: {platform_name: constraint_dict}}``.
+    """
+    result: dict[str, dict[str, dict]] = {}
+    for pc in platform_constants:
+        cname = pc.get("const_name", "")
+        if not cname:
+            continue
+        desc = pc.get("description", "") or (
+            f"平台外部常量 {cname}（取值随设备型号不同）"
+        )
+        per_platform: dict[str, dict] = {}
+        for pv in pc.get("platform_values", []):
+            plat = pv.get("platform", "")
+            values = pv.get("values", [])
+            if not plat or not values:
+                continue
+            per_platform[plat] = {
+                "description": desc,
+                "type": {"value": "int64_t", "src_text": ""},
+                "format": {"value": "N/A", "src_text": ""},
+                "is_optional": {"value": False, "src_text": ""},
+                "is_support_discontinuous": {"value": "N/A", "src_text": ""},
+                "is_operator_param": {"value": False, "src_text": ""},
+                "dimensions": {"value": [], "src_text": ""},
+                "array_length": {"value": "N/A", "src_text": ""},
+                "dtype": {"value": [], "src_text": ""},
+                "allowed_range_value": {
+                    "value": values,
+                    "type": "enum",
+                    "src_text": pv.get("source_citation", ""),
+                },
+            }
+        if per_platform:
+            result[cname] = per_platform
+    return result
+
+
 def _build_inputs_outputs(
     params: list[dict],
     implicit_params: list[dict] | None = None,
+    platform_constants: list[dict] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Build inputs/outputs: {param_name: param_constraint} split by direction.
 
     Includes:
     1. Parameters from *WorkspaceSize functions (excluding workspaceSize, executor)
     2. Non-operator (implicit) parameters extracted from shape descriptions
+    3. External platform constants (e.g. rankSize) with per-platform value ranges
     """
     _EXCLUDED_PARAMS = {"workspaceSize", "executor"}
     inputs: dict[str, Any] = {}
@@ -377,6 +434,16 @@ def _build_inputs_outputs(
         for name, info in extracted.items():
             if name not in inputs and name not in outputs:
                 inputs[name] = _build_implicit_param_constraint(info)
+
+    # 3. External platform constants (e.g. rankSize) — per-platform allowed ranges.
+    # Surfaced as inputs so their document-derived value ranges are available
+    # alongside operator params; constraints_in_parameters still carries the
+    # raw platform_constants metadata block.
+    if platform_constants:
+        ext = _build_external_constant_constraints(platform_constants)
+        for name, per_platform in ext.items():
+            if name not in inputs and name not in outputs:
+                inputs[name] = per_platform
 
     return inputs, outputs
 

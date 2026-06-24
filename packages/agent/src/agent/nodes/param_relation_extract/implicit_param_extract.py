@@ -351,13 +351,20 @@ def _extract_platform_constant_values(
 
     Scans constraint section for patterns like:
     - "Atlas A2 ...：支持2、4、8卡"
+
+    ``<term>...</term>`` wrappers are stripped first so that platform names
+    appear directly before the colon — the md wraps platform names in
+    ``<term>`` tags, which would otherwise sit between the name and the colon
+    and break the match (e.g. ``<term>Atlas A2</term>：``).
     """
+    # Strip <term> wrappers so the platform name is directly followed by the colon.
+    clean_text = re.sub(r"</?term>", "", sections_text)
     results: list[dict] = []
     for platform in supported_platforms:
         pattern = re.compile(
             re.escape(platform) + r"[：:].*?支持\s*([\d、,，\s]+)\s*卡",
         )
-        match = pattern.search(sections_text)
+        match = pattern.search(clean_text)
         if match:
             values_str = match.group(1)
             values = [
@@ -859,17 +866,26 @@ async def implicit_param_extract_node(
         ]
 
         platform_constants: list[dict] = []
+        seen_consts: set[str] = set()
         for m in mappings:
-            if m.get("is_external_constant"):
-                pv = _extract_platform_constant_values(
-                    sections_text, m["var_name"], supported,
-                )
-                if pv:
-                    platform_constants.append({
-                        "const_name": m["var_name"],
-                        "description": "",
-                        "platform_values": pv,
-                    })
+            if not m.get("is_external_constant"):
+                continue
+            cname = m["var_name"]
+            # Dedup by const_name: the same external constant (e.g. rankSize)
+            # may be classified multiple times across different text contexts;
+            # keep only the first occurrence to avoid duplicate injected entries.
+            if cname in seen_consts:
+                continue
+            seen_consts.add(cname)
+            pv = _extract_platform_constant_values(
+                sections_text, cname, supported,
+            )
+            if pv:
+                platform_constants.append({
+                    "const_name": cname,
+                    "description": "",
+                    "platform_values": pv,
+                })
 
         # Persist implicit_params to DB
         rendered = format_implicit_params_context(
