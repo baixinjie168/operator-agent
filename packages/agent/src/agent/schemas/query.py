@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class OperatorSummary(BaseModel):
@@ -158,8 +158,28 @@ class ConstraintsResultResponse(BaseModel):
     results: list[ConstraintsResultItem]
 
 
+class DocumentContentResponse(BaseModel):
+    success: bool
+    operator_name: str | None = None
+    version: int | None = None
+    content: str | None = None
+    error: str | None = None
+
+
 class JsonConstraintsResponse(BaseModel):
     success: bool
     operator_name: str | None = None
     json_constraints: dict | None = None
+    error: str | None = None
+
+
+class UpdateJsonConstraintsRequest(BaseModel):
+    operator_name: str = Field(..., min_length=1)
+    json_constraints: str = Field(..., min_length=2)
+
+
+class UpdateJsonConstraintsResponse(BaseModel):
+    success: bool
+    operator_name: str
+    doc_id: int | None = None
     error: str | None = None

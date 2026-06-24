@@ -22,6 +22,15 @@ from mcp_server.tools.document_tools import (
     save_parameters,
     save_parsed_document,
 )
+from mcp_server.tools.document_tools import (
+    get_document_content as _get_document_content,
+)
+from mcp_server.tools.document_tools import (
+    get_function_explanation_summary as _get_fn_expl_summary,
+)
+from mcp_server.tools.document_tools import (
+    get_json_constraints as _get_json_constraints,
+)
 from mcp_server.tools.document_tools import get_parsed_by_doc_id as _get_parsed_by_doc_id
 from mcp_server.tools.document_tools import (
     query_constraints_result as _query_constraints_result,
@@ -68,22 +77,22 @@ from mcp_server.tools.document_tools import (
 from mcp_server.tools.document_tools import (
     get_json_constraints as _get_json_constraints,
 )
-from mcp_server.tools.document_tools import (
+from mcp_server.tools.constraint_tools import (
     save_implicit_params as _save_implicit_params,
 )
-from mcp_server.tools.document_tools import (
+from mcp_server.tools.constraint_tools import (
     query_implicit_params_by_doc_id as _query_ip_by_doc_id,
 )
-from mcp_server.tools.document_tools import (
+from mcp_server.tools.constraint_tools import (
     save_parameter_representations as _save_parameter_representations,
 )
-from mcp_server.tools.document_tools import (
+from mcp_server.tools.constraint_tools import (
     query_parameter_representations_by_doc_id as _query_pr_by_doc_id,
 )
-from mcp_server.tools.document_tools import (
+from mcp_server.tools.platform_tools import (
     save_platform_constants as _save_platform_constants,
 )
-from mcp_server.tools.document_tools import (
+from mcp_server.tools.platform_tools import (
     query_platform_constants_by_doc_id as _query_pc_by_doc_id,
 )
 from mcp_server.tools.document_tools import (
@@ -99,7 +108,13 @@ from mcp_server.tools.document_tools import (
     save_dtype_combinations as _save_dtype_combinations,
 )
 from mcp_server.tools.document_tools import (
+    save_function_explanation_summary as _save_fn_expl,
+)
+from mcp_server.tools.document_tools import (
     save_function_signatures as _save_function_signatures,
+)
+from mcp_server.tools.document_tools import (
+    save_json_constraints as _save_json_constraints,
 )
 from mcp_server.tools.document_tools import (
     save_param_relations as _save_param_relations,
@@ -109,6 +124,9 @@ from mcp_server.tools.document_tools import (
 )
 from mcp_server.tools.document_tools import (
     save_return_codes as _save_return_codes,
+)
+from mcp_server.tools.document_tools import (
+    update_json_constraints_by_name as _update_json_constraints_by_name,
 )
 from mcp_server.tools.parameter_tools import (
     batch_update_param_field as _batch_update_param_field,
@@ -135,9 +153,6 @@ from mcp_server.tools.document_tools import (
     update_param_constraint as _update_param_constraint,
 )
 from mcp_server.tools.document_tools import (
-    update_param_relation_objects as _update_param_relation_objects,
-)
-from mcp_server.tools.document_tools import (
     update_param_dformat as _update_param_dformat,
 )
 from mcp_server.tools.document_tools import (
@@ -147,12 +162,15 @@ from mcp_server.tools.document_tools import (
     update_param_optional as _update_param_optional,
 )
 from mcp_server.tools.document_tools import (
+    update_param_relation_objects as _update_param_relation_objects,
+)
+from mcp_server.tools.document_tools import (
     update_param_shape as _update_param_shape,
 )
-from mcp_server.tools.document_tools import (
+from mcp_server.tools.parameter_tools import (
     update_param_platform_attributes as _update_param_plat_attrs,
 )
-from mcp_server.tools.document_tools import (
+from mcp_server.tools.parameter_tools import (
     update_param_usage_notes as _update_param_usage_notes,
 )
 from mcp_server.tools.task_tools import (
@@ -184,6 +202,15 @@ from mcp_server.tools.task_tools import (
 )
 from mcp_server.tools.task_tools import (
     update_task_status as _update_task_status,
+)
+from mcp_server.tools.test_case_tools import (
+    do_get_test_cases as _do_get_test_cases,
+)
+from mcp_server.tools.test_case_tools import (
+    do_list_test_case_operators as _do_list_test_case_operators,
+)
+from mcp_server.tools.test_case_tools import (
+    do_save_test_cases as _do_save_test_cases,
 )
 from mcp_server.tools.task_tools import (
     delete_task as _delete_task,
@@ -969,6 +996,21 @@ def save_json_constraints(doc_id: int, json_constraints: str) -> str:
 
 
 @mcp.tool()
+def get_document_content(operator_name: str, version: int | None = None) -> str:
+    """Retrieve raw Markdown content from the latest document version for an operator.
+
+    Args:
+        operator_name: Operator name.
+        version: Version number (null for latest).
+
+    Returns:
+        JSON string with content, version, operator_name, or null if not found.
+    """
+    result = _get_document_content(operator_name, version)
+    return json.dumps(result, ensure_ascii=False)
+
+
+@mcp.tool()
 def get_json_constraints(operator_name: str) -> str:
     """Retrieve json_constraints from the latest document version for an operator.
 
@@ -979,6 +1021,21 @@ def get_json_constraints(operator_name: str) -> str:
         JSON string of the json_constraints field, or null if not found.
     """
     result = _get_json_constraints(operator_name)
+    return json.dumps(result, ensure_ascii=False)
+
+
+@mcp.tool()
+def update_json_constraints_by_name(operator_name: str, json_constraints: str) -> str:
+    """Update json_constraints for the latest document version of an operator.
+
+    Args:
+        operator_name: Operator name.
+        json_constraints: JSON string of the updated constraints.
+
+    Returns:
+        JSON string with saved flag and doc_id.
+    """
+    result = _update_json_constraints_by_name(operator_name, json_constraints)
     return json.dumps(result, ensure_ascii=False)
 
 
@@ -1105,6 +1162,32 @@ def get_function_explanation_summary(doc_id: int) -> str:
     return json.dumps(result, ensure_ascii=False)
 
 
+# ── GeneratorAgent MCP tools ─────────────────────────────────────────────────
+
+
+@mcp.tool()
+def save_test_cases(
+    operator_name: str,
+    cases_json: str,
+    source: str = "generated",
+    output_dir: str | None = None,
+) -> str:
+    """Persist generated test cases to DB and ``cases/{operator_name}_cases.json``.
+
+    Args:
+        operator_name: Operator name (e.g. ``aclnnAdaLayerNorm``).
+        cases_json: JSON-serialized list of test case records.
+        source: Provenance label (default ``"generated"``).
+        output_dir: Override for the cases directory.  ``None`` → ``cases/``
+            under the project root.
+
+    Returns:
+        JSON with ``operator_name``, ``saved_count``, and absolute ``output_path``.
+    """
+    result = _do_save_test_cases(operator_name, cases_json, source=source, output_dir=output_dir)
+    return json.dumps(result, ensure_ascii=False)
+
+
 @mcp.tool()
 def create_task(name: str, total_count: int, upload_dir: str) -> str:
     """Create a new batch processing task.
@@ -1182,6 +1265,20 @@ def update_task_item_status(
 
 
 @mcp.tool()
+def get_test_cases(operator_name: str) -> str:
+    """Return the most recent saved test cases for ``operator_name``.
+
+    Args:
+        operator_name: Operator name.
+
+    Returns:
+        JSON with ``operator_name`` and ``cases`` list, or ``"null"`` if none.
+    """
+    result = _do_get_test_cases(operator_name)
+    return json.dumps(result, ensure_ascii=False)
+
+
+@mcp.tool()
 def get_pending_task_items(task_id: int) -> str:
     """Get all pending task items for a task, ordered by seq.
 
@@ -1192,6 +1289,17 @@ def get_pending_task_items(task_id: int) -> str:
         JSON array of task item dicts with status='pending'.
     """
     result = _get_pending_task_items(task_id)
+    return json.dumps(result, ensure_ascii=False)
+
+
+@mcp.tool()
+def list_test_case_operators() -> str:
+    """List operator names that have saved test cases, with counts.
+
+    Returns:
+        JSON array of ``{operator_name, count, last_created_at}`` objects.
+    """
+    result = _do_list_test_case_operators()
     return json.dumps(result, ensure_ascii=False)
 
 

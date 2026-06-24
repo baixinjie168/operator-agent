@@ -29,8 +29,6 @@
   .main button:disabled { background: #a5a5a5; cursor: not-allowed; }
   .main button.secondary { background: #6b7280; }
   .main button.secondary:hover { background: #4b5563; }
-  .main button.danger { background: #dc2626; }
-  .main button.danger:hover { background: #b91c1c; }
 
   /* Split panel layout */
   .split-panel { display: flex; gap: 20px; flex: 1; min-height: 0; }
@@ -166,78 +164,114 @@
   .json-tree li.collapsed > .jc::before { content: '\25B6'; }
   .json-tree li:not(.collapsed) > .jc::before { content: '\25BC'; }
   .json-tree .jb-open, .json-tree .jb-close { color: #6b7280; }
+
+  /* ── Test Cases Generator module ─────────────────────────────────────── */
+  .case-gen-form { display: grid; grid-template-columns: 1fr 120px 120px auto; gap: 10px; align-items: end; margin-bottom: 12px; }
+  .case-gen-form label { display: block; font-size: .8rem; color: #4b5563; margin-bottom: 4px; }
+  .case-gen-form input, .case-gen-form select { padding: 7px 10px; border: 1px solid #ddd; border-radius: 6px; font-size: .9rem; }
+  .case-gen-form input:focus, .case-gen-form select:focus { outline: none; border-color: #4f46e5; }
+
+  .case-list { display: flex; flex-direction: column; gap: 10px; }
+  .case-card { border: 1px solid #e5e7eb; border-radius: 8px; background: #fff; transition: .15s; overflow: hidden; }
+  .case-card:hover { border-color: #4f46e5; box-shadow: 0 1px 4px rgba(79,70,229,.12); }
+  .case-card-head { display: flex; align-items: center; gap: 10px; padding: 12px 16px; background: #f9fafb; border-bottom: 1px solid #e5e7eb; cursor: pointer; }
+  .case-card-head .case-id { background: #4f46e5; color: #fff; border-radius: 6px; padding: 2px 10px; font-size: .8rem; font-weight: 700; }
+  .case-card-head .case-name { font-weight: 600; font-size: .95rem; color: #1f2937; flex: 1; }
+  .case-card-head .case-arrow { color: #6b7280; font-size: .9rem; transition: transform .2s; }
+  .case-card.open .case-card-head .case-arrow { transform: rotate(90deg); }
+  .case-card-body { display: none; padding: 14px 16px; }
+  .case-card.open .case-card-body { display: block; }
+  .case-summary { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+  .case-summary .pill { font-size: .75rem; padding: 3px 10px; border-radius: 10px; font-weight: 600; }
+  .pill-tensor { background: #dbeafe; color: #1e40af; }
+  .pill-attrs { background: #fef3c7; color: #92400e; }
+  .pill-required { background: #dcfce7; color: #166534; }
+  .pill-optional { background: #f3f4f6; color: #6b7280; }
+
+  .case-inputs-table { width: 100%; border-collapse: collapse; font-size: .82rem; margin-bottom: 10px; }
+  .case-inputs-table th { background: #f3f4f6; padding: 6px 10px; text-align: left; border: 1px solid #e5e7eb; font-weight: 600; color: #374151; }
+  .case-inputs-table td { padding: 6px 10px; border: 1px solid #e5e7eb; vertical-align: top; font-family: 'Consolas','Monaco','Courier New',monospace; }
+  .case-inputs-table tr:hover td { background: #f9fafb; }
+
+  .case-raw { background: #1e1e1e; color: #d4d4d4; padding: 12px; border-radius: 6px; overflow-x: auto; font-size: .78rem; line-height: 1.5; white-space: pre-wrap; word-break: break-all; max-height: 320px; overflow-y: auto; margin-top: 8px; }
+
+  .case-actions { display: flex; gap: 8px; margin: 8px 0 14px; flex-wrap: wrap; }
+  .case-actions a.btn-link { display: inline-block; padding: 6px 14px; background: #6b7280; color: #fff; border-radius: 6px; text-decoration: none; font-size: .85rem; }
+  .case-actions a.btn-link:hover { background: #4b5563; }
+
+  .case-meta-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px 16px; margin: 10px 0; padding: 10px 14px; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px; }
+  .case-meta-grid .meta-item { font-size: .82rem; color: #4b5563; }
+  .case-meta-grid .meta-item strong { color: #1f2937; display: block; font-size: .95rem; font-family: 'Consolas','Monaco','Courier New',monospace; }
   .json-tree .jcount { color: #6b7280; font-size: .75rem; margin-left: 6px; font-style: italic; }
 
-  .jc-toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; padding: 6px 10px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; }
-  .jc-toolbar .btn-download { display: inline-flex; align-items: center; gap: 4px; padding: 5px 12px; border-radius: 5px; font-size: .82rem; font-weight: 500; cursor: pointer; border: 1px solid #c7d2fe; background: #eef2ff; color: #4338ca; transition: .15s; }
-  .jc-toolbar .btn-download:hover { background: #e0e7ff; border-color: #a5b4fc; }
-  .jc-toolbar .btn-download:active { background: #c7d2fe; }
-  .jc-toolbar .btn-icon { font-size: .9rem; }
+  /* ── Execute (ExecuterAgent) module ─────────────────────────────────── */
+  .exec-form-label { display: block; font-size: .8rem; color: #4b5563; margin-bottom: 4px; font-weight: 500; }
+  .exec-form-input { width: 100%; padding: 8px 10px; border: 1px solid #ddd; border-radius: 6px; font-size: .9rem; transition: border-color .15s; }
+  .exec-form-input:focus { outline: none; border-color: #4f46e5; box-shadow: 0 0 0 2px rgba(79,70,229,.1); }
+  .exec-form-select { width: 100%; padding: 8px 10px; border: 1px solid #ddd; border-radius: 6px; font-size: .9rem; background: #fff; }
+  .exec-form-select:focus { outline: none; border-color: #4f46e5; }
+  .exec-textarea { width: 100%; flex: 1; min-height: 160px; border: 1px solid #ddd; border-radius: 6px; padding: 12px; font-family: 'Consolas','Monaco','Courier New',monospace; font-size: .82rem; resize: vertical; line-height: 1.5; transition: border-color .15s; }
+  .exec-textarea:focus { outline: none; border-color: #4f46e5; box-shadow: 0 0 0 2px rgba(79,70,229,.1); }
+  .exec-textarea::placeholder { color: #b0b8c4; font-family: -apple-system, "Segoe UI", Roboto, sans-serif; }
 
-  /* Task panel */
-  .task-sub-view { display: none; flex: 1; min-height: 0; flex-direction: column; }
-  .task-sub-view.active { display: flex; }
-  .task-doc-list { flex: 1; overflow-y: auto; border: 1px solid #e5e7eb; border-radius: 6px; }
-  .task-doc-row { display: flex; align-items: center; padding: 8px 12px; border-bottom: 1px solid #f3f4f6; font-size: .85rem; gap: 10px; }
-  .task-doc-row:hover { background: #f9fafb; }
-  .task-doc-row:last-child { border-bottom: none; }
-  .task-doc-row input[type="checkbox"] { flex-shrink: 0; width: 16px; height: 16px; accent-color: #4f46e5; }
-  .task-doc-name { flex: 1; font-weight: 500; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .task-doc-path { color: #9ca3af; font-size: .8rem; flex-shrink: 0; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .task-doc-size { color: #9ca3af; font-size: .8rem; flex-shrink: 0; width: 60px; text-align: right; }
-  .task-doc-cat { font-size: .75rem; padding: 1px 8px; border-radius: 10px; background: #e0e7ff; color: #3730a3; font-weight: 600; flex-shrink: 0; }
-  .task-pager { display: flex; gap: 4px; justify-content: center; align-items: center; padding: 10px 0; font-size: .85rem; }
-  .task-pager button { padding: 4px 10px; font-size: .8rem; border-radius: 4px; min-width: auto; }
-  .task-pager .pg-active { background: #4f46e5; color: #fff; }
+  .exec-pipeline { display: flex; flex-direction: column; gap: 0; position: relative; }
+  .exec-step { display: flex; align-items: flex-start; gap: 14px; padding: 14px 16px; border-radius: 8px; border: 1px solid #e5e7eb; background: #fff; transition: all .25s; position: relative; }
+  .exec-step + .exec-step { margin-top: -1px; border-top-left-radius: 0; border-top-right-radius: 0; }
+  .exec-step:not(:last-child) { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+  .exec-step.active { border-color: #4f46e5; background: #f5f3ff; z-index: 1; }
+  .exec-step.done { border-color: #86efac; background: #f0fdf4; }
+  .exec-step.error { border-color: #fca5a5; background: #fef2f2; }
 
-  .task-list-item { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border: 1px solid #e5e7eb; border-radius: 6px; margin-bottom: 8px; cursor: pointer; transition: .15s; }
-  .task-list-item:hover { background: #f9fafb; border-color: #4f46e5; }
-  .task-list-name { font-weight: 600; font-size: .95rem; }
-  .task-list-meta { font-size: .8rem; color: #888; margin-top: 2px; }
-  .task-list-status { display: flex; align-items: center; gap: 8px; }
+  .exec-step-icon { width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: .8rem; font-weight: 700; transition: all .25s; }
+  .exec-step .exec-step-icon { background: #f3f4f6; color: #9ca3af; }
+  .exec-step.active .exec-step-icon { background: #4f46e5; color: #fff; animation: execPulse 1.5s ease-in-out infinite; }
+  .exec-step.done .exec-step-icon { background: #16a34a; color: #fff; }
+  .exec-step.error .exec-step-icon { background: #dc2626; color: #fff; }
+  @keyframes execPulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(79,70,229,.35); } 50% { box-shadow: 0 0 0 6px rgba(79,70,229,0); } }
 
-  .task-progress-bar { height: 8px; background: #e5e7eb; border-radius: 4px; overflow: hidden; margin: 12px 0; }
-  .task-progress-fill { height: 100%; background: #4f46e5; border-radius: 4px; transition: width .3s; }
-  .task-progress-fill.has-errors { background: #f59e0b; }
+  .exec-step-body { flex: 1; min-width: 0; }
+  .exec-step-title { font-size: .9rem; font-weight: 600; color: #374151; line-height: 32px; }
+  .exec-step.active .exec-step-title { color: #4f46e5; }
+  .exec-step.done .exec-step-title { color: #166534; }
+  .exec-step.error .exec-step-title { color: #991b1b; }
+  .exec-step-desc { font-size: .78rem; color: #9ca3af; margin-top: 2px; }
+  .exec-step.active .exec-step-desc { color: #6366f1; }
+  .exec-step.done .exec-step-desc { color: #16a34a; }
+  .exec-step.error .exec-step-desc { color: #dc2626; }
 
-  .task-items-table { width: 100%; border-collapse: collapse; font-size: .85rem; }
-  .task-items-table th { background: #f3f4f6; padding: 8px 10px; text-align: left; border: 1px solid #e5e7eb; font-weight: 600; color: #374151; }
-  .task-items-table td { padding: 6px 10px; border: 1px solid #e5e7eb; }
-  .task-items-table tr:hover td { background: #f9fafb; }
-  .ti-pending { background: #f3f4f6; color: #6b7280; padding: 2px 10px; border-radius: 10px; font-size: .8rem; font-weight: 600; }
-  .ti-running { background: #dbeafe; color: #1d4ed8; padding: 2px 10px; border-radius: 10px; font-size: .8rem; font-weight: 600; }
-  .ti-completed { background: #dcfce7; color: #166534; padding: 2px 10px; border-radius: 10px; font-size: .8rem; font-weight: 600; }
-  .ti-failed { background: #fee2e2; color: #991b1b; padding: 2px 10px; border-radius: 10px; font-size: .8rem; font-weight: 600; }
-  .badge-running { background: #dbeafe; color: #1d4ed8; }
-  .badge-completed { background: #dcfce7; color: #166534; }
-  .badge-failed { background: #fee2e2; color: #991b1b; }
-  .badge-pending { background: #f3f4f6; color: #6b7280; }
+  .exec-step-badge { flex-shrink: 0; align-self: center; }
+  .exec-badge { display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px; border-radius: 12px; font-size: .72rem; font-weight: 600; }
+  .exec-badge-pending { background: #f3f4f6; color: #9ca3af; }
+  .exec-badge-running { background: #e0e7ff; color: #4338ca; }
+  .exec-badge-success { background: #dcfce7; color: #166534; }
+  .exec-badge-failed { background: #fee2e2; color: #991b1b; }
+  .exec-badge-running .exec-spinner { width: 10px; height: 10px; border-width: 1.5px; }
+  .exec-spinner { display: inline-block; width: 12px; height: 12px; border: 2px solid #c7d2fe; border-top-color: #4f46e5; border-radius: 50%; animation: spin .6s linear infinite; }
 
-  /* Category tabs */
-  .task-cat-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px solid #e5e7eb; }
-  .task-cat-tab { padding: 5px 14px; border-radius: 16px; font-size: .82rem; cursor: pointer; background: #f3f4f6; border: 1px solid #e5e7eb; color: #555; transition: .15s; white-space: nowrap; }
-  .task-cat-tab:hover { background: #e0e7ff; border-color: #c7d2fe; }
-  .task-cat-tab.active { background: #4f46e5; color: #fff; border-color: #4f46e5; font-weight: 600; }
-  .task-cat-tab .cat-count { display: inline-block; min-width: 18px; text-align: center; padding: 0 5px; border-radius: 10px; font-size: .7rem; font-weight: 600; margin-left: 4px; background: rgba(0,0,0,.08); }
-  .task-cat-tab.active .cat-count { background: rgba(255,255,255,.25); }
-  .task-cat-action-bar { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; padding: 6px 0; }
-  .task-cat-select-all { display: flex; align-items: center; gap: 6px; font-size: .85rem; color: #4f46e5; cursor: pointer; user-select: none; }
-  .task-cat-select-all input[type="checkbox"] { accent-color: #4f46e5; width: 15px; height: 15px; cursor: pointer; }
-  .task-cat-select-all:hover { color: #4338ca; }
+  .exec-result-panel { margin-top: 16px; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; }
+  .exec-result-header { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; background: #f9fafb; border-bottom: 1px solid #e5e7eb; }
+  .exec-result-header h3 { font-size: .9rem; color: #374151; margin: 0; }
+  .exec-metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0; }
+  .exec-metric { padding: 14px 16px; text-align: center; border-right: 1px solid #e5e7eb; }
+  .exec-metric:last-child { border-right: none; }
+  .exec-metric-value { font-size: 1.4rem; font-weight: 700; font-family: 'Consolas','Monaco','Courier New',monospace; }
+  .exec-metric-label { font-size: .72rem; color: #9ca3af; margin-top: 2px; text-transform: uppercase; letter-spacing: .5px; }
+  .exec-metric-value.val-pass { color: #16a34a; }
+  .exec-metric-value.val-fail { color: #dc2626; }
+  .exec-metric-value.val-total { color: #1d4ed8; }
+  .exec-metric-value.val-status { font-size: .85rem; }
 
-  /* Top-level task tabs (任务列表 / 执行概览) */
-  .task-top-tab { padding: 8px 20px; font-size: .92rem; cursor: pointer; background: none; border: none; border-bottom: 2px solid transparent; color: #6b7280; font-weight: 500; transition: .15s; margin-bottom: -2px; }
-  .task-top-tab:hover { color: #4f46e5; }
-  .task-top-tab.active { color: #4f46e5; border-bottom-color: #4f46e5; font-weight: 600; }
+  .exec-code-toggle { display: flex; align-items: center; gap: 6px; padding: 10px 16px; background: #f9fafb; border-top: 1px solid #e5e7eb; cursor: pointer; font-size: .82rem; color: #6b7280; transition: .15s; user-select: none; }
+  .exec-code-toggle:hover { background: #f3f4f6; color: #374151; }
+  .exec-code-toggle .arrow { transition: transform .2s; font-size: .7rem; }
+  .exec-code-toggle.open .arrow { transform: rotate(90deg); }
+  .exec-code-body { display: none; }
+  .exec-code-body.open { display: block; }
+  .exec-code-body pre { margin: 0; background: #1e1e1e; color: #d4d4d4; padding: 16px; font-size: .8rem; line-height: 1.6; white-space: pre-wrap; word-break: break-all; max-height: 300px; overflow-y: auto; }
 
-  /* Summary cards */
-  .summary-card { flex: 1; min-width: 130px; padding: 14px 18px; border: 1px solid #e5e7eb; border-radius: 8px; background: #f9fafb; text-align: center; }
-  .summary-card .sc-val { font-size: 1.5rem; font-weight: 700; color: #111827; }
-  .summary-card .sc-label { font-size: .78rem; color: #6b7280; margin-top: 2px; }
-  .summary-card.sc-ok .sc-val { color: #059669; }
-  .summary-card.sc-err .sc-val { color: #dc2626; }
-  .summary-card.sc-rate .sc-val { color: #4f46e5; }
-  .task-cat-name { font-weight: 600; font-size: .9rem; color: #374151; }
+  .exec-right-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; flex: 1; color: #c0c7d0; text-align: center; gap: 10px; }
+  .exec-right-empty svg { width: 56px; height: 56px; opacity: .35; }
+  .exec-right-empty p { font-size: .9rem; }
 </style>
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 </head>
@@ -286,9 +320,13 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
         约束结果
       </button>
-      <button class="nav-item" onclick="switchTab('tasks', this)">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
-        任务
+      <button class="nav-item" onclick="switchTab('cases', this)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+        测试用例生成
+      </button>
+      <button class="nav-item" onclick="switchTab('execute', this)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+        用例执行
       </button>
     </nav>
   </aside>
@@ -519,89 +557,159 @@
     </div>
   </div>
 
-  <!-- Tasks Panel -->
-  <div class="panel" id="panelTasks">
+  <!-- Test Cases Generator Panel -->
+  <div class="panel" id="panelCases">
     <div class="card" style="flex:1;display:flex;flex-direction:column;min-height:0;overflow:hidden">
-
-      <!-- Top-level tab bar: 任务列表 | 执行概览 -->
-      <div id="taskTopTabs" style="display:flex;gap:0;border-bottom:2px solid #e5e7eb;margin-bottom:14px">
-        <button class="task-top-tab active" data-tab="list" onclick="switchTaskTopTab('list')">任务列表</button>
-        <button class="task-top-tab" data-tab="summary" onclick="switchTaskTopTab('summary')">执行概览</button>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <h2 style="margin:0">测试用例生成 (GeneratorAgent)</h2>
+        <div style="display:flex;gap:8px;align-items:center">
+          <button class="secondary" onclick="loadAllCaseOperators()">刷新</button>
+        </div>
       </div>
 
-      <!-- Top-tab: 任务列表 (wraps existing sub-views) -->
-      <div id="taskTopTabList" style="flex:1;display:flex;flex-direction:column;min-height:0">
-
-      <!-- Sub-view: Task List -->
-      <div class="task-sub-view active" id="taskListView">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-          <h2 style="margin:0">任务列表</h2>
-          <div style="display:flex;gap:8px">
-            <button onclick="showTaskCreate()">新建任务</button>
-            <button class="secondary" onclick="loadTaskList()">刷新</button>
+      <!-- Generate new cases form -->
+      <div style="padding:14px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:12px">
+        <div style="font-weight:600;color:#374151;margin-bottom:8px">生成新用例</div>
+        <div class="case-gen-form">
+          <div>
+            <label>算子</label>
+            <select id="genOperatorSelect"><option value="">— 请选择算子 —</option></select>
+          </div>
+          <div>
+            <label>数量</label>
+            <input id="genCount" type="number" min="1" max="200" value="10">
+          </div>
+          <div>
+            <label>种子 (可选)</label>
+            <input id="genSeed" type="number" placeholder="留空则随机">
+          </div>
+          <div>
+            <button id="genBtn" onclick="generateCases()">生成</button>
           </div>
         </div>
-        <div id="taskListContent" style="flex:1;min-height:0;overflow-y:auto"></div>
-        <div class="status" id="taskListStatus"></div>
+        <div class="status" id="genStatus"></div>
       </div>
 
-      <!-- Sub-view: Create Task -->
-      <div class="task-sub-view" id="taskCreateView">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-          <span class="back-link" onclick="showTaskList()">&larr; 返回列表</span>
-          <h2 style="margin:0">新建任务</h2>
+      <!-- Existing cases list -->
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div style="font-weight:600;color:#374151">已有用例</div>
+        <select id="caseOpFilter" onchange="loadExistingCases()" style="padding:6px 12px;border:1px solid #ddd;border-radius:6px;font-size:.85rem;min-width:200px">
+          <option value="">— 选择算子查看 —</option>
+        </select>
+      </div>
+      <div id="caseTableWrap" style="flex:1;min-height:0;overflow-y:auto">
+        <div id="caseContent"></div>
+        <div class="status" id="caseStatus"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Execute Panel -->
+  <div class="panel" id="panelExecute">
+    <div class="split-panel">
+      <!-- Left: Input -->
+      <div class="split-left">
+        <div class="card" style="flex:1;display:flex;flex-direction:column">
+          <h2>输入测试用例</h2>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+            <div>
+              <label class="exec-form-label">算子名称</label>
+              <input id="execOperatorName" class="exec-form-input" type="text" placeholder="aclnnAdaLayerNorm">
+            </div>
+            <div>
+              <label class="exec-form-label">快速加载已有用例</label>
+              <select id="execCaseLoader" class="exec-form-select" onchange="loadCasesForExecute()">
+                <option value="">— 选择算子 —</option>
+              </select>
+            </div>
+          </div>
+          <label class="exec-form-label">cases.json 数据</label>
+          <textarea id="execCasesJson" class="exec-textarea" placeholder='粘贴 cases.json 内容，例如:&#10;[{"id":0,"name":"aclnnAdaLayerNorm","inputs":[...]}]'></textarea>
+          <div style="margin-top:12px;display:flex;gap:10px;align-items:center">
+            <button id="execBtn" onclick="runExecute()">
+              <svg style="width:14px;height:14px;vertical-align:-2px;margin-right:4px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+              执行用例
+            </button>
+            <button class="secondary" onclick="document.getElementById('execCasesJson').value='';document.getElementById('execOperatorName').value=''">清空</button>
+          </div>
+          <div class="status" id="execStatus"></div>
         </div>
-        <div id="taskCatTabs" class="task-cat-tabs"></div>
-        <div class="task-cat-action-bar">
-          <label class="task-cat-select-all" onclick="toggleCategoryAll()">
-            <input type="checkbox" id="taskCatSelectAllCb">
-            <span>全选「<span id="taskCatSelectAllName">全部</span>」</span>
-          </label>
-          <span id="taskCatInfo" style="font-size:.8rem;color:#9ca3af"></span>
-          <span style="flex:1"></span>
-          <span id="taskSelectedCount" style="font-size:.85rem;color:#6b7280;white-space:nowrap">已选: 0</span>
-        </div>
-        <div style="display:flex;gap:12px;align-items:center;margin-bottom:10px">
-          <input type="text" id="taskDocSearch" placeholder="搜索算子名..." style="flex:1;padding:8px 12px;border:1px solid #ddd;border-radius:6px;font-size:.85rem" oninput="filterTaskDocs()">
-          <select id="taskDocPageSizeSelect" onchange="setTaskDocPageSize(this.value)" style="padding:8px 12px;border:1px solid #ddd;border-radius:6px;font-size:.85rem">
-            <option value="20">每页 20 条</option>
-            <option value="50" selected>每页 50 条</option>
-            <option value="100">每页 100 条</option>
-          </select>
-        </div>
-        <div class="task-doc-list" id="taskDocList"></div>
-        <div class="task-pager" id="taskDocPager"></div>
-        <div style="display:flex;gap:12px;align-items:center;margin-top:10px">
-          <button class="secondary" onclick="taskDocSelectAll()">全选当前页</button>
-          <button class="secondary" onclick="taskDocClearAll()">清空选择</button>
-          <div style="flex:1"></div>
-          <input type="text" id="taskNameInput" placeholder="任务名称（可选）" style="padding:8px 12px;border:1px solid #ddd;border-radius:6px;font-size:.85rem;width:200px">
-          <button id="createTaskBtn" onclick="submitCreateTask()" disabled>创建任务 (0)</button>
-        </div>
-        <div class="status" id="taskCreateStatus"></div>
       </div>
 
-      <!-- Sub-view: Task Detail -->
-      <div class="task-sub-view" id="taskDetailView">
-        <span class="back-link" onclick="showTaskList()">&larr; 返回列表</span>
-        <div id="taskDetailHeader" style="margin-bottom:12px"></div>
-        <div class="task-progress-bar"><div class="task-progress-fill" id="taskProgressFill"></div></div>
-        <div style="display:flex;gap:8px;margin-bottom:10px" id="taskDetailActions"></div>
-        <div id="taskDetailContent" style="flex:1;min-height:0;overflow-y:auto"></div>
-      </div>
+      <!-- Right: Pipeline + Results -->
+      <div class="split-right">
+        <div class="card" style="flex:1;display:flex;flex-direction:column;min-height:0">
+          <h2>执行流程</h2>
 
-      </div><!-- /taskTopTabList -->
+          <!-- Empty state -->
+          <div class="exec-right-empty" id="execRightEmpty">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+            <p>请在左侧输入用例数据并点击执行</p>
+          </div>
 
-      <!-- Top-tab: 执行概览 -->
-      <div id="taskTopTabSummary" style="flex:1;display:none;flex-direction:column;min-height:0">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
-          <h2 style="margin:0">执行概览</h2>
-          <button class="secondary" onclick="loadTasksSummary()">刷新</button>
+          <!-- Pipeline steps (hidden initially) -->
+          <div id="execPipelineWrap" style="display:none;flex:1;min-height:0;overflow-y:auto">
+            <div class="exec-pipeline" id="execPipeline">
+              <div class="exec-step" id="execStep0">
+                <div class="exec-step-icon">1</div>
+                <div class="exec-step-body">
+                  <div class="exec-step-title">生成 ATK 脚本</div>
+                  <div class="exec-step-desc" id="execStepDesc0">调用 generator.py 生成可执行的 ATK 测试脚本</div>
+                </div>
+                <div class="exec-step-badge" id="execStepBadge0"><span class="exec-badge exec-badge-pending">等待中</span></div>
+              </div>
+              <div class="exec-step" id="execStep1">
+                <div class="exec-step-icon">2</div>
+                <div class="exec-step-body">
+                  <div class="exec-step-title">CPU 参考推导</div>
+                  <div class="exec-step-desc" id="execStepDesc1">通过 LLM 推导 CPU Golden Reference 实现</div>
+                </div>
+                <div class="exec-step-badge" id="execStepBadge1"><span class="exec-badge exec-badge-pending">等待中</span></div>
+              </div>
+              <div class="exec-step" id="execStep2">
+                <div class="exec-step-icon">3</div>
+                <div class="exec-step-body">
+                  <div class="exec-step-title">执行 ATK 测试</div>
+                  <div class="exec-step-desc" id="execStepDesc2">连接执行机运行 ATK 测试并验证结果</div>
+                </div>
+                <div class="exec-step-badge" id="execStepBadge2"><span class="exec-badge exec-badge-pending">等待中</span></div>
+              </div>
+            </div>
+
+            <!-- Result panel (hidden until complete) -->
+            <div class="exec-result-panel" id="execResultPanel" style="display:none">
+              <div class="exec-result-header">
+                <h3>执行结果</h3>
+                <span id="execResultStatus"></span>
+              </div>
+              <div class="exec-metrics" id="execMetrics">
+                <div class="exec-metric">
+                  <div class="exec-metric-value val-status" id="execMetricStatus">—</div>
+                  <div class="exec-metric-label">状态</div>
+                </div>
+                <div class="exec-metric">
+                  <div class="exec-metric-value val-pass" id="execMetricPassed">0</div>
+                  <div class="exec-metric-label">通过</div>
+                </div>
+                <div class="exec-metric">
+                  <div class="exec-metric-value val-fail" id="execMetricFailed">0</div>
+                  <div class="exec-metric-label">失败</div>
+                </div>
+                <div class="exec-metric">
+                  <div class="exec-metric-value val-total" id="execMetricTotal">0</div>
+                  <div class="exec-metric-label">总计</div>
+                </div>
+              </div>
+              <div class="exec-code-toggle" id="execCodeToggle" onclick="toggleExecCode()">
+                <span class="arrow">▶</span> 查看完整输出
+              </div>
+              <div class="exec-code-body" id="execCodeBody">
+                <pre id="execResultBody"></pre>
+              </div>
+            </div>
+          </div>
         </div>
-        <div id="taskSummaryTotals" style="display:flex;gap:14px;margin-bottom:16px;flex-wrap:wrap"></div>
-        <div id="taskSummaryContent" style="flex:1;min-height:0;overflow-y:auto"></div>
       </div>
-
     </div>
   </div>
 
@@ -622,11 +730,6 @@
 <script>
 /* ---------- Tab switching ---------- */
 function switchTab(name, el) {
-  // Stop task polling when leaving the tasks panel
-  if (name !== 'tasks') {
-    _stopTaskListPoll();
-    _stopTaskDetailPoll();
-  }
   document.querySelectorAll('.nav-item').forEach(t => t.classList.remove('active'));
   document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
   el.classList.add('active');
@@ -639,7 +742,8 @@ function switchTab(name, el) {
   if (name === 'signatures') { loadSigOperators(); loadSignatures(); }
   if (name === 'dtypes') { loadDtypeOperators(); loadDtypeCombos(); }
   if (name === 'result') { loadResultOperators(); loadConstraintsResult(); }
-  if (name === 'tasks') { showTaskList(); loadTaskList(); }
+  if (name === 'cases') { loadAllCaseOperators(); }
+  if (name === 'execute') { loadExecCaseOperators(); }
 }
 
 /* ---------- Parse step helpers ---------- */
@@ -928,16 +1032,7 @@ async function loadDetail(name) {
       .then(res => res.json())
       .then(jcData => {
         if (jcData.success && jcData.json_constraints) {
-          const jcJson = jcData.json_constraints;
-          // Store for download
-          window._currentJsonConstraint = jcJson;
-          window._currentJsonConstraintName = name;
-          const toolbar = '<div class="jc-toolbar">'
-            + '<button class="btn-download" onclick="downloadJsonConstraint()">'
-            + '<span class="btn-icon">⬇</span> 下载 JSON</button>'
-            + '</div>';
-          document.getElementById('tabJsonConstraint').innerHTML = toolbar
-            + '<div class="json-tree"><ul>' + renderJsonTree(jcJson) + '</ul></div>';
+          document.getElementById('tabJsonConstraint').innerHTML = '<div class="json-tree"><ul>' + renderJsonTree(jcData.json_constraints) + '</ul></div>';
         } else {
           document.getElementById('tabJsonConstraint').innerHTML = '<div class="empty-state">无 JSON Constraint 数据</div>';
         }
@@ -959,24 +1054,6 @@ async function loadDetail(name) {
   } catch (err) {
     metaEl.innerHTML = '<span class="badge badge-err">ERROR</span> ' + err.message;
   }
-}
-
-function downloadJsonConstraint() {
-  if (!window._currentJsonConstraint) {
-    alert('无 JSON Constraint 数据可下载');
-    return;
-  }
-  const name = window._currentJsonConstraintName || 'json_constraint';
-  const jsonStr = JSON.stringify(window._currentJsonConstraint, null, 2);
-  const blob = new Blob([jsonStr], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = name + '.json';
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
 }
 
 function renderJsonTree(val, key) {
@@ -1158,7 +1235,7 @@ async function loadParams() {
         '<td class="td-src">' + (p.src_content
           ? '<textarea readonly rows="2" style="width:100%;border:1px solid #ddd;border-radius:4px;padding:4px;font-family:monospace;font-size:.75rem;background:#fffbeb;resize:vertical">' + escapeHtml(stripMarkup(p.src_content)) + '</textarea>'
           : '-') + '</td>' +
-        '<td>' + (p.llm_description
+        '<td>' + (p.description
           ? '<a class="desc-link" data-idx="' + idx + '" onclick="openDescModalByIdx(this)">查看描述</a>'
           : '-') + '</td>' +
         '<td>' + escapeHtml(p.data_type || '-') + '</td>' +
@@ -1198,7 +1275,7 @@ function openDescModalByIdx(el) {
   const title = document.getElementById('descModalTitle');
   const body = document.getElementById('descModalBody');
   title.textContent = param.param_name + ' (' + param.function_name + ')';
-  body.innerHTML = param.llm_description ? marked.parse(param.llm_description) : '（无描述）';
+  body.innerHTML = param.description ? marked.parse(param.description) : '（无描述）';
   overlay.style.display = 'flex';
 }
 
@@ -1784,559 +1861,482 @@ async function loadConstraintsResult() {
   }
 }
 
-/* ---------- Tasks ---------- */
-let _taskDocs = [];
-let _taskDocPage = 1;
-let _taskDocPageSize = 50;
-let _taskDocSelected = new Set();
-let _taskDocActiveCat = '全部';
-let _taskListPollTimer = null;
-let _taskDetailPollTimer = null;
-let _taskDetailId = null;
+/* ---------- Test Cases Generator (GeneratorAgent) ---------- */
 
-function showTaskSubView(viewId) {
-  document.querySelectorAll('#panelTasks .task-sub-view').forEach(v => v.classList.remove('active'));
-  document.getElementById(viewId).classList.add('active');
-}
-
-function showTaskList() {
-  showTaskSubView('taskListView');
-  _stopTaskDetailPoll();
-}
-
-function showTaskCreate() {
-  _stopTaskListPoll();
-  showTaskSubView('taskCreateView');
-  loadTaskDocs();
-}
-
-function showTaskDetail(taskId) {
-  _stopTaskListPoll();
-  showTaskSubView('taskDetailView');
-  _taskDetailId = taskId;
-  loadTaskDetail(taskId);
-  _startTaskDetailPoll(taskId);
-}
-
-/* -- Load task docs for create view -- */
-async function loadTaskDocs() {
-  const listEl = document.getElementById('taskDocList');
-  listEl.innerHTML = '<div style="padding:20px;text-align:center;color:#888"><span class="spinner"></span>加载中...</div>';
+async function loadAllCaseOperators() {
+  // Populate both the "generate" dropdown (all operators) and
+  // the "已有用例" filter (only operators with saved cases).
   try {
-    const res = await fetch('/api/v1/task-docs');
+    // 1. All operators (for the generate dropdown)
+    const opsRes = await fetch('/api/v1/operators');
+    const opsData = await opsRes.json();
+    const genSelect = document.getElementById('genOperatorSelect');
+    const currentGen = genSelect.value;
+    genSelect.innerHTML = '<option value="">— 请选择算子 —</option>';
+    if (opsData.operators) {
+      opsData.operators
+        .slice()
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .forEach(op => {
+          const opt = document.createElement('option');
+          opt.value = op.name;
+          opt.textContent = op.name + (op.latest_version ? ' (v' + op.latest_version + ')' : '');
+          genSelect.appendChild(opt);
+        });
+    }
+    genSelect.value = currentGen;
+  } catch (e) {
+    document.getElementById('genStatus').textContent = '加载算子列表失败: ' + e.message;
+  }
+
+  // 2. Operators that already have saved cases
+  await loadCaseOperatorsWithSaved();
+  // 3. Refresh the right-hand list if a filter is set
+  await loadExistingCases();
+}
+
+async function loadCaseOperatorsWithSaved() {
+  try {
+    const res = await fetch('/api/v1/cases');
     const data = await res.json();
-    _taskDocs = data.documents || [];
-    _taskDocPage = 1;
-    _taskDocActiveCat = '全部';
-    renderTaskDocs();
-  } catch (err) {
-    listEl.innerHTML = '<div style="padding:20px;text-align:center;color:#991b1b">加载失败: ' + err.message + '</div>';
+    const filter = document.getElementById('caseOpFilter');
+    const current = filter.value;
+    filter.innerHTML = '<option value="">— 选择算子查看 —</option>';
+    const rows = data.operators || [];
+    rows.forEach(r => {
+      const opt = document.createElement('option');
+      opt.value = r.operator_name;
+      const stamp = r.last_created_at ? ' · ' + r.last_created_at : '';
+      opt.textContent = r.operator_name + ' (' + r.count + ' 条' + stamp + ')';
+      filter.appendChild(opt);
+    });
+    filter.value = current;
+  } catch (_) {
+    /* non-fatal */
   }
 }
 
-function filterTaskDocs() {
-  _taskDocPage = 1;
-  renderTaskDocs();
-}
+async function generateCases() {
+  const opSel = document.getElementById('genOperatorSelect');
+  const countEl = document.getElementById('genCount');
+  const seedEl = document.getElementById('genSeed');
+  const btn = document.getElementById('genBtn');
+  const statusEl = document.getElementById('genStatus');
 
-function renderTaskDocs() {
-  const searchEl = document.getElementById('taskDocSearch');
-  const search = (searchEl ? searchEl.value : '').toLowerCase();
-
-  // Build category list
-  const categories = ['全部'];
-  const catSet = new Set();
-  _taskDocs.forEach(d => { if (d.category && !catSet.has(d.category)) { catSet.add(d.category); categories.push(d.category); } });
-
-  // Render category tabs
-  const tabsEl = document.getElementById('taskCatTabs');
-  if (tabsEl) {
-    tabsEl.innerHTML = categories.map(cat => {
-      const count = cat === '全部' ? _taskDocs.length : _taskDocs.filter(d => d.category === cat).length;
-      const active = cat === _taskDocActiveCat ? ' active' : '';
-      return '<span class="task-cat-tab' + active + '" onclick="switchTaskCat(\'' + escapeHtml(cat) + '\')">'
-        + escapeHtml(cat) + '<span class="cat-count">' + count + '</span></span>';
-    }).join('');
-  }
-
-  // Filter by category and search
-  let filtered = _taskDocs;
-  if (_taskDocActiveCat !== '全部') filtered = filtered.filter(d => d.category === _taskDocActiveCat);
-  if (search) filtered = filtered.filter(d => d.name.toLowerCase().includes(search));
-
-  // Pagination
-  const totalPages = Math.max(1, Math.ceil(filtered.length / _taskDocPageSize));
-  if (_taskDocPage > totalPages) _taskDocPage = totalPages;
-  const start = (_taskDocPage - 1) * _taskDocPageSize;
-  const pageItems = filtered.slice(start, start + _taskDocPageSize);
-
-  // Update category select-all checkbox
-  const catCb = document.getElementById('taskCatSelectAllCb');
-  const catName = document.getElementById('taskCatSelectAllName');
-  if (catCb && pageItems.length > 0) {
-    catCb.checked = pageItems.every(d => _taskDocSelected.has(d.path));
-  } else if (catCb) {
-    catCb.checked = false;
-  }
-  if (catName) catName.textContent = _taskDocActiveCat;
-
-  // Update category info
-  const catInfoEl = document.getElementById('taskCatInfo');
-  if (catInfoEl) {
-    const selInCat = pageItems.filter(d => _taskDocSelected.has(d.path)).length;
-    catInfoEl.textContent = pageItems.length > 0 ? (pageItems.length + ' 个文档，已选 ' + selInCat) : '';
-  }
-
-  // Render document list
-  const listEl = document.getElementById('taskDocList');
-  if (pageItems.length === 0) {
-    listEl.innerHTML = '<div style="padding:20px;text-align:center;color:#aaa">无匹配的文档</div>';
-  } else {
-    listEl.innerHTML = pageItems.map(d => {
-      const checked = _taskDocSelected.has(d.path) ? 'checked' : '';
-      const sizeKB = (d.size / 1024).toFixed(1) + 'KB';
-      const cat = (_taskDocActiveCat === '全部' && d.category) ? '<span class="task-doc-cat">' + escapeHtml(d.category) + '</span>' : '';
-      return '<div class="task-doc-row">'
-        + '<input type="checkbox" ' + checked + ' onchange="toggleTaskDoc(\'' + escapeHtml(d.path) + '\', this.checked)">'
-        + '<span class="task-doc-name">' + escapeHtml(d.name) + '</span>'
-        + ' ' + cat
-        + '<span class="task-doc-path" title="' + escapeHtml(d.path) + '">' + escapeHtml(d.path) + '</span>'
-        + '<span class="task-doc-size">' + sizeKB + '</span>'
-        + '</div>';
-    }).join('');
-  }
-
-  // Pager
-  const pagerEl = document.getElementById('taskDocPager');
-  if (totalPages <= 1) {
-    pagerEl.innerHTML = '<span style="color:#9ca3af">共 ' + filtered.length + ' 个文档</span>';
+  const operatorName = opSel.value.trim();
+  if (!operatorName) {
+    statusEl.innerHTML = '<span class="badge badge-err">请先选择算子</span>';
     return;
   }
-  let pg = '';
-  if (_taskDocPage > 1) pg += '<button class="secondary" onclick="_taskDocPage=1;renderTaskDocs()">首页</button><button class="secondary" onclick="_taskDocPage--;renderTaskDocs()">&lt;</button>';
-  const rangeStart = Math.max(1, _taskDocPage - 2);
-  const rangeEnd = Math.min(totalPages, _taskDocPage + 2);
-  for (let i = rangeStart; i <= rangeEnd; i++) {
-    pg += '<button class="' + (i === _taskDocPage ? 'pg_active' : 'secondary') + '" onclick="_taskDocPage=' + i + ';renderTaskDocs()">' + i + '</button>';
-  }
-  if (_taskDocPage < totalPages) pg += '<button class="secondary" onclick="_taskDocPage++;renderTaskDocs()">&gt;</button><button class="secondary" onclick="_taskDocPage=' + totalPages + ';renderTaskDocs()">末页</button>';
-  pg += '<span style="color:#9ca3af;margin-left:8px">共 ' + filtered.length + ' 个文档</span>';
-  pagerEl.innerHTML = pg;
-}
+  const count = parseInt(countEl.value, 10) || 10;
+  const seedRaw = seedEl.value.trim();
+  const seed = seedRaw === '' ? null : parseInt(seedRaw, 10);
 
-function toggleTaskDoc(path, checked) {
-  if (checked) _taskDocSelected.add(path);
-  else _taskDocSelected.delete(path);
-  updateTaskSelectedCount();
-}
-
-function switchTaskCat(cat) {
-  _taskDocActiveCat = cat;
-  _taskDocPage = 1;
-  renderTaskDocs();
-}
-
-function getCategoryFilteredPaths() {
-  const searchEl = document.getElementById('taskDocSearch');
-  const search = (searchEl ? searchEl.value : '').toLowerCase();
-  return _taskDocs
-    .filter(d => _taskDocActiveCat === '全部' || d.category === _taskDocActiveCat)
-    .filter(d => !search || d.name.toLowerCase().includes(search))
-    .map(d => d.path);
-}
-
-function toggleCategoryAll() {
-  const paths = getCategoryFilteredPaths();
-  const start = (_taskDocPage - 1) * _taskDocPageSize;
-  const pageItems = paths.slice(start, start + _taskDocPageSize);
-  const allSelected = pageItems.length > 0 && pageItems.every(p => _taskDocSelected.has(p));
-  if (allSelected) {
-    pageItems.forEach(p => _taskDocSelected.delete(p));
-  } else {
-    pageItems.forEach(p => _taskDocSelected.add(p));
-  }
-  renderTaskDocs();
-  updateTaskSelectedCount();
-}
-
-function taskDocSelectAll() {
-  const paths = getCategoryFilteredPaths();
-  const start = (_taskDocPage - 1) * _taskDocPageSize;
-  const pageItems = paths.slice(start, start + _taskDocPageSize);
-  pageItems.forEach(p => _taskDocSelected.add(p));
-  renderTaskDocs();
-  updateTaskSelectedCount();
-}
-
-function taskDocClearAll() {
-  _taskDocSelected.clear();
-  renderTaskDocs();
-  updateTaskSelectedCount();
-}
-
-function updateTaskSelectedCount() {
-  const count = _taskDocSelected.size;
-  document.getElementById('taskSelectedCount').textContent = '已选: ' + count;
-  const btn = document.getElementById('createTaskBtn');
-  btn.disabled = count === 0;
-  btn.textContent = '创建任务 (' + count + ')';
-}
-
-function setTaskDocPageSize(size) {
-  const newSize = parseInt(size, 10);
-  if (newSize > 0 && newSize <= 100) {
-    _taskDocPageSize = newSize;
-    _taskDocPage = 1;
-    renderTaskDocs();
-  }
-}
-
-/* -- Create task -- */
-async function submitCreateTask() {
-  if (_taskDocSelected.size === 0) return;
-  const btn = document.getElementById('createTaskBtn');
-  const statusEl = document.getElementById('taskCreateStatus');
   btn.disabled = true;
-  statusEl.innerHTML = '<span class="spinner"></span>创建中...';
-
-  const name = document.getElementById('taskNameInput').value.trim() || null;
-  const file_paths = Array.from(_taskDocSelected);
+  statusEl.innerHTML = '<span class="spinner"></span>正在为 ' + escapeHtml(operatorName) + ' 生成 ' + count + ' 个用例...';
 
   try {
-    const res = await fetch('/api/v1/tasks', {
+    const body = { operator_name: operatorName, count: count };
+    if (seed !== null && !Number.isNaN(seed)) body.seed = seed;
+
+    const res = await fetch('/api/v1/cases/generate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, file_paths }),
+      body: JSON.stringify(body),
     });
     const data = await res.json();
-    if (data.success) {
-      statusEl.innerHTML = '<span class="badge badge-ok">创建成功</span>';
-      _taskDocSelected.clear();
-      updateTaskSelectedCount();
-      setTimeout(() => showTaskDetail(data.task_id), 500);
-    } else {
-      statusEl.innerHTML = '<span class="badge badge-err">创建失败: ' + escapeHtml(data.error || '未知错误') + '</span>';
-      btn.disabled = false;
+    if (!data.success) {
+      statusEl.innerHTML = '<span class="badge badge-err">ERROR</span> ' + escapeHtml(data.error || '生成失败');
+      return;
     }
+    statusEl.innerHTML = '<span class="badge badge-ok">SUCCESS</span> 已生成 ' + data.cases_count +
+      ' 条用例 → <code style="font-size:.8rem">' + escapeHtml(data.output_path || '') + '</code>';
+
+    // Refresh the existing-cases filter and auto-select the just-generated operator.
+    await loadCaseOperatorsWithSaved();
+    document.getElementById('caseOpFilter').value = operatorName;
+    await loadExistingCases();
   } catch (err) {
-    statusEl.innerHTML = '<span class="badge badge-err">请求失败: ' + err.message + '</span>';
+    statusEl.innerHTML = '<span class="badge badge-err">ERROR</span> ' + escapeHtml(err.message);
+  } finally {
     btn.disabled = false;
   }
 }
 
-/* -- Task list -- */
-async function loadTaskList() {
-  const contentEl = document.getElementById('taskListContent');
-  const statusEl = document.getElementById('taskListStatus');
-  _stopTaskListPoll();
+async function loadExistingCases() {
+  const filterEl = document.getElementById('caseOpFilter');
+  const statusEl = document.getElementById('caseStatus');
+  const contentEl = document.getElementById('caseContent');
+  const operatorName = filterEl.value;
+
+  if (!operatorName) {
+    contentEl.innerHTML = '<div class="empty-state">请选择算子以查看已保存的测试用例</div>';
+    statusEl.textContent = '';
+    return;
+  }
+
+  statusEl.innerHTML = '<span class="spinner"></span>加载中...';
+  contentEl.innerHTML = '';
 
   try {
-    const res = await fetch('/api/v1/tasks');
+    const res = await fetch('/api/v1/cases/' + encodeURIComponent(operatorName));
     const data = await res.json();
-    const tasks = data.tasks || [];
-    if (tasks.length === 0) {
-      contentEl.innerHTML = '<div class="empty-state">暂无任务，点击"新建任务"创建</div>';
+    if (!data.found) {
+      contentEl.innerHTML = '<div class="empty-state">该算子暂无已保存的测试用例 — 请使用上方"生成新用例"功能</div>';
       statusEl.textContent = '';
       return;
     }
-    contentEl.innerHTML = tasks.map(t => {
-      const badgeCls = 'badge-' + t.status;
-      const progress = t.total_count > 0 ? `${t.completed_count}/${t.total_count}` : '-';
-      return `<div class="task-list-item" onclick="showTaskDetail(${t.id})">
-        <div>
-          <div class="task-list-name">${escapeHtml(t.name)}</div>
-          <div class="task-list-meta">${escapeHtml(t.created_at || '')} | ${progress} 完成</div>
-        </div>
-        <div class="task-list-status">
-          <span class="badge ${badgeCls}">${t.status}</span>
-          <span style="color:#888;font-size:.8rem">&gt;</span>
-        </div>
-      </div>`;
-    }).join('');
-    statusEl.textContent = '共 ' + tasks.length + ' 个任务';
-
-    // Auto-poll if any running
-    if (tasks.some(t => t.status === 'running' || t.status === 'pending')) {
-      _startTaskListPoll();
-    }
+    const cases = data.cases || [];
+    contentEl.innerHTML = renderCaseList(cases, operatorName);
+    statusEl.textContent = '共 ' + cases.length + ' 条用例';
   } catch (err) {
-    contentEl.innerHTML = '<div class="empty-state">加载失败: ' + err.message + '</div>';
+    contentEl.innerHTML = '<div class="empty-state">加载失败: ' + escapeHtml(err.message) + '</div>';
+    statusEl.textContent = '';
   }
 }
 
-function _startTaskListPoll() {
-  _stopTaskListPoll();
-  _taskListPollTimer = setInterval(async () => {
-    // Stop polling if the tasks panel itself is not visible (user switched tab)
-    if (!document.getElementById('panelTasks').classList.contains('active')) {
-      _stopTaskListPoll();
-      return;
-    }
-    // Stop polling if the task list sub-view is not active (user navigated to detail/create)
-    if (!document.getElementById('taskListView').classList.contains('active')) {
-      _stopTaskListPoll();
-      return;
-    }
-    try {
-      const res = await fetch('/api/v1/tasks');
-      const data = await res.json();
-      const tasks = data.tasks || [];
-      const hasActive = tasks.some(t => t.status === 'running' || t.status === 'pending');
-      // Re-render the list
-      const contentEl = document.getElementById('taskListContent');
-      contentEl.innerHTML = tasks.map(t => {
-        const badgeCls = 'badge-' + t.status;
-        const progress = t.total_count > 0 ? `${t.completed_count}/${t.total_count}` : '-';
-        return `<div class="task-list-item" onclick="showTaskDetail(${t.id})">
-          <div>
-            <div class="task-list-name">${escapeHtml(t.name)}</div>
-            <div class="task-list-meta">${escapeHtml(t.created_at || '')} | ${progress} 完成</div>
-          </div>
-          <div class="task-list-status">
-            <span class="badge ${badgeCls}">${t.status}</span>
-            <span style="color:#888;font-size:.8rem">&gt;</span>
-          </div>
-        </div>`;
-      }).join('');
-      if (!hasActive) _stopTaskListPoll();
-    } catch (_) {}
-  }, 3000);
+function renderCaseList(cases, operatorName) {
+  if (!cases || cases.length === 0) {
+    return '<div class="empty-state">该算子暂无用例</div>';
+  }
+
+  // Header with download link
+  const downloadUrl = '/api/v1/cases/' + encodeURIComponent(operatorName) + '/download';
+  let html = '';
+  html += '<div class="case-actions">' +
+    '<a class="btn-link" href="' + downloadUrl + '" target="_blank">下载 ' + escapeHtml(operatorName) + '_cases.json</a>' +
+    '<span style="font-size:.8rem;color:#6b7280;align-self:center">文件路径: <code style="font-size:.75rem">cases/' + escapeHtml(operatorName) + '_cases.json</code></span>' +
+    '</div>';
+  html += '<div class="case-list">';
+  cases.forEach((c, idx) => {
+    html += renderCaseCard(c, idx);
+  });
+  html += '</div>';
+  return html;
 }
 
-function _stopTaskListPoll() {
-  if (_taskListPollTimer) { clearInterval(_taskListPollTimer); _taskListPollTimer = null; }
-}
+function renderCaseCard(c, idx) {
+  const inputs = c.inputs || [];
+  const required = inputs.filter(i => i.required).length;
+  const optional = inputs.length - required;
+  const tensors = inputs.filter(i => i.type === 'tensor').length;
+  const attrs = inputs.length - tensors;
 
-/* -- Task detail -- */
-async function loadTaskDetail(taskId) {
-  const headerEl = document.getElementById('taskDetailHeader');
-  const contentEl = document.getElementById('taskDetailContent');
-  const progressFill = document.getElementById('taskProgressFill');
+  const summary = '<div class="case-summary">' +
+    '<span class="pill pill-tensor">tensor: ' + tensors + '</span>' +
+    (attrs ? '<span class="pill pill-attrs">attrs: ' + attrs + '</span>' : '') +
+    '<span class="pill pill-required">必选: ' + required + '</span>' +
+    (optional ? '<span class="pill pill-optional">可选: ' + optional + '</span>' : '') +
+    '</div>';
 
-  try {
-    const res = await fetch('/api/v1/tasks/' + taskId);
-    const t = await res.json();
-
-    const badgeCls = 'badge-' + t.status;
-    const progress = t.total_count > 0 ? `${t.completed_count}/${t.total_count}` : '-';
-    headerEl.innerHTML = `
-      <div style="display:flex;align-items:center;gap:12px">
-        <h2 style="margin:0">${escapeHtml(t.name)}</h2>
-        <span class="badge ${badgeCls}">${t.status}</span>
-        <span style="font-size:.85rem;color:#6b7280">${progress}</span>
-      </div>`;
-
-    // Download button (only when there are completed items)
-    const actionsEl = document.getElementById('taskDetailActions');
-    let actionsHtml = '';
-
-    // Count stuck (running) and pending items
-    const items = t.items || [];
-    const stuckCount = items.filter(i => i.status === 'running').length;
-    const pendingCount = items.filter(i => i.status === 'pending').length;
-    const canResume = stuckCount > 0 || pendingCount > 0;
-
-    if (canResume) {
-      const resumeLabel = stuckCount > 0
-        ? `▶ 继续执行 (重置 ${stuckCount} 个卡住 + ${pendingCount} 个待处理)`
-        : `▶ 继续执行 (${pendingCount} 个待处理)`;
-      actionsHtml += `<button onclick="resumeTask(${t.id})">${resumeLabel}</button>`;
-    }
-    if (t.failed_count > 0 && (t.status === 'failed' || t.status === 'completed')) {
-      actionsHtml += `<button onclick="retryFailedTask(${t.id})">🔄 重试失败 (${t.failed_count})</button>`;
-    }
-    if (t.completed_count > 0) {
-      actionsHtml += `<button class="secondary" onclick="downloadTaskResults(${t.id}, '${escapeHtml(t.name)}')">⬇ 下载结果 (${t.completed_count})</button>`;
-    }
-    if (t.status !== 'running') {
-      actionsHtml += `<button class="danger" onclick="deleteTask(${t.id}, '${escapeHtml(t.name)}')">🗑 删除任务</button>`;
-    }
-    actionsEl.innerHTML = actionsHtml;
-
-    const pct = t.total_count > 0 ? Math.round((t.completed_count + t.failed_count) / t.total_count * 100) : 0;
-    progressFill.style.width = pct + '%';
-    progressFill.className = 'task-progress-fill' + (t.failed_count > 0 ? ' has-errors' : '');
-
-    if (items.length === 0) {
-      contentEl.innerHTML = '<div class="empty-state">无任务条目</div>';
-      return;
-    }
-
-    let html = '<table class="task-items-table"><thead><tr><th>#</th><th>算子名</th><th>状态</th><th>开始时间</th><th>完成时间</th><th>错误</th></tr></thead><tbody>';
-    items.forEach(item => {
-      const statusCls = 'ti-' + item.status;
-      const time = item.started_at && item.finished_at ? _formatDuration(item.started_at, item.finished_at) : (item.status === 'running' ? '...' : '');
-      html += `<tr>
-        <td>${item.seq}</td>
-        <td>${escapeHtml(item.operator_name)}</td>
-        <td><span class="${statusCls}">${item.status}</span></td>
-        <td style="font-size:.8rem;color:#888">${escapeHtml(item.started_at || '')}</td>
-        <td style="font-size:.8rem;color:#888">${escapeHtml(time)}</td>
-        <td style="font-size:.8rem;color:#991b1b;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(item.error || '')}">${escapeHtml(item.error || '')}</td>
-      </tr>`;
+  // Build inputs table
+  let inputsTable = '';
+  if (inputs.length > 0) {
+    inputsTable = '<table class="case-inputs-table"><thead><tr>' +
+      '<th>name</th><th>type</th><th>dtype</th><th>shape</th><th>range_values</th><th>required</th></tr>' +
+      '</thead><tbody>';
+    inputs.forEach(inp => {
+      const shapeStr = inp.shape ? '[' + inp.shape.join(', ') + ']' : '-';
+      const rv = inp.range_values;
+      const rvStr = Array.isArray(rv) ? '[' + rv.map(v => typeof v === 'number' ? v.toFixed(3) : v).join(', ') + ']' :
+                    (rv === null || rv === undefined ? '-' : String(rv));
+      inputsTable += '<tr>' +
+        '<td><strong>' + escapeHtml(inp.name) + '</strong></td>' +
+        '<td>' + escapeHtml(inp.type) + '</td>' +
+        '<td>' + escapeHtml(inp.dtype) + '</td>' +
+        '<td>' + escapeHtml(shapeStr) + '</td>' +
+        '<td>' + escapeHtml(rvStr) + '</td>' +
+        '<td>' + (inp.required ? '✓' : '—') + '</td>' +
+        '</tr>';
     });
-    html += '</tbody></table>';
-    contentEl.innerHTML = html;
-
-    // Stop polling if done
-    if (t.status === 'completed' || t.status === 'failed') {
-      _stopTaskDetailPoll();
-    }
-  } catch (err) {
-    headerEl.innerHTML = '<span class="badge badge-err">加载失败: ' + err.message + '</span>';
+    inputsTable += '</tbody></table>';
+  } else {
+    inputsTable = '<div style="color:#999;font-size:.85rem;padding:8px">无 inputs</div>';
   }
+
+  // Meta grid
+  const meta = '<div class="case-meta-grid">' +
+    '<div class="meta-item">name<strong>' + escapeHtml(c.name || '') + '</strong></div>' +
+    '<div class="meta-item">aclnn_name<strong>' + escapeHtml(c.aclnn_name || '') + '</strong></div>' +
+    '<div class="meta-item">api_type<strong>' + escapeHtml(c.api_type || '') + '</strong></div>' +
+    '<div class="meta-item">version<strong>' + escapeHtml(c.version || '') + '</strong></div>' +
+    '<div class="meta-item">api<strong>' + escapeHtml(c.api || '') + '</strong></div>' +
+    '<div class="meta-item">backward<strong>' + (c.backward ? 'true' : 'false') + '</strong></div>' +
+    '</div>';
+
+  const raw = '<pre class="case-raw">' + escapeHtml(JSON.stringify(c, null, 2)) + '</pre>';
+
+  return '<div class="case-card" id="case-card-' + idx + '">' +
+    '<div class="case-card-head" onclick="toggleCaseCard(' + idx + ')">' +
+    '<span class="case-id">id=' + (c.id != null ? c.id : idx) + '</span>' +
+    '<span class="case-name">' + escapeHtml(c.name || 'unnamed') + ' · ' + inputs.length + ' inputs</span>' +
+    summary +
+    '<span class="case-arrow">▶</span>' +
+    '</div>' +
+    '<div class="case-card-body">' +
+    meta +
+    '<div style="font-size:.85rem;font-weight:600;color:#4b5563;margin:10px 0 6px">Inputs</div>' +
+    inputsTable +
+    '<div style="font-size:.85rem;font-weight:600;color:#4b5563;margin:14px 0 4px">Raw JSON</div>' +
+    raw +
+    '</div>' +
+    '</div>';
 }
 
-function _startTaskDetailPoll(taskId) {
-  _stopTaskDetailPoll();
-  _taskDetailPollTimer = setInterval(() => {
-    if (!document.getElementById('taskDetailView').classList.contains('active')) {
-      _stopTaskDetailPoll();
-      return;
+function toggleCaseCard(idx) {
+  const card = document.getElementById('case-card-' + idx);
+  if (card) card.classList.toggle('open');
+}
+
+/* ---------- Execute (ExecuterAgent) ---------- */
+
+const EXEC_STEPS = ['generate_atk', 'cpu_derivation', 'run_atk'];
+const EXEC_STEP_DESCS = [
+  '调用 generator.py 生成可执行的 ATK 测试脚本',
+  '通过 LLM 推导 CPU Golden Reference 实现',
+  '连接执行机运行 ATK 测试并验证结果',
+];
+
+function resetExecPipeline() {
+  for (let i = 0; i < 3; i++) {
+    const el = document.getElementById('execStep' + i);
+    el.className = 'exec-step';
+    document.getElementById('execStepDesc' + i).textContent = EXEC_STEP_DESCS[i];
+    document.getElementById('execStepBadge' + i).innerHTML = '<span class="exec-badge exec-badge-pending">等待中</span>';
+  }
+  document.getElementById('execResultPanel').style.display = 'none';
+  document.getElementById('execCodeBody').classList.remove('open');
+  document.getElementById('execCodeToggle').classList.remove('open');
+}
+
+function setExecStepState(index, state, detail) {
+  const el = document.getElementById('execStep' + index);
+  const badgeEl = document.getElementById('execStepBadge' + index);
+  const descEl = document.getElementById('execStepDesc' + index);
+
+  if (index > 0) {
+    const prev = document.getElementById('execStep' + (index - 1));
+    if (prev.classList.contains('active')) {
+      prev.classList.remove('active');
+      prev.classList.add('done');
+      document.getElementById('execStepBadge' + (index - 1)).innerHTML = '<span class="exec-badge exec-badge-success">✓ 完成</span>';
     }
-    loadTaskDetail(taskId);
-  }, 2000);
+  }
+
+  el.className = 'exec-step ' + state;
+  if (detail) descEl.textContent = detail;
+
+  const badgeMap = {
+    active: '<span class="exec-badge exec-badge-running"><span class="exec-spinner"></span> 执行中</span>',
+    done: '<span class="exec-badge exec-badge-success">✓ 完成</span>',
+    error: '<span class="exec-badge exec-badge-failed">✗ 失败</span>',
+  };
+  badgeEl.innerHTML = badgeMap[state] || '';
 }
 
-function _stopTaskDetailPoll() {
-  if (_taskDetailPollTimer) { clearInterval(_taskDetailPollTimer); _taskDetailPollTimer = null; }
+function toggleExecCode() {
+  document.getElementById('execCodeBody').classList.toggle('open');
+  document.getElementById('execCodeToggle').classList.toggle('open');
 }
 
-/* -- Resume stuck task -- */
-async function resumeTask(taskId) {
+async function loadExecCaseOperators() {
   try {
-    const res = await fetch('/api/v1/tasks/' + taskId + '/resume', { method: 'POST' });
+    const res = await fetch('/api/v1/cases');
     const data = await res.json();
-    if (data.success) {
-      // Restart polling to show live progress
-      _startTaskDetailPoll(taskId);
-      loadTaskDetail(taskId);
-    } else {
-      alert('恢复失败: ' + (data.error || '未知错误'));
-    }
-  } catch (err) {
-    alert('恢复失败: ' + err.message);
-  }
+    const select = document.getElementById('execCaseLoader');
+    const current = select.value;
+    select.innerHTML = '<option value="">— 选择算子 —</option>';
+    const rows = data.operators || [];
+    rows.forEach(r => {
+      const opt = document.createElement('option');
+      opt.value = r.operator_name;
+      const stamp = r.last_created_at ? ' · ' + r.last_created_at : '';
+      opt.textContent = r.operator_name + ' (' + r.count + ' 条' + stamp + ')';
+      select.appendChild(opt);
+    });
+    select.value = current;
+  } catch (_) {}
 }
 
-/* -- Retry failed operators -- */
-async function retryFailedTask(taskId) {
+async function loadCasesForExecute() {
+  const select = document.getElementById('execCaseLoader');
+  const operatorName = select.value;
+  if (!operatorName) return;
+
+  document.getElementById('execOperatorName').value = operatorName;
+
   try {
-    const res = await fetch('/api/v1/tasks/' + taskId + '/retry-failed', { method: 'POST' });
+    const res = await fetch('/api/v1/cases/' + encodeURIComponent(operatorName));
     const data = await res.json();
-    if (data.success) {
-      // Navigate to the new retry task detail
-      loadTaskDetail(data.new_task_id);
-      _startTaskDetailPoll(data.new_task_id);
-      // Refresh task list to show the new task
-      loadTaskList();
-    } else {
-      alert('重试失败: ' + (data.error || '未知错误'));
+    if (data.found && data.cases) {
+      document.getElementById('execCasesJson').value = JSON.stringify(data.cases, null, 2);
     }
   } catch (err) {
-    alert('重试失败: ' + err.message);
+    document.getElementById('execStatus').textContent = '加载用例失败: ' + err.message;
   }
 }
 
-/* -- Delete task -- */
-async function deleteTask(taskId, taskName) {
-  if (!confirm(`确认删除任务 "${taskName}" 及其所有算子解析数据？\n\n此操作不可恢复。`)) {
+async function runExecute() {
+  const operatorName = document.getElementById('execOperatorName').value.trim();
+  const casesJson = document.getElementById('execCasesJson').value.trim();
+  const btn = document.getElementById('execBtn');
+  const statusEl = document.getElementById('execStatus');
+
+  if (!operatorName) {
+    statusEl.innerHTML = '<span class="badge badge-err">请输入算子名称</span>';
     return;
   }
-  try {
-    const res = await fetch('/api/v1/tasks/' + taskId, { method: 'DELETE' });
-    const data = await res.json();
-    if (data.success) {
-      // Go back to task list
-      showTaskSubView('taskListView');
-      loadTaskList();
-    } else {
-      alert('删除失败: ' + (data.error || '未知错误'));
-    }
-  } catch (err) {
-    alert('删除失败: ' + err.message);
+  if (!casesJson) {
+    statusEl.innerHTML = '<span class="badge badge-err">请输入 cases.json 数据</span>';
+    return;
   }
-}
 
-function _formatDuration(startStr, endStr) {
   try {
-    const start = new Date(startStr);
-    const end = new Date(endStr);
-    const sec = Math.round((end - start) / 1000);
-    if (sec < 60) return sec + 's';
-    const min = Math.floor(sec / 60);
-    const remSec = sec % 60;
-    return min + 'm ' + remSec + 's';
-  } catch (_) { return ''; }
-}
-
-/* -- Download results -- */
-function downloadTaskResults(taskId, taskName) {
-  const a = document.createElement('a');
-  a.href = '/api/v1/tasks/' + taskId + '/download';
-  a.download = (taskName || 'task-' + taskId) + '-results.zip';
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-}
-
-/* -- Top-level tabs (任务列表 / 执行概览) -- */
-function switchTaskTopTab(tab) {
-  document.querySelectorAll('.task-top-tab').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
-  const listWrap = document.getElementById('taskTopTabList');
-  const summaryWrap = document.getElementById('taskTopTabSummary');
-  if (tab === 'list') {
-    listWrap.style.display = 'flex';
-    summaryWrap.style.display = 'none';
-  } else {
-    listWrap.style.display = 'none';
-    summaryWrap.style.display = 'flex';
-    loadTasksSummary();
+    JSON.parse(casesJson);
+  } catch (e) {
+    statusEl.innerHTML = '<span class="badge badge-err">JSON 格式错误: ' + escapeHtml(e.message) + '</span>';
+    return;
   }
-}
 
-/* -- Summary view -- */
-async function loadTasksSummary() {
-  const totalsEl = document.getElementById('taskSummaryTotals');
-  const contentEl = document.getElementById('taskSummaryContent');
-  totalsEl.innerHTML = '<span style="color:#9ca3af;font-size:.85rem">加载中…</span>';
-  contentEl.innerHTML = '';
+  btn.disabled = true;
+  statusEl.innerHTML = '<span class="spinner"></span>正在提交 ' + escapeHtml(operatorName) + ' 执行任务...';
+
+  document.getElementById('execRightEmpty').style.display = 'none';
+  document.getElementById('execPipelineWrap').style.display = '';
+  resetExecPipeline();
+  setExecStepState(0, 'active', '正在生成 ATK 脚本...');
+
   try {
-    const res = await fetch('/api/v1/tasks-summary');
+    const res = await fetch('/api/v1/execute/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ operator_name: operatorName, cases_json: casesJson }),
+    });
     const data = await res.json();
-    const tot = data.totals || {};
-    totalsEl.innerHTML = `
-      <div class="summary-card"><div class="sc-val">${tot.task_count ?? 0}</div><div class="sc-label">任务总数</div></div>
-      <div class="summary-card"><div class="sc-val">${tot.total_count ?? 0}</div><div class="sc-label">算子总数</div></div>
-      <div class="summary-card sc-ok"><div class="sc-val">${tot.completed_count ?? 0}</div><div class="sc-label">成功</div></div>
-      <div class="summary-card sc-err"><div class="sc-val">${tot.failed_count ?? 0}</div><div class="sc-label">失败</div></div>
-      <div class="summary-card sc-rate"><div class="sc-val">${tot.success_rate ?? 0}%</div><div class="sc-label">成功率</div></div>`;
 
-    const tasks = data.tasks || [];
-    if (tasks.length === 0) {
-      contentEl.innerHTML = '<div class="empty-state">暂无任务数据</div>';
+    if (!data.success) {
+      setExecStepState(0, 'error', data.error || '请求失败');
+      statusEl.innerHTML = '<span class="badge badge-err">ERROR</span> ' + escapeHtml(data.error || '执行失败');
+      btn.disabled = false;
       return;
     }
-    let html = '<table class="task-items-table"><thead><tr><th>任务名称</th><th>状态</th><th>总数</th><th>成功</th><th>失败</th><th>成功率</th><th>创建时间</th><th></th></tr></thead><tbody>';
-    tasks.forEach(t => {
-      const statusCls = 'badge-' + t.status;
-      const rateColor = t.success_rate >= 90 ? '#059669' : t.success_rate >= 60 ? '#d97706' : '#dc2626';
-      html += `<tr>
-        <td><strong>${escapeHtml(t.name)}</strong></td>
-        <td><span class="badge ${statusCls}">${t.status}</span></td>
-        <td>${t.total_count}</td>
-        <td style="color:#059669;font-weight:600">${t.completed_count}</td>
-        <td style="color:${t.failed_count > 0 ? '#dc2626' : '#9ca3af'};font-weight:${t.failed_count > 0 ? 600 : 400}">${t.failed_count}</td>
-        <td style="color:${rateColor};font-weight:600">${t.success_rate}%</td>
-        <td style="font-size:.8rem;color:#888">${escapeHtml(t.created_at || '')}</td>
-        <td><span style="cursor:pointer;color:#4f46e5;font-size:.82rem" onclick="switchTaskTopTab('list');showTaskDetail(${t.id})">详情</span></td>
-      </tr>`;
-    });
-    html += '</tbody></table>';
-    contentEl.innerHTML = html;
+
+    statusEl.innerHTML = '<span class="spinner"></span>任务已提交 <code style="font-size:.78rem;color:#6b7280">' + escapeHtml(data.task_id) + '</code>';
+    pollExecuteStatus(data.task_id, operatorName);
   } catch (err) {
-    totalsEl.innerHTML = '<span class="badge badge-err">加载失败: ' + err.message + '</span>';
+    setExecStepState(0, 'error', err.message);
+    statusEl.innerHTML = '<span class="badge badge-err">ERROR</span> ' + escapeHtml(err.message);
+    btn.disabled = false;
   }
+}
+
+async function pollExecuteStatus(taskId, operatorName) {
+  const statusEl = document.getElementById('execStatus');
+  const btn = document.getElementById('execBtn');
+  let currentStep = 0;
+  let attempts = 0;
+  const maxAttempts = 120;
+
+  const nodeToStep = {
+    'exec_generate_atk': 0,
+    'exec_cpu_derivation': 1,
+    'exec_run_atk': 2,
+  };
+  const stepLabels = {
+    0: '正在生成 ATK 脚本...',
+    1: '正在推导 CPU 参考实现...',
+    2: '正在执行 ATK 测试...',
+  };
+
+  try {
+    const streamUrl = '/api/v1/runs/' + taskId + '/stream';
+    const response = await fetch(streamUrl);
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (attempts < maxAttempts) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        try {
+          const event = JSON.parse(line.slice(6));
+          const eventType = event.event_type;
+          const eventData = event.data || {};
+          const nodeId = eventData.node_id;
+
+          if (eventType === 'node.started' && nodeId in nodeToStep) {
+            const stepIdx = nodeToStep[nodeId];
+            if (stepIdx > currentStep) {
+              setExecStepState(currentStep, 'done', '完成');
+              currentStep = stepIdx;
+            }
+            setExecStepState(stepIdx, 'active', stepLabels[stepIdx]);
+          }
+
+          if (eventType === 'node.completed' && nodeId in nodeToStep) {
+            const stepIdx = nodeToStep[nodeId];
+            setExecStepState(stepIdx, 'done', eventData.message || '完成');
+          }
+
+          if (eventType === 'node.failed' && nodeId in nodeToStep) {
+            const stepIdx = nodeToStep[nodeId];
+            setExecStepState(stepIdx, 'error', eventData.error || '执行失败');
+          }
+
+          if (eventType === 'task.completed') {
+            for (let i = currentStep; i < EXEC_STEPS.length; i++) {
+              setExecStepState(i, 'done', '完成');
+            }
+            const result = eventData.result || {};
+            const execResult = result.exec_result || {};
+            showExecResult(result, execResult);
+            statusEl.innerHTML = '<span class="badge badge-ok">SUCCESS</span> ' +
+              (execResult.passed || 0) + '/' + (execResult.total || 0) + ' 用例通过';
+            btn.disabled = false;
+            return;
+          }
+
+          if (eventType === 'task.failed') {
+            setExecStepState(currentStep, 'error', eventData.error || '执行失败');
+            statusEl.innerHTML = '<span class="badge badge-err">ERROR</span> ' + escapeHtml(eventData.error || '执行失败');
+            btn.disabled = false;
+            return;
+          }
+        } catch (_) {}
+      }
+      attempts++;
+    }
+
+    statusEl.innerHTML = '<span class="badge badge-err">执行超时或连接断开</span>';
+    btn.disabled = false;
+  } catch (err) {
+    statusEl.innerHTML = '<span class="badge badge-err">连接失败: ' + escapeHtml(err.message) + '</span>';
+    btn.disabled = false;
+  }
+}
+
+function showExecResult(result, execResult) {
+  const panel = document.getElementById('execResultPanel');
+  panel.style.display = '';
+
+  const statusEl = document.getElementById('execResultStatus');
+  statusEl.innerHTML = result.status === 'completed'
+    ? '<span class="badge badge-ok">COMPLETED</span>'
+    : '<span class="badge badge-err">FAILED</span>';
+
+  document.getElementById('execMetricStatus').textContent = result.status === 'completed' ? '通过' : '失败';
+  document.getElementById('execMetricStatus').className = 'exec-metric-value ' + (result.status === 'completed' ? 'val-pass' : 'val-fail');
+  document.getElementById('execMetricPassed').textContent = execResult.passed || 0;
+  document.getElementById('execMetricFailed').textContent = execResult.failed || 0;
+  document.getElementById('execMetricTotal').textContent = execResult.total || 0;
+  document.getElementById('execResultBody').textContent = JSON.stringify(result, null, 2);
 }
 
 </script>

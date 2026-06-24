@@ -454,4 +454,27 @@ async def allowed_range_build_node(state: BuildParamConstraintState) -> dict[str
         extracted, len(params), len(bool_params), len(tensor_params),
         deterministic_count, len(llm_needed),
     )
+
+    # NODE_PROGRESS: range_done — frontend ExtractorAgent panel
+    from agent.runtime.context import get_context
+    from agent.runtime.events import EventType, Span, SpanType
+    ctx = get_context()
+    if ctx and ctx.manager:
+        span = Span(
+            span_id="progress",
+            parent_span_id=ctx.current_span_id if ctx else None,
+            span_type=SpanType.NODE,
+            name="build_param_constraint",
+        )
+        ctx.manager.emit(EventType.NODE_PROGRESS, ctx.run_id, span, {
+            "agent_id": "constraint",
+            "node_id": "build_param_constraint",
+            "message": f"取值范围提取完成: {extracted}/{len(params)} 个参数已提取",
+            "phase": "range_done",
+            "range_count": extracted,
+            "params_count": len(params),
+            "deterministic_count": deterministic_count,
+            "llm_count": len(llm_needed),
+        })
+
     return {"allowed_range_map": result}

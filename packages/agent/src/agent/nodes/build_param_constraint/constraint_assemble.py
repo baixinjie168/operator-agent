@@ -168,4 +168,155 @@ async def constraint_assemble_node(state: BuildParamConstraintState) -> dict[str
             result.get("updated", 0), len(updates), doc_id,
         )
 
-    return {"error": None}
+    # Build per-param validation_results for the frontend
+    # ExtractorAgent constraint detail panel (cs_constraint / cs_check_constraint).
+    #
+    # Frontend expected schema (cd-cst-check, _renderValidationResults with
+    # rowMeta = {titleField: "param_name", paramsField: "function_name",
+    # valueField: "parsed_dimensions", primaryLabel: "个参数"} and
+    # phaseConfigs = [
+    #   {name:"维度结构校验", field:"phase_dim_structure", kind:"dim_struct"},
+    #   {name:"维度对齐校验", field:"phase_dim_alignment", kind:"dim_align"},
+    #   {name:"取值范围结构校验", field:"phase_range_structure", kind:"range"},
+    # ]).
+    validation_results: list[dict] = []
+    for param in params:
+        pname = param.get("param_name", "")
+        fn_name = param.get("function_name", "")
+        map_key = f"{fn_name}::{pname}"
+        attr_key = f"{fn_name}::{pname}::"  # match any platform
+
+        # Find this param's assembled constraint.
+        assembled: dict | None = None
+        for u in updates:
+            if u["function_name"] == fn_name and u["param_name"] == pname:
+                try:
+                    assembled = json.loads(u["param_constraint"])
+                except (json.JSONDecodeError, TypeError):
+                    assembled = None
+                break
+
+        # Aggregate per-platform validation results.
+        dim_struct_failed: list[str] = []   # 维度结构校验失败平台
+        dim_align_failed: list[str] = []   # 维度对齐校验失败平台
+        range_struct_failed: list[str] = []  # 取值范围结构校验失败平台
+        parsed_dims_list: list = []        # valueField: parsed_dimensions
+        any_passed = False
+        has_validation = bool(supported_platforms) and assembled is not None
+
+        if assembled is not None:
+            for plat in supported_platforms:
+                plat_data = assembled.get(plat, {})
+                dims = plat_data.get("dimensions", {}).get("value", [])
+                ar_data = plat_data.get("allowed_range_value", {})
+                ar_value = ar_data.get("value", []) if isinstance(ar_data, dict) else ar_data or []
+                ar_type = ar_data.get("type", "range") if isinstance(ar_data, dict) else "range"
+                shape_raw = plat_data.get("dimensions", {}).get("src_text", "")
+
+                parsed_dims_list.append({
+                    "platform": plat,
+                    "shape": shape_raw,
+                    "dimensions": dims,
+                })
+
+                # 维度结构校验: dims 是否为合法格式（list of [min,max] 或 list of int）
+                if shape_raw and not dims:
+                    dim_struct_failed.append(plat)
+                elif dims:
+                    ok = all(
+                        (isinstance(d, list) and len(d) == 2
+                         and all(isinstance(x, (int, float)) for x in d))
+                        or isinstance(d, int)
+                        for d in dims
+                    )
+                    if ok:
+                        any_passed = True
+                    else:
+                        dim_struct_failed.append(plat)
+                else:
+                    # No shape at all — treat as skipped (not failed).
+                    pass
+
+                # 维度对齐校验: dims 元素必须为 2 的幂次或带 min/max 等价
+                # （仅作轻量校验：若 dims 中存在异常大的数则视为未对齐）
+                if dims:
+                    for d in dims:
+                        if isinstance(d, list) and len(d) == 2:
+                            lo, hi = d[0], d[1]
+                            if hi > 2**31:
+                                dim_align_failed.append(plat)
+                                break
+
+                # 取值范围结构校验: ar_value 必须为 list（enum 或 range）
+                if ar_value and not isinstance(ar_value, list):
+                    range_struct_failed.append(plat)
+                elif ar_type and ar_type not in ("range", "enum"):
+                    range_struct_failed.append(plat)
+
+        def _phase(status: str, error: str = "", reason: str = "") -> dict:
+            return {"status": status, "error": error, "reason": reason}
+
+        # Aggregate error/reason messages for each phase.
+        dim_struct_err = (
+            "; ".join(f"{p}: 无法解析 shape" for p in dim_struct_failed)
+            if dim_struct_failed else ""
+        )
+        dim_align_err = (
+            "; ".join(f"{p}: shape 维度值超出 2^31" for p in dim_align_failed)
+            if dim_align_failed else ""
+        )
+        range_err = (
+            "; ".join(f"{p}: allowed_range 结构非法" for p in range_struct_failed)
+            if range_struct_failed else ""
+        )
+
+        validation_results.append({
+            "function_name": fn_name,
+            "param_name": pname,
+            "platforms_count": len(supported_platforms),
+            "missing_platforms": [
+                plat for plat in supported_platforms
+                if assembled is None or not assembled.get(plat)
+            ],
+            "has_constraint": assembled is not None and bool(assembled),
+            "syntax_valid": bool(assembled) and not (
+                dim_struct_failed or dim_align_failed or range_struct_failed
+            ),
+            "validation_error": "",
+            "corrected": False,
+            "has_validation": has_validation and any_passed,
+            # valueField: 解析后的 dimensions
+            "parsed_dimensions": parsed_dims_list,
+            # 三段式校验（前端 phaseConfigs 期望的字段名）
+            "phase_dim_structure": _phase(
+                "failed" if dim_struct_failed else
+                ("passed" if any_passed else "skipped"),
+                error=dim_struct_err,
+            ),
+            "phase_dim_alignment": _phase(
+                "failed" if dim_align_failed else
+                ("passed" if any_passed else "skipped"),
+                error=dim_align_err,
+            ),
+            "phase_range_structure": _phase(
+                "failed" if range_struct_failed else
+                ("passed" if (assembled and any_passed) else "skipped"),
+                error=range_err,
+            ),
+        })
+
+    return {
+        "error": None,
+        "params_count": len(params),
+        "dimensions_count": sum(
+            len((dimensions_map.get(f"{p['function_name']}::{p['param_name']}::{p.get('shape','')}", []) or []))
+            for p in params
+        ),
+        "range_count": sum(
+            len((ar_map.get(f"{p['function_name']}::{p['param_name']}", {}).get("value", [])
+                 if isinstance(ar_map.get(f"{p['function_name']}::{p['param_name']}", {}), dict)
+                 else ar_map.get(f"{p['function_name']}::{p['param_name']}", []) or []))
+            for p in params
+        ),
+        "validation_results": validation_results,
+    }
