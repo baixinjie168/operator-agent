@@ -83,7 +83,7 @@ async def attrs_build_node(state: BuildParamConstraintState) -> dict[str, Any]:
                 else:
                     dtype_raw_set = dtype_by_platform.get(plat, {}).get(pname, [])
                     if not dtype_raw_set:
-                        dtype_raw_set = dtype_by_platform.get("通用", {}).get(pname, [])
+                        dtype_raw_set = dtype_by_platform.get("common", {}).get(pname, [])
                     dtypes = sorted(dtype_raw_set) if dtype_raw_set else []
             else:
                 dtypes = _split_csv(dtype_raw)

@@ -161,7 +161,13 @@ def _find_nearby_param_name(text: str, pos: int) -> str:
     if td_end < 0:
         return ""
     cell = re.sub(r"<[^>]+>", "", text[content_start:td_end]).strip()
-    return cell if cell.isidentifier() else ""
+    if cell.isidentifier():
+        return cell
+    # Cell may contain a type annotation in parentheses, e.g.
+    # "x（aclTensor*）" or "activation（char*）".  Extract the leading
+    # identifier before the opening parenthesis.
+    m = re.match(r"^([A-Za-z_]\w*)", cell)
+    return m.group(1) if m else ""
 
 
 # ---------------------------------------------------------------------------
@@ -180,11 +186,15 @@ def _identify_tensor_params(
     tensor_params: set[str] = set()
 
     for row_match in re.finditer(
-        r"<tr>\s*<td>(\w+)</td>(.*?)</tr>",
+        r"<tr>\s*<td>([^<]*)</td>(.*?)</tr>",
         sections_text,
         re.DOTALL,
     ):
-        param_name = row_match.group(1)
+        # Cell may contain a type annotation in parentheses, e.g.
+        # "x（aclTensor*）".  Extract the leading identifier.
+        raw_name = row_match.group(1).strip()
+        m = re.match(r"^([A-Za-z_]\w*)", raw_name)
+        param_name = m.group(1) if m else raw_name
         if param_name not in sig_params:
             continue
         row_content = row_match.group(2)

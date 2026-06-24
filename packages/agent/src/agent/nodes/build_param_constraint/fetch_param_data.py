@@ -54,7 +54,7 @@ async def fetch_param_data_node(state: BuildParamConstraintState) -> dict[str, A
         # dtype_by_platform: platform -> param_name -> list[str]
         dtype_by_platform: dict[str, dict[str, set[str]]] = {}
         for combo in dtype_combos:
-            plat = combo.get("platform", "通用")
+            plat = combo.get("platform", "common")
             dtype_by_platform.setdefault(plat, {})
             for pname, dtype_val in combo.get("combo", {}).items():
                 dtype_by_platform[plat].setdefault(pname, set())

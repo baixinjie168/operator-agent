@@ -29,7 +29,27 @@ class Database:
 
     def connect(self) -> None:
         self._conn = sqlite3.connect(str(self._db_path))
-        self._conn.execute("PRAGMA journal_mode=WAL")
+        # WAL mode requires mmap-backed shared memory which can fail with
+        # "disk I/O error" on WSL /mnt/<drive> (DrvFs/9P) mounts.  Fall back
+        # to the rollback journal (DELETE) so the server still starts.
+        try:
+            self._conn.execute("PRAGMA journal_mode=WAL")
+        except sqlite3.OperationalError:
+            # Retry once after removing potentially stale WAL/SHM sidecars
+            self._conn.close()
+            for suffix in ("-wal", "-shm"):
+                sidecar = self._db_path.with_suffix(self._db_path.suffix + suffix)
+                if sidecar.exists():
+                    try:
+                        sidecar.unlink()
+                    except OSError:
+                        pass
+            self._conn = sqlite3.connect(str(self._db_path))
+            try:
+                self._conn.execute("PRAGMA journal_mode=WAL")
+            except sqlite3.OperationalError:
+                # Last resort: disable WAL entirely
+                self._conn.execute("PRAGMA journal_mode=DELETE")
         self._conn.execute("PRAGMA foreign_keys=ON")
         self._conn.executescript(_load_schema())
         # 迁移：v2 — 新增 is_optional 列
@@ -168,7 +188,7 @@ class Database:
                     id              INTEGER PRIMARY KEY AUTOINCREMENT,
                     doc_id          INTEGER NOT NULL REFERENCES document_versions(id),
                     function_name   TEXT NOT NULL DEFAULT '',
-                    platform        TEXT NOT NULL DEFAULT '通用',
+                    platform        TEXT NOT NULL DEFAULT 'common',
                     combo           TEXT NOT NULL DEFAULT '{}',
                     created_at      TEXT DEFAULT (datetime('now'))
                 );

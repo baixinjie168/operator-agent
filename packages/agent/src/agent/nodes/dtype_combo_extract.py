@@ -42,7 +42,7 @@ PLATFORM_NAMES = [
     "Atlas A3 训练系列产品/Atlas A3 推理系列产品",
     "Atlas 200I/500 A2 推理产品",
     "Atlas 350 加速卡",
-    "通用",
+    "common",
 ]
 
 
@@ -66,18 +66,18 @@ def _build_platform_context(supported_platforms: list[str]) -> str:
     return (
         "适用平台（本算子实际支持的产品列表）：\n"
         f"{platform_list}\n"
-        "对于未明确标注平台的约束，platform 字段必须使用上述列表中的名称，不要设为\"通用\"。\n\n"
+        "对于未明确标注平台的约束，platform 字段必须使用上述列表中的名称，不要设为\"common\"。\n\n"
     )
 
 
 def _expand_generic_platform(
     combos: list[dict], supported_platforms: list[str]
 ) -> list[dict]:
-    """Expand combos with platform='通用' into one record per supported platform.
+    """Expand combos with platform='common' into one record per supported platform.
 
-    Post-processing safety net: if the LLM still returns '通用' after being
+    Post-processing safety net: if the LLM still returns 'common' after being
     given the platform context, replace it with the actual supported platforms
-    so that downstream code never sees '通用' as a key when specific platforms
+    so that downstream code never sees 'common' as a key when specific platforms
     are known.
     """
     if not supported_platforms:
@@ -85,7 +85,7 @@ def _expand_generic_platform(
 
     expanded: list[dict] = []
     for combo in combos:
-        if combo.get("platform") == "通用":
+        if combo.get("platform") == "common":
             for platform in supported_platforms:
                 new_combo = dict(combo)
                 new_combo["platform"] = platform
@@ -155,7 +155,7 @@ async def dtype_combo_extract_node(state: PipelineState) -> dict[str, Any]:
                 supported_platforms, platform_context,
             )
 
-        # Post-process: expand "通用" into actual supported platforms
+        # Post-process: expand "common" into actual supported platforms
         combos = _expand_generic_platform(combos, supported_platforms)
 
         if not combos:
@@ -221,7 +221,7 @@ async def _extract_from_table(
 
     combos: list[dict] = []
     for platform_block in parsed:
-        platform = platform_block.get("platform", "通用")
+        platform = platform_block.get("platform", "common")
         platform = _normalize_platform(platform)
         rows = platform_block.get("rows", [])
 
@@ -280,87 +280,6 @@ def _expand_multi_values(row: dict) -> list[dict]:
     return results
 
 
-def _generate_combos_from_constraints(
-    constraints: list[dict],
-    dtype_desc_map: dict[str, set[str]],
-    function_name: str,
-) -> list[dict]:
-    """Generate combo dicts from extracted text constraints with coupling detection."""
-    positive: dict[str, list[str]] = {}
-    negative: dict[str, list[str]] = {}
-
-    for c in constraints:
-        pn = c.get("param_name", "")
-        mode = c.get("mode", "")
-        dtypes = [d.upper() for d in c.get("dtypes", []) if d.upper() in DTYPE_WHITELIST]
-
-        if mode == "positive":
-            positive[pn] = dtypes
-        elif mode == "negative":
-            negative[pn] = dtypes
-
-    all_params = set(positive.keys()) | set(negative.keys())
-    resolved: dict[str, list[str]] = {}
-
-    for pn in all_params:
-        if pn in positive:
-            resolved[pn] = positive[pn]
-        elif pn in negative:
-            full_set = dtype_desc_map.get(pn, set())
-            if not full_set:
-                logger.warning(
-                    "dtype_combo_extract: no dtype_desc for %s.%s, skipping negative constraint",
-                    function_name, pn,
-                )
-                continue
-            resolved[pn] = sorted(full_set - set(negative[pn]))
-
-    if not resolved:
-        return []
-
-    # Coupling detection: group params with identical dtype lists
-    groups: list[tuple[list[str], list[str]]] = []
-    seen: set[str] = set()
-    for pn, dtypes in resolved.items():
-        if pn in seen:
-            continue
-        coupled = [p for p, d in resolved.items() if d == dtypes and p not in seen]
-        for p in coupled:
-            seen.add(p)
-        groups.append((coupled, dtypes))
-
-    # Each coupling group varies together
-    group_options: list[list[dict]] = []
-    for coupled_params, dtypes in groups:
-        options: list[dict] = []
-        for dt in dtypes:
-            option = {pn: dt for pn in coupled_params}
-            options.append(option)
-        group_options.append(options)
-
-    total = 1
-    for opts in group_options:
-        total *= len(opts)
-    if total > _MAX_COMBOS_PER_PLATFORM:
-        logger.warning(
-            "dtype_combo_extract: coupling expansion too large (%d), truncating",
-            total,
-        )
-        combo: dict[str, str] = {}
-        for opts in group_options:
-            combo.update(opts[0])
-        return [combo]
-
-    results: list[dict] = []
-    for combo_tuple in itertools.product(*group_options):
-        merged: dict[str, str] = {}
-        for opt in combo_tuple:
-            merged.update(opt)
-        results.append(merged)
-
-    return results
-
-
 async def _extract_from_text(
     llm: ChatOpenAI,
     params: list[dict],
@@ -369,7 +288,14 @@ async def _extract_from_text(
     supported_platforms: list[str],
     platform_context: str,
 ) -> list[dict]:
-    """Extract combos from text-based dtype constraints (Source B)."""
+    """Extract combos from text-based dtype constraints (Source B).
+
+    The LLM is asked to output complete scenario-based combinations
+    (preserving intra-scenario dtype coupling), using the same
+    ``{platform, rows}`` structure as the table path (Source A). This avoids the
+    over-generalized Cartesian product of per-param dtype lists, which mixes
+    dtypes across mutually-exclusive scenarios (e.g. quant vs pseudo-quant).
+    """
     prompt = DTYPE_CONSTRAINT_TEXT_PROMPT.format(
         params_text=params_text,
         constraints_text=constraints_content,
@@ -378,30 +304,23 @@ async def _extract_from_text(
     response = await llm.ainvoke(prompt)
     raw_text = response.content if hasattr(response, "content") else str(response)
 
-    constraints = _parse_json_array(raw_text)
-    if not constraints:
+    parsed = _parse_json_array(raw_text)
+    if not parsed:
         return []
 
-    dtype_desc_map = _build_dtype_desc_map(params)
-
-    # Group constraints by (function_name, platform)
-    grouped: dict[tuple[str, str], list[dict]] = {}
-    for c in constraints:
-        param_name = c.get("param_name", "")
-        platform = _normalize_platform(c.get("platform", "通用"))
-        fn = _find_function_for_param(param_name, params)
-        key = (fn, platform)
-        grouped.setdefault(key, []).append(c)
-
     combos: list[dict] = []
-    for (fn, platform), group in grouped.items():
-        generated = _generate_combos_from_constraints(group, dtype_desc_map, fn)
-        for combo in generated:
-            combos.append({
-                "function_name": fn,
-                "platform": platform,
-                "combo": combo,
-            })
+    for platform_block in parsed:
+        platform = _normalize_platform(platform_block.get("platform", "common"))
+        rows = platform_block.get("rows", [])
+        for row in rows:
+            expanded = _expand_multi_values(row)
+            for combo in expanded:
+                fn = _infer_function_name(combo, params)
+                combos.append({
+                    "function_name": fn,
+                    "platform": platform,
+                    "combo": combo,
+                })
 
     return combos
 
@@ -414,7 +333,7 @@ def _normalize_platform(platform: str) -> str:
     p = platform.strip()
     p = re.sub(r"<[^>]+>", "", p).strip()
     if not p:
-        return "通用"
+        return "common"
     for name in PLATFORM_NAMES:
         if name == p or name in p or p in name:
             return name
@@ -446,32 +365,6 @@ def _parse_json_array(text: str) -> list[dict]:
 
     logger.warning("dtype_combo_extract: failed to parse LLM response: %s", text[:200])
     return []
-
-
-def _build_dtype_desc_map(params: list[dict]) -> dict[str, set[str]]:
-    """Build param_name -> set of dtype values from dtype_desc field."""
-    result: dict[str, set[str]] = {}
-    for p in params:
-        pn = p.get("param_name", "")
-        dd = p.get("dtype_desc", "") or ""
-        if not dd:
-            continue
-        dtypes = set()
-        for part in re.split(r"[、，,/]", dd):
-            part = part.strip().upper()
-            if part in DTYPE_WHITELIST:
-                dtypes.add(part)
-        if dtypes:
-            result[pn] = dtypes
-    return result
-
-
-def _find_function_for_param(param_name: str, params: list[dict]) -> str:
-    """Find the function_name for a given param_name."""
-    for p in params:
-        if p.get("param_name") == param_name:
-            return p.get("function_name", "")
-    return ""
 
 
 def _infer_function_name(combo: dict, params: list[dict]) -> str:

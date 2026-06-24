@@ -138,7 +138,7 @@ def save_dtype_combinations(doc_id: int, combos: list[dict]) -> dict:
             (
                 doc_id,
                 record.get("function_name", ""),
-                record.get("platform", "通用"),
+                record.get("platform", "common"),
                 combo_json,
             ),
         )

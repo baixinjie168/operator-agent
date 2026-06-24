@@ -318,7 +318,7 @@ def _build_implicit_param_constraint(info: dict) -> dict:
                 "src_text": "",
             },
         }
-        return {"通用": constraint}
+        return {"common": constraint}
 
     tensor_ref = ""
     if info.get("tensor_param") and info.get("dim_index") is not None:
@@ -336,7 +336,7 @@ def _build_implicit_param_constraint(info: dict) -> dict:
         "dtype": {"value": [], "src_text": ""},
         "allowed_range_value": {"value": [], "type": "range", "src_text": ""},
     }
-    return {"通用": constraint}
+    return {"common": constraint}
 
 
 def _build_inputs_outputs(
@@ -554,7 +554,7 @@ def _build_dtype_support(dtype_combos: list[dict]) -> dict[str, list[dict]]:
     """Build dtype_support_description: {platform: [combo]}."""
     grouped: dict[str, list[dict]] = {}
     for dc in dtype_combos:
-        plat = dc.get("platform", "通用")
+        plat = dc.get("platform", "common")
         combo = dc.get("combo", {})
         if combo:
             grouped.setdefault(plat, []).append(combo)
