@@ -1,6 +1,6 @@
 """ExtractExe node: LLM-based description extraction for Execute parameters.
 
-Reuses ``_extract_one`` and ``_create_llm`` from ``extract_ws.py`` so the two
+Reuses ``_extract_one`` from ``extract_ws.py`` so the two
 branches share identical extraction logic.
 """
 
@@ -11,12 +11,11 @@ import logging
 from typing import Any
 
 from agent.nodes.context_utils import _is_ws_function
-from agent.nodes.llm_description_extract.extract_ws import _create_llm, _extract_one
+from agent.nodes.llm_description_extract.extract_ws import _extract_one
 from agent.nodes.llm_description_extract.state import DescriptionExtractState
+from agent.utils.llm_common import CONCURRENCY_LIMIT, create_llm
 
 logger = logging.getLogger(__name__)
-
-_CONCURRENCY_LIMIT = 5
 
 
 async def extract_exe_node(state: DescriptionExtractState) -> dict[str, Any]:
@@ -35,8 +34,8 @@ async def extract_exe_node(state: DescriptionExtractState) -> dict[str, Any]:
         return {"exe_results": [], "error": None}
 
     try:
-        llm = _create_llm()
-        sem = asyncio.Semaphore(_CONCURRENCY_LIMIT)
+        llm = create_llm()
+        sem = asyncio.Semaphore(CONCURRENCY_LIMIT)
 
         async def _task(p: dict) -> dict | None:
             async with sem:

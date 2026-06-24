@@ -13,16 +13,12 @@ from typing import Any
 
 from langchain_openai import ChatOpenAI
 
-from agent.core.config import settings
 from agent.nodes.context_utils import _is_ws_function, extract_param_context
 from agent.nodes.llm_description_extract.state import DescriptionExtractState
 from agent.prompts import LLM_DESCRIPTION_EXTRACT_PROMPT
+from agent.utils.llm_common import CONCURRENCY_LIMIT, JSON_BLOCK_RE, create_llm
 
 logger = logging.getLogger(__name__)
-
-_CONCURRENCY_LIMIT = 5
-
-_JSON_BLOCK_RE = re.compile(r"```(?:json)?\s*([\s\S]*?)```", re.IGNORECASE)
 
 _INPUT_KEYWORDS = ("输入", "入参", "input", "计算输入")
 _OUTPUT_KEYWORDS = ("输出", "出参", "output", "计算输出")
@@ -31,14 +27,6 @@ _OUTPUT_KEYWORDS = ("输出", "出参", "output", "计算输出")
 # ---------------------------------------------------------------------------
 # Helpers (shared with extract_exe)
 # ---------------------------------------------------------------------------
-
-def _create_llm() -> ChatOpenAI:
-    return ChatOpenAI(
-        api_key=settings.active_api_key,
-        base_url=settings.active_base_url,
-        model=settings.active_model,
-        temperature=0.1,
-    )
 
 
 def _parse_direction(raw: str) -> str:
@@ -66,7 +54,7 @@ def _build_discontinuous_json(raw_val: Any, param_type: str) -> str:
 
 def _parse_llm_response(text: str) -> dict | None:
     """Parse an LLM JSON response, tolerating code fences and surrounding text."""
-    match = _JSON_BLOCK_RE.search(text)
+    match = JSON_BLOCK_RE.search(text)
     if match:
         text = match.group(1)
     text = text.strip()
@@ -187,8 +175,8 @@ async def extract_ws_node(state: DescriptionExtractState) -> dict[str, Any]:
         return {"ws_results": [], "error": None}
 
     try:
-        llm = _create_llm()
-        sem = asyncio.Semaphore(_CONCURRENCY_LIMIT)
+        llm = create_llm()
+        sem = asyncio.Semaphore(CONCURRENCY_LIMIT)
 
         async def _task(p: dict) -> dict | None:
             async with sem:

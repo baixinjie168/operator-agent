@@ -7,7 +7,9 @@ attributes that are present in the original context.
 
 from __future__ import annotations
 
+import json
 import logging
+import re as _re
 from typing import Any
 
 from agent.nodes.llm_description_extract.state import DescriptionExtractState
@@ -27,8 +29,6 @@ def _section_filled(desc: str, header: str) -> bool:
     descriptions (which never contain ``# `` headers), returns False so
     that the caller can fall back to keyword-based checks.
     """
-    import re as _re
-
     pattern = _re.compile(
         r"^#\s+" + _re.escape(header) + r"\s*\n(.*?)(?=^#|\Z)",
         _re.MULTILINE | _re.DOTALL,
@@ -40,6 +40,26 @@ def _section_filled(desc: str, header: str) -> bool:
     return bool(body) and body != "无"
 
 
+def _has_json_dtype(result: dict) -> bool:
+    """Check if dtype_desc field contains JSON values.
+
+    When a parameter's dtype is entirely platform-specific (e.g. all values
+    tagged with <term>PLATFORM</term>), the LLM correctly omits it from
+    llm_description. But the dtype IS captured by table_column_extract
+    in the dtype_desc JSON field. This check prevents false-positive warnings.
+    """
+    try:
+        dtype_raw = result.get("dtype_desc", "") or ""
+        if not dtype_raw:
+            return False
+        parsed = json.loads(dtype_raw) if isinstance(dtype_raw, str) else dtype_raw
+        if isinstance(parsed, dict):
+            return any(v for v in parsed.values() if isinstance(v, str) and v.strip())
+    except (json.JSONDecodeError, TypeError):
+        pass
+    return False
+
+
 ATTR_CHECKLIST: list[tuple[str, Any]] = [
     ("direction", lambda r: r.get("direction") in ("input", "output")),
     (
@@ -48,7 +68,8 @@ ATTR_CHECKLIST: list[tuple[str, Any]] = [
         or any(
             k in r.get("llm_description", "").lower()
             for k in ["float", "int", "bool", "dtype", "type"]
-        ),
+        )
+        or _has_json_dtype(r),
     ),
     (
         "shape",
@@ -68,7 +89,11 @@ ATTR_CHECKLIST: list[tuple[str, Any]] = [
     ),
     (
         "discontinuous",
-        lambda r: "tensor" in r.get("param_type", "").lower()
+        # Only check for aclTensor parameters — non-tensor params (int64_t,
+        # bool, const char*, etc.) legitimately have null discontinuous.
+        # Using "acltensor" instead of "tensor" avoids false positives on
+        # types like "int64_t" that don't contain "tensor".
+        lambda r: "acltensor" in r.get("param_type", "").lower()
         and r.get("is_support_discontinuous") is not None,
     ),
 ]

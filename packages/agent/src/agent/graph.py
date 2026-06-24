@@ -21,13 +21,16 @@ Prerequisites are checked automatically:
   - EXECUTE without GENERATE: exec_generate_atk requires cases_path in
     state; returns error if not set.
 
-EXTRACT stage flow (updated from main branch):
+EXTRACT stage flow (main branch architecture):
     InitDoc -> [ProductSupport || FunctionSignatureExtract || FunctionExplanationExtract]
-           -> TableColumnExtract -> ImplicitParamExtract
+           -> TableColumnExtract
            -> LlmDescriptionExtract (subgraph)
            -> [detail extractors in parallel]
+                (param_relation_extract is a subgraph: implicit_param_extract
+                 + extract_ws + extract_exe + parameter_representation_build
+                 + merge_relations + save_relations)
            -> BuildParamRelations -> BuildSingleParamConstraint
-           -> BuildParamConstraint -> AssembleResult -> END
+           -> BuildParamConstraint (subgraph) -> AssembleResult -> END
 
 Note: FunctionSignatureExtract also produces the flat parameters list
 (replaces the old parse_params node).
@@ -41,11 +44,13 @@ from enum import Enum
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
-# -- Extract stage nodes (from main branch new architecture) --
+# -- Extract stage nodes (using main branch new architecture) --
 from agent.nodes.allowed_range_extract import allowed_range_extract_node as _allowed_range_extract
 from agent.nodes.array_length_extract import array_length_extract_node as _array_length_extract
 from agent.nodes.assemble_result import assemble_result_node as _assemble_result
-from agent.nodes.build_param_constraint import build_param_constraint_node as _build_param_constraint
+from agent.nodes.build_param_constraint import (
+    create_build_param_constraint_subgraph,
+)
 from agent.nodes.build_param_relations import build_param_relations_node as _build_param_relations
 from agent.nodes.determinism_extract import determinism_extract_node as _determinism_extract
 from agent.nodes.dformat_extract import dformat_extract_node as _dformat_extract
@@ -55,7 +60,6 @@ from agent.nodes.function_explanation_extract import (
     function_explanation_extract_node as _function_explanation_extract,
 )
 from agent.nodes.function_signature_extract import function_signature_extract_node as _function_signature_extract
-from agent.nodes.implicit_param_extract import implicit_param_extract_node as _implicit_param_extract
 from agent.nodes.init_doc import init_doc_node as _init_doc
 from agent.nodes.llm_description_extract import create_description_extract_subgraph
 from agent.nodes.optional_extract import optional_extract_node as _optional_extract
@@ -159,13 +163,27 @@ _DETAIL_EXTRACTORS = [
 # -------------------------------------------------------------------
 
 def _build_extract(graph: StateGraph, *, is_first: bool, is_last: bool) -> None:
-    """Build the EXTRACT stage using main new architecture."""
+    """Build the EXTRACT stage using main new architecture.
+
+    The stage flow:
+    InitDoc → [ProductSupport ∥ FunctionSignatureExtract
+               ∥ FunctionExplanationExtract] → TableColumnExtract
+           → LlmDescriptionExtract (subgraph)
+           → [ShapeExtract ∥ DtypeExtract ∥ DFormatExtract ∥ OptionalExtract
+              ∥ ArrayLengthExtract ∥ AllowedRangeExtract
+              ∥ ReturnCodeExtract ∥ DeterminismExtract ∥ DtypeComboExtract
+              ∥ ParamRelationExtract (subgraph: implicit_param_extract
+                 + extract_ws + extract_exe + parameter_representation_build
+                 + merge_relations + save_relations)]
+           → BuildParamRelations → BuildSingleParamConstraint
+           → BuildParamConstraint (subgraph)
+           → AssembleResult → END
+    """
     graph.add_node("init_doc", traced_node("init_doc")(_init_doc))
     graph.add_node("product_support", traced_node("product_support")(_product_support))
     graph.add_node("function_signature_extract", traced_node("function_signature_extract")(_function_signature_extract))
     graph.add_node("function_explanation_extract", traced_node("function_explanation_extract")(_function_explanation_extract))
     graph.add_node("table_column_extract", traced_node("table_column_extract")(_table_column_extract))
-    graph.add_node("implicit_param_extract", traced_node("implicit_param_extract")(_implicit_param_extract))
     graph.add_node("llm_description_extract", create_description_extract_subgraph())
     graph.add_node("shape_extract", traced_node("shape_extract")(_shape_extract))
     graph.add_node("dtype_extract", traced_node("dtype_extract")(_dtype_extract))
@@ -179,7 +197,8 @@ def _build_extract(graph: StateGraph, *, is_first: bool, is_last: bool) -> None:
     graph.add_node("param_relation_extract", create_param_relation_subgraph())
     graph.add_node("build_param_relations", traced_node("build_param_relations")(_build_param_relations))
     graph.add_node("build_single_param_constraint", traced_node("build_single_param_constraint")(_build_single_param_constraint))
-    graph.add_node("build_param_constraint", traced_node("build_param_constraint")(_build_param_constraint))
+    bpc_subgraph = create_build_param_constraint_subgraph()
+    graph.add_node("build_param_constraint", bpc_subgraph)
     graph.add_node("assemble_result", traced_node("assemble_result")(_assemble_result))
 
     if is_first:
@@ -189,17 +208,19 @@ def _build_extract(graph: StateGraph, *, is_first: bool, is_last: bool) -> None:
     graph.add_edge("product_support", "table_column_extract")
     graph.add_edge("function_signature_extract", "table_column_extract")
     graph.add_edge("function_explanation_extract", "table_column_extract")
-    graph.add_edge("table_column_extract", "implicit_param_extract")
-    graph.add_edge("implicit_param_extract", "llm_description_extract")
+    graph.add_edge("table_column_extract", "llm_description_extract")
 
+    # Fan out: detail extractors run in parallel after llm_description_extract
     for n in _DETAIL_EXTRACTORS:
         graph.add_edge("llm_description_extract", n)
 
+    # Converge: param_relation_extract goes to build_param_relations,
+    # others go to build_single_param_constraint
     for n in _DETAIL_EXTRACTORS:
         if n == "param_relation_extract":
             graph.add_edge(n, "build_param_relations")
         else:
-            graph.add_edge(n, "build_param_constraint")
+            graph.add_edge(n, "build_single_param_constraint")
 
     graph.add_edge("build_param_relations", "build_single_param_constraint")
     graph.add_edge("build_single_param_constraint", "build_param_constraint")

@@ -4,9 +4,12 @@ from __future__ import annotations
 
 from agent.nodes.function_signature_extract import (
     _normalize_param_types,
-    _parse_json_response,
     _signatures_to_parameters,
 )
+from agent.utils.llm_common import parse_json_response as _raw_parse
+
+def _parse_json_response(text):
+    return _raw_parse(text, list) or []
 
 
 class TestParseJsonResponse:

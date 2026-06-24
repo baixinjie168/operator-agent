@@ -3,7 +3,6 @@
 Provides zero-LLM-cost pre-filtering tools:
 - extract_param_context: slice section text to relevant parameter context
 - parse_param_table: parse Markdown/HTML tables into structured rows
-- _is_ws_function: detect GetWorkspaceSize function names
 
 Used by llm_description_extract, allowed_range_extract, and other per-param nodes.
 """
@@ -12,6 +11,8 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+
+from agent.utils.param_validators import is_ws_function as _is_ws_function  # noqa: F401 re-export
 
 
 # ---------------------------------------------------------------------------
@@ -27,7 +28,9 @@ def extract_param_context(sections_text: str, param_name: str) -> str:
     3. Keep ±2 adjacent lines for semantic coherence
     4. Always preserve Markdown table headers (first ``|`` row + separator)
     5. v2: Expand to full <tr>...</tr> for HTML table rows
-    6. Join the selected lines; fall back to full text if result is too short
+    6. v3: Resolve cross-parameter references ("与xxx一致" / "与`xxx`一致")
+       by including the referenced parameter's table row
+    7. Join the selected lines; fall back to full text if result is too short
     """
     lines = sections_text.split("\n")
     relevant: set[int] = set()
@@ -68,6 +71,24 @@ def extract_param_context(sections_text: str, param_name: str) -> str:
         elif not is_table_row:
             table_started = False
 
+    # Phase 2.1: preserve HTML <thead> rows so the LLM can see column
+    # headers (e.g. "数据格式", "数据类型") and map them to <td> values.
+    in_thead = False
+    for i, line in enumerate(lines):
+        lower = line.lower()
+        if "<thead" in lower:
+            in_thead = True
+        if in_thead:
+            relevant.add(i)
+        if "</thead" in lower:
+            in_thead = False
+
+    # Phase 2.5 (v3): resolve cross-parameter references
+    # When a parameter's row contains "与xxx一致" / "与`xxx`一致" /
+    # "和xxx相同" etc., include the referenced parameter's row so the
+    # LLM can resolve the actual value.
+    _resolve_cross_references(lines, relevant, html_table_rows, param_name)
+
     # Phase 3: no match found → return full text
     if not relevant:
         return sections_text
@@ -78,6 +99,55 @@ def extract_param_context(sections_text: str, param_name: str) -> str:
     if len(result) < 100:
         return sections_text
     return result
+
+
+# Regex: matches "与xxx一致", "与`xxx`一致", "和xxx相同", "与"xxx"一致" etc.
+# Note: non-raw string so “ / ” (Chinese curly quotes) are interpreted.
+# Use [a-zA-Z0-9_]* instead of \w* to avoid matching Chinese characters.
+_CROSS_REF_RE = re.compile(
+    '[与和同跟]\\s*["“”"‘’\'`]?'
+    '\\s*([a-zA-Z_][a-zA-Z0-9_]*)\\s*'
+    '["“”"‘’\'`]?'
+    '\\s*(?:一致|相同|一样|同)',
+    re.UNICODE,
+)
+
+
+def _resolve_cross_references(
+    lines: list[str],
+    relevant: set[int],
+    html_table_rows: list[tuple[int, int]],
+    param_name: str,
+) -> None:
+    """When *param_name*'s table row contains cross-parameter references
+    (e.g. "与self一致"), add the referenced parameter's row to *relevant*.
+
+    Modifies *relevant* in place.  Only resolves one level deep to avoid
+    combinatorial blow-up.
+    """
+    # Collect text from already-selected lines
+    selected_text = "\n".join(lines[i] for i in sorted(relevant))
+
+    # Find referenced parameter names
+    refs = set(_CROSS_REF_RE.findall(selected_text))
+    refs.discard(param_name)  # don't recurse into self
+
+    if not refs:
+        return
+
+    # For each referenced param, find its table row and add to relevant
+    for ref_name in refs:
+        # HTML table rows
+        for tr_start, tr_end in html_table_rows:
+            row_text = "\n".join(lines[tr_start:tr_end + 1])
+            if _param_matches(row_text, ref_name):
+                for j in range(tr_start, tr_end + 1):
+                    relevant.add(j)
+
+        # Markdown table rows (lines starting with |)
+        for i, line in enumerate(lines):
+            if line.startswith("|") and _param_matches(line, ref_name):
+                relevant.add(i)
 
 
 def _param_matches(line: str, param_name: str) -> bool:
@@ -150,6 +220,4 @@ def format_param_context(row: ParamRow, extra_paragraphs: list[str]) -> str:
 # Function-type helpers
 # ---------------------------------------------------------------------------
 
-def _is_ws_function(function_name: str) -> bool:
-    """Return True if *function_name* is a GetWorkspaceSize variant."""
-    return "GetWorkspaceSize" in function_name
+# _is_ws_function is re-exported from agent.utils.param_validators above

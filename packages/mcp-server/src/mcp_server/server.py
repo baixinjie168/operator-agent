@@ -72,6 +72,36 @@ from mcp_server.tools.document_tools import (
     save_constraints_result as _save_constraints_result,
 )
 from mcp_server.tools.document_tools import (
+    save_json_constraints as _save_json_constraints,
+)
+from mcp_server.tools.document_tools import (
+    get_json_constraints as _get_json_constraints,
+)
+from mcp_server.tools.constraint_tools import (
+    save_implicit_params as _save_implicit_params,
+)
+from mcp_server.tools.constraint_tools import (
+    query_implicit_params_by_doc_id as _query_ip_by_doc_id,
+)
+from mcp_server.tools.constraint_tools import (
+    save_parameter_representations as _save_parameter_representations,
+)
+from mcp_server.tools.constraint_tools import (
+    query_parameter_representations_by_doc_id as _query_pr_by_doc_id,
+)
+from mcp_server.tools.platform_tools import (
+    save_platform_constants as _save_platform_constants,
+)
+from mcp_server.tools.platform_tools import (
+    query_platform_constants_by_doc_id as _query_pc_by_doc_id,
+)
+from mcp_server.tools.document_tools import (
+    get_function_explanation_summary as _get_fn_expl_summary,
+)
+from mcp_server.tools.document_tools import (
+    save_function_explanation_summary as _save_fn_expl,
+)
+from mcp_server.tools.document_tools import (
     save_determinism as _save_determinism,
 )
 from mcp_server.tools.document_tools import (
@@ -98,7 +128,10 @@ from mcp_server.tools.document_tools import (
 from mcp_server.tools.document_tools import (
     update_json_constraints_by_name as _update_json_constraints_by_name,
 )
-from mcp_server.tools.document_tools import (
+from mcp_server.tools.parameter_tools import (
+    batch_update_param_field as _batch_update_param_field,
+)
+from mcp_server.tools.parameter_tools import (
     update_param_allowed_range as _update_param_allowed_range,
 )
 from mcp_server.tools.document_tools import (
@@ -133,6 +166,12 @@ from mcp_server.tools.document_tools import (
 )
 from mcp_server.tools.document_tools import (
     update_param_shape as _update_param_shape,
+)
+from mcp_server.tools.document_tools import (
+    update_param_platform_attributes as _update_param_plat_attrs,
+)
+from mcp_server.tools.document_tools import (
+    update_param_usage_notes as _update_param_usage_notes,
 )
 from mcp_server.tools.task_tools import (
     create_task as _create_task,
@@ -172,6 +211,9 @@ from mcp_server.tools.test_case_tools import (
 )
 from mcp_server.tools.test_case_tools import (
     do_save_test_cases as _do_save_test_cases,
+)
+from mcp_server.tools.task_tools import (
+    delete_task as _delete_task,
 )
 
 mcp = FastMCP("operator-agent-mcp-server")
@@ -358,6 +400,28 @@ def query_params_by_doc(doc_id: int) -> str:
 
 
 @mcp.tool()
+def batch_update_params(doc_id: int, field: str, updates: str) -> str:
+    """Generic batch update for any parameter field.
+
+    Replaces the individual update_param_shape, update_param_dtype, etc. tools.
+
+    Args:
+        doc_id: Primary key of document_versions table.
+        field: Target field name. One of: shape, dtype, dformat, is_optional,
+               is_support_discontinuous, param_desc, direction, array_length,
+               allowed_range_value, param_constraint.
+        updates: JSON string — array of dicts with function_name, param_name,
+                 and the field-specific value key.
+
+    Returns:
+        JSON string with count of updated parameters.
+    """
+    data = json.loads(updates)
+    result = _batch_update_param_field(doc_id, field, data)
+    return json.dumps(result, ensure_ascii=False)
+
+
+@mcp.tool()
 def update_param_shape(doc_id: int, updates: str) -> str:
     """Batch update only the shape field of parameters.
 
@@ -370,6 +434,40 @@ def update_param_shape(doc_id: int, updates: str) -> str:
     """
     data = json.loads(updates)
     result = _update_param_shape(doc_id, data)
+    return json.dumps(result, ensure_ascii=False)
+
+
+@mcp.tool()
+def update_param_platform_attributes(doc_id: int, updates: str) -> str:
+    """Batch update the platform_attributes field of parameters.
+
+    Args:
+        doc_id: Primary key of document_versions table.
+        updates: JSON string — array of dicts with function_name, param_name,
+                 platform_attributes (JSON string of {field: {platform: value}}).
+
+    Returns:
+        JSON string with count of updated parameters.
+    """
+    data = json.loads(updates)
+    result = _update_param_plat_attrs(doc_id, data)
+    return json.dumps(result, ensure_ascii=False)
+
+
+@mcp.tool()
+def update_param_usage_notes(doc_id: int, updates: str) -> str:
+    """Batch update the usage_notes field of parameters.
+
+    Args:
+        doc_id: Primary key of document_versions table.
+        updates: JSON string — array of dicts with function_name, param_name,
+                 usage_notes (JSON string of {platform: value}).
+
+    Returns:
+        JSON string with count of updated parameters.
+    """
+    data = json.loads(updates)
+    result = _update_param_usage_notes(doc_id, data)
     return json.dumps(result, ensure_ascii=False)
 
 
@@ -942,6 +1040,99 @@ def update_json_constraints_by_name(operator_name: str, json_constraints: str) -
 
 
 @mcp.tool()
+def save_implicit_params(doc_id: int, mappings_json: str, rendered_text: str) -> str:
+    """Persist implicit (non-operator) parameters for a document version (traceability).
+
+    Args:
+        doc_id: Primary key of document_versions table.
+        mappings_json: JSON string — array of implicit parameter mapping dicts.
+        rendered_text: The rendered prompt context text that the LLM sees.
+
+    Returns:
+        JSON string with saved flag.
+    """
+    result = _save_implicit_params(doc_id, mappings_json, rendered_text)
+    return json.dumps(result, ensure_ascii=False)
+
+
+@mcp.tool()
+def query_implicit_params_by_doc_id(doc_id: int) -> str:
+    """Query implicit parameters for a document version by doc_id.
+
+    Args:
+        doc_id: Primary key of document_versions table.
+
+    Returns:
+        JSON string with mappings (array) and rendered_text, or null if not found.
+    """
+    result = _query_ip_by_doc_id(doc_id)
+    return json.dumps(result, ensure_ascii=False)
+
+
+@mcp.tool()
+def save_platform_constants(doc_id: int, constants_json: str) -> str:
+    """Persist platform constants (external constants like rankSize) for a document version.
+
+    Args:
+        doc_id: Primary key of document_versions table.
+        constants_json: JSON string — array of platform constant dicts.
+
+    Returns:
+        JSON string with saved flag and count.
+    """
+    result = _save_platform_constants(doc_id, constants_json)
+    return json.dumps(result, ensure_ascii=False)
+
+
+@mcp.tool()
+def query_platform_constants_by_doc_id(doc_id: int) -> str:
+    """Query platform constants for a document version by doc_id.
+
+    Args:
+        doc_id: Primary key of document_versions table.
+
+    Returns:
+        JSON string with constants array, or empty if not found.
+    """
+    result = _query_pc_by_doc_id(doc_id)
+    return json.dumps(result, ensure_ascii=False)
+
+
+@mcp.tool()
+def save_parameter_representations(
+    doc_id: int, representations_json: str,
+) -> str:
+    """Persist parameter_representation records for a document version.
+
+    Args:
+        doc_id: Primary key of document_versions table.
+        representations_json: JSON string with shape
+            {"representations": [...tensor-dim reps...],
+             "platform_representations": {platform: [...constant reps...]}}.
+
+    Returns:
+        JSON string with saved flag.
+    """
+    result = _save_parameter_representations(doc_id, representations_json)
+    return json.dumps(result, ensure_ascii=False)
+
+
+@mcp.tool()
+def query_parameter_representations_by_doc_id(doc_id: int) -> str:
+    """Query parameter_representation records for a document version by doc_id.
+
+    Args:
+        doc_id: Primary key of document_versions table.
+
+    Returns:
+        JSON string with representations list and platform_representations
+        dict, or empty if not found.
+    """
+    result = _query_pr_by_doc_id(doc_id)
+    return json.dumps(result, ensure_ascii=False)
+
+
+@mcp.tool()
 def save_function_explanation_summary(doc_id: int, summary: str) -> str:
     """Save function explanation summary for a document version.
 
@@ -1180,6 +1371,26 @@ def reset_stuck_task_items(task_id: int) -> str:
         JSON string with count of reset items.
     """
     result = _reset_stuck_task_items(task_id)
+    return json.dumps(result, ensure_ascii=False)
+
+
+@mcp.tool()
+def delete_task(task_id: int) -> str:
+    """Delete a task and all associated operator data (cascade).
+
+    Deletes: task items, document_versions, parameters, param_relations,
+    function_signatures, platform_support, return_codes, dtype_combinations,
+    constraints_result, implicit_params, platform_constants.
+
+    Only allows deletion of finished tasks (not running).
+
+    Args:
+        task_id: Task ID to delete.
+
+    Returns:
+        JSON string with deleted_task_id, deleted_docs, deleted_items.
+    """
+    result = _delete_task(task_id)
     return json.dumps(result, ensure_ascii=False)
 
 

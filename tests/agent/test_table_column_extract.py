@@ -389,3 +389,149 @@ class TestExtract4ColumnsRelativeRef:
         assert result.get("dtype_desc") is None or result.get("dtype_desc") == ""
         # param_desc preserved (even if it contains relative ref language)
         assert result["param_desc"] == "shape与self相同"
+
+
+# ---------------------------------------------------------------------------
+# Platform-tagged value extraction (term + nested ul/li)
+# ---------------------------------------------------------------------------
+
+from agent.utils.table_parser import (
+    extract_columns_as_json,
+    extract_platform_tagged_values,
+    parse_html_tables_with_raw,
+)
+
+
+class TestExtractPlatformTaggedValues:
+    """Test extract_platform_tagged_values handles all HTML patterns."""
+
+    def test_li_pattern_term_inside_li(self):
+        """<li><term>PLATFORM</term>：VALUE</li> — the common list pattern."""
+        html = (
+            "<li><term>Atlas A2 训练系列产品</term>：[M, K1]</li>"
+            "<li><term>Atlas 推理系列加速卡产品</term>：[M, K1]</li>"
+        )
+        result = extract_platform_tagged_values(html)
+        assert result == {
+            "Atlas A2 训练系列产品": "[M, K1]",
+            "Atlas 推理系列加速卡产品": "[M, K1]",
+        }
+
+    def test_inline_pattern_simple_value(self):
+        """<term>PLATFORM</term>：VALUE without nested list."""
+        html = "<term>Atlas A2 训练系列产品</term>：输入在有/无专家时分别为[E, N2]/[N2]"
+        result = extract_platform_tagged_values(html)
+        assert result == {
+            "Atlas A2 训练系列产品": "输入在有/无专家时分别为[E, N2]/[N2]",
+        }
+
+    def test_inline_pattern_nested_ul_multiple_li(self):
+        """<term>PLATFORM</term>：<ul><li>..</li><li>..</li></ul> — the bug case.
+
+        Regression: the value must include ALL <li> items, not just the first.
+        """
+        html = (
+            "<term>Atlas A2 训练系列产品</term>："
+            "<ul>"
+            "<li>per-channel下输入在有/无专家时分别为[E, N2]/[N2]</li>"
+            "<li>per-group下输入在有/无专家时分别为[E, G, N2]/[G, N2]</li>"
+            "</ul>"
+        )
+        result = extract_platform_tagged_values(html)
+        assert result is not None
+        assert "Atlas A2 训练系列产品" in result
+        value = result["Atlas A2 训练系列产品"]
+        # Both per-channel and per-group must be present
+        assert "per-channel" in value
+        assert "per-group" in value
+        assert "[E, G, N2]" in value
+        assert "[G, N2]" in value
+
+    def test_inline_pattern_nested_ul_three_li(self):
+        """Three nested <li> items must all be captured."""
+        html = (
+            "<term>Atlas A2</term>："
+            "<ul>"
+            "<li>per-tensor：[E]</li>"
+            "<li>per-channel：[E, N1]</li>"
+            "<li>per-group：[E, G, N1]</li>"
+            "</ul>"
+        )
+        result = extract_platform_tagged_values(html)
+        value = result["Atlas A2"]
+        assert "per-tensor" in value
+        assert "per-channel" in value
+        assert "per-group" in value
+
+    def test_no_platform_tag_returns_none(self):
+        """Universal value (no <term> tags) returns None."""
+        assert extract_platform_tagged_values("FLOAT16、BFLOAT16") is None
+        assert extract_platform_tagged_values("") is None
+
+
+class TestExtractColumnsJsonNestedList:
+    """End-to-end: extract_columns_as_json with nested <ul><li> shape values."""
+
+    NESTED_LIST_TABLE_HTML = """\
+<table>
+<tr>
+  <th>参数名</th><th>输入/输出</th><th>描述</th><th>使用说明</th>
+  <th>数据类型</th><th>数据格式</th><th>维度(shape)</th><th>非连续Tensor</th>
+</tr>
+<tr>
+  <td>antiquantOffset2Optional（aclTensor*）</td>
+  <td>可选输入</td>
+  <td>伪量化参数，第二个matmul的偏移量。</td>
+  <td><term>Atlas 推理系列加速卡产品</term>：只支持传空指针。</td>
+  <td><term>Atlas A2 训练系列产品/Atlas A2 推理系列产品</term>：FLOAT16、BFLOAT16</td>
+  <td>ND</td>
+  <td><term>Atlas A2 训练系列产品/Atlas A2 推理系列产品</term>：<ul><li>per-channel下输入在有/无专家时分别为[E, N2]/[N2]</li><li>per-group下输入在有/无专家时分别为[E, G, N2]/[G, N2]</li></ul></td>
+  <td>√</td>
+</tr>
+</table>
+"""
+
+    def test_nested_ul_shape_not_truncated(self):
+        """Regression: shape with nested <ul><li> must keep ALL list items."""
+        tables, raw_tables = parse_html_tables_with_raw(self.NESTED_LIST_TABLE_HTML)
+        grid = tables[0]
+        raw_grid = raw_tables[0]
+        col_map = detect_table_columns(grid[0])
+        name_idx = find_param_name_column(grid[0])
+
+        result = extract_columns_as_json(
+            grid, raw_grid, col_map, "antiquantOffset2Optional", "aclTensor*", name_idx
+        )
+
+        # Shape must be platform-keyed with FULL content
+        assert "shape" in result
+        shape = result["shape"]
+        platform = "Atlas A2 训练系列产品/Atlas A2 推理系列产品"
+        assert platform in shape
+        value = shape[platform]
+        # Both per-channel and per-group present (the bug truncated at first </li>)
+        assert "per-channel" in value
+        assert "[E, N2]" in value and "[N2]" in value
+        assert "per-group" in value
+        assert "[E, G, N2]" in value and "[G, N2]" in value
+
+    def test_dtype_and_usage_extracted_correctly(self):
+        """dtype and usage_notes columns should also parse platform tags."""
+        tables, raw_tables = parse_html_tables_with_raw(self.NESTED_LIST_TABLE_HTML)
+        grid = tables[0]
+        raw_grid = raw_tables[0]
+        col_map = detect_table_columns(grid[0])
+        name_idx = find_param_name_column(grid[0])
+
+        result = extract_columns_as_json(
+            grid, raw_grid, col_map, "antiquantOffset2Optional", "aclTensor*", name_idx
+        )
+
+        assert result["dtype_desc"] == {
+            "Atlas A2 训练系列产品/Atlas A2 推理系列产品": "FLOAT16、BFLOAT16",
+        }
+        assert result["usage_notes"] == {
+            "Atlas 推理系列加速卡产品": "只支持传空指针。",
+        }
+        assert result["dformat_desc"] == {"*": "ND"}
+        assert result["direction"] == "input"

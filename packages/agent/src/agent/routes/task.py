@@ -331,6 +331,24 @@ async def resume_stuck_task(task_id: int) -> dict:
         return {"success": False, "error": str(e)}
 
 
+@router.delete("/tasks/{task_id}")
+async def delete_task(task_id: int) -> dict:
+    """Delete a task and all associated operator data."""
+    task = await _mcp_client.get_task(task_id)
+    if task is None:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    try:
+        result = await _mcp_client.delete_task(task_id)
+        return {"success": True, **result}
+    except ValueError as e:
+        return {"success": False, "error": str(e)}
+    except Exception as e:
+        logger.exception("Failed to delete task %s", task_id)
+        return {"success": False, "error": str(e)}
+
+
 @router.post("/tasks/{task_id}/retry-failed", response_model=RetryTaskResponse)
 async def retry_failed_operators(task_id: int) -> RetryTaskResponse:
     """Retry all failed operators from a completed task.

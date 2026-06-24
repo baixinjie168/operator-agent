@@ -5,7 +5,6 @@
       "mcp__duckduckgo__fetch_content",
       "mcp__web_reader__webReader",
       "mcp__4_5v_mcp__analyze_image",
-
       "Bash(git status*)",
       "Bash(git diff*)",
       "Bash(git log*)",
@@ -20,7 +19,6 @@
       "Bash(git show*)",
       "Bash(git remote*)",
       "Bash(gh *)",
-
       "Bash(uv *)",
       "Bash(python*)",
       "Bash(pytest*)",
@@ -29,7 +27,6 @@
       "Bash(mypy *)",
       "Bash(pip *)",
       "Bash(bandit *)",
-
       "Bash(ls *)",
       "Bash(find *)",
       "Bash(cat *)",
@@ -43,18 +40,18 @@
       "Bash(mv *)",
       "Bash(touch *)",
       "Bash(chmod *)",
-
       "Bash(curl *)",
       "Bash(uvicorn *)",
-
       "Bash(grep *)",
       "Bash(rg *)",
       "Bash(fd *)",
-
       "Read",
       "Write",
       "Edit"
     ],
     "deny": []
+  },
+  "enabledPlugins": {
+    "claude-mem@thedotmack": true
   }
 }

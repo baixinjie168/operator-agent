@@ -8,30 +8,15 @@ from typing import Any
 
 from langchain_openai import ChatOpenAI
 
-from agent.core.config import settings
 from agent.mcp_client import MCPClient
 from agent.nodes.state import PipelineState
 from agent.prompts import SHAPE_EXTRACT_PROMPT
-from agent.runtime.context import get_context
-from agent.runtime.events import EventType, SpanStatus, SpanType
+from agent.utils.llm_common import CONCURRENCY_LIMIT, create_llm, parse_json_response
+from agent.utils.param_validators import is_cross_reference, is_dash
 
 logger = logging.getLogger(__name__)
 
 _mcp_client = MCPClient()
-
-_CONCURRENCY_LIMIT = 5
-
-_STEP_NAME = "shape_extract"
-_STEP_LABEL = "Shape提取"
-
-_JSON_BLOCK_RE = re.compile(r"```(?:json)?\s*([\s\S]*?)```", re.IGNORECASE)
-
-# Matches cross-reference patterns like "与self一致", "同input相同"
-_RELATIVE_REF_RE = re.compile(
-    r"^(?:与|同|和|跟)"
-    r".{1,20}"
-    r"(?:一致|相同|一样|保持一致|保持一致|同)$",
-)
 
 
 def _is_shape_valid(shape: str) -> bool:
@@ -42,14 +27,36 @@ def _is_shape_valid(shape: str) -> bool:
     - Empty / whitespace-only strings
     - Dash variants (-, —, –, －)
     - Cross-references to other params (e.g. "与self一致")
+
+    Handles JSON format: {"*": "[M, K1]"} or {"platform": "[M, K1]"}.
+    If any platform value is valid, returns True.
     """
     s = shape.strip()
     if not s:
         return False
-    if s in ("-", "—", "–", "－"):
+    # Try parsing as JSON
+    try:
+        parsed = json.loads(s)
+        if isinstance(parsed, dict) and parsed:
+            return any(
+                _is_plain_shape_valid(v)
+                for v in parsed.values()
+                if isinstance(v, str)
+            )
+    except (json.JSONDecodeError, TypeError):
+        pass
+    return _is_plain_shape_valid(s)
+
+
+def _is_plain_shape_valid(s: str) -> bool:
+    """Check a plain text shape value (non-JSON)."""
+    s = s.strip()
+    if not s:
+        return False
+    if is_dash(s):
         return False
     cleaned = s.replace("`", "")
-    if _RELATIVE_REF_RE.match(cleaned):
+    if is_cross_reference(cleaned):
         return False
     return True
 
@@ -87,29 +94,6 @@ async def shape_extract_node(state: PipelineState) -> dict[str, Any]:
             if p.get("llm_description")
             and (not p.get("shape") or not _is_shape_valid(p.get("shape", "")))
         ]
-        undescribed = [p for p in params if not p.get("llm_description")]
-
-        ctx = get_context()
-        if undescribed and ctx and ctx.manager:
-            for p in undescribed:
-                pn = p.get("param_name", "")
-                fn = p.get("function_name", "")
-                skip_span = ctx.manager.open_span(
-                    run_id=ctx.run_id,
-                    parent_span_id=ctx.current_span_id,
-                    span_type=SpanType.NODE,
-                    name=f"{_STEP_NAME}:{fn}:{pn}",
-                )
-                ctx.manager.close_span(ctx.run_id, skip_span, SpanStatus.SUCCESS)
-                ctx.manager.emit(EventType.PARAM_STEP_ERROR, ctx.run_id, skip_span, {
-                    "agent_id": "doc",
-                    "node_id": _STEP_NAME,
-                    "param_name": pn,
-                    "function_name": fn,
-                    "step_name": _STEP_NAME,
-                    "message": f"参数 {pn} {_STEP_LABEL} 已跳过: 无参数描述",
-                    "error": "无参数描述",
-                })
         if not described:
             logger.info("ShapeExtract: no parameters needing shape extraction for doc_id=%s, skipping", doc_id)
             return {"error": None}
@@ -128,72 +112,29 @@ async def shape_extract_node(state: PipelineState) -> dict[str, Any]:
                 len(invalid_clears), doc_id,
             )
 
-        llm = _create_llm()
-        sem = asyncio.Semaphore(_CONCURRENCY_LIMIT)
-        ctx = get_context()
+        llm = create_llm()
+        sem = asyncio.Semaphore(CONCURRENCY_LIMIT)
 
         async def _extract_one(param: dict) -> dict | None:
-            param_name = param.get("param_name", "")
-            function_name = param.get("function_name", "")
-            parent_span_id = ctx.current_span_id if ctx else None
-            param_span = None
-
-            if ctx and ctx.manager:
-                param_span = ctx.manager.open_span(
-                    run_id=ctx.run_id,
-                    parent_span_id=parent_span_id,
-                    span_type=SpanType.NODE,
-                    name=f"{_STEP_NAME}:{function_name}:{param_name}",
-                )
-                ctx.manager.emit(EventType.PARAM_STEP_START, ctx.run_id, param_span, {
-                    "agent_id": "doc",
-                    "node_id": _STEP_NAME,
-                    "param_name": param_name,
-                    "function_name": function_name,
-                    "step_name": _STEP_NAME,
-                    "message": f"参数 {param_name} {_STEP_LABEL} 开始...",
-                })
-
-            try:
-                async with sem:
-                    result = await _extract_shape(llm, param)
-
-                if ctx and ctx.manager and param_span:
-                    ctx.manager.close_span(ctx.run_id, param_span, SpanStatus.SUCCESS)
-                    ctx.manager.emit(EventType.PARAM_STEP_COMPLETE, ctx.run_id, param_span, {
-                        "agent_id": "doc",
-                        "node_id": _STEP_NAME,
-                        "param_name": param_name,
-                        "function_name": function_name,
-                        "step_name": _STEP_NAME,
-                        "message": f"参数 {param_name} {_STEP_LABEL} 完成",
-                        "result_preview": result.get("shape", "") or "",
-                        "has_result": bool(result and result.get("shape")),
-                    })
-
-                return result
-            except Exception as exc:
-                if ctx and ctx.manager and param_span:
-                    ctx.manager.close_span(ctx.run_id, param_span, SpanStatus.ERROR, error=str(exc))
-                    ctx.manager.emit(EventType.PARAM_STEP_ERROR, ctx.run_id, param_span, {
-                        "agent_id": "doc",
-                        "node_id": _STEP_NAME,
-                        "param_name": param_name,
-                        "function_name": function_name,
-                        "step_name": _STEP_NAME,
-                        "message": f"参数 {param_name} {_STEP_LABEL} 失败: {exc}",
-                        "error": str(exc),
-                    })
-                return None
+            async with sem:
+                return await _extract_shape(llm, param)
 
         results = await asyncio.gather(*[_extract_one(p) for p in described])
 
         shape_updates = [r for r in results if r is not None and r.get("shape")]
-
+        # Wrap plain text shape values as JSON: {"*": value}
+        for u in shape_updates:
+            val = u["shape"]
+            if isinstance(val, str) and not val.startswith("{"):
+                u["shape"] = json.dumps({"*": val}, ensure_ascii=False)
         if shape_updates:
             result = await _mcp_client.update_param_shape(doc_id, shape_updates)
-            updated = result.get("updated", 0)
-            logger.info("ShapeExtract: updated shape for %d/%d parameters", updated, len(described))
+            logger.info(
+                "ShapeExtract: updated shape for %d/%d parameters (doc_id=%s)",
+                result.get("updated", 0),
+                len(described),
+                doc_id,
+            )
         else:
             logger.info("ShapeExtract: no unconditional shapes extracted for doc_id=%s", doc_id)
 
@@ -202,15 +143,6 @@ async def shape_extract_node(state: PipelineState) -> dict[str, Any]:
     except Exception as e:
         logger.exception("ShapeExtract failed for %s", operator_name)
         return {"error": str(e)}
-
-
-def _create_llm() -> ChatOpenAI:
-    return ChatOpenAI(
-        api_key=settings.active_api_key,
-        base_url=settings.active_base_url,
-        model=settings.active_model,
-        temperature=0.1,
-    )
 
 
 async def _extract_shape(llm: ChatOpenAI, param: dict) -> dict | None:
@@ -223,34 +155,7 @@ async def _extract_shape(llm: ChatOpenAI, param: dict) -> dict | None:
     response = await llm.ainvoke(prompt)
     text = response.content if hasattr(response, "content") else str(response)
 
-    result = _parse_shape_response(text)
+    result = parse_json_response(text, dict)
     if result:
         result["function_name"] = function_name
     return result
-
-
-def _parse_shape_response(text: str) -> dict | None:
-    """Parse LLM JSON response into {param_name, shape} dict."""
-    match = _JSON_BLOCK_RE.search(text)
-    if match:
-        text = match.group(1)
-    text = text.strip()
-
-    try:
-        data = json.loads(text)
-        if isinstance(data, dict):
-            return data
-    except json.JSONDecodeError:
-        pass
-
-    obj_match = re.search(r"\{[^{}]*\}", text)
-    if obj_match:
-        try:
-            data = json.loads(obj_match.group(0))
-            if isinstance(data, dict):
-                return data
-        except json.JSONDecodeError:
-            pass
-
-    logger.warning("ShapeExtract: failed to parse LLM response as JSON: %s", text[:200])
-    return None

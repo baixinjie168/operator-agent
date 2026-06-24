@@ -8,23 +8,15 @@ from typing import Any
 
 from langchain_openai import ChatOpenAI
 
-from agent.core.config import settings
 from agent.mcp_client import MCPClient
 from agent.nodes.state import PipelineState
 from agent.prompts import DFORMAT_EXTRACT_PROMPT
-from agent.runtime.context import get_context
-from agent.runtime.events import EventType, SpanStatus, SpanType
+from agent.utils.llm_common import CONCURRENCY_LIMIT, create_llm, parse_json_response
+from agent.utils.param_validators import is_cross_reference, is_dash
 
 logger = logging.getLogger(__name__)
 
 _mcp_client = MCPClient()
-
-_CONCURRENCY_LIMIT = 5
-
-_STEP_NAME = "dformat_extract"
-_STEP_LABEL = "数据格式提取"
-
-_JSON_BLOCK_RE = re.compile(r"```(?:json)?\s*([\s\S]*?)```", re.IGNORECASE)
 
 _VALID_DFORMATS = frozenset({
     "ND", "NCHW", "NHWC", "HWCN", "NDHWC", "NCDHW", "NC", "NCL",
@@ -32,30 +24,37 @@ _VALID_DFORMATS = frozenset({
     "NDC1HWC0", "FRACTAL_Z_3D",
 })
 
-# Matches cross-reference patterns like "与self一致", "同input相同"
-_RELATIVE_REF_RE = re.compile(
-    r"^(?:与|同|和|跟)"
-    r".{1,20}"
-    r"(?:一致|相同|一样|保持一致|保持一致|同)$",
-)
-
 
 def _is_dformat_valid(dformat_desc: str) -> bool:
     """Check whether an existing dformat_desc value is reasonable.
 
-    Returns False for values that should trigger re-extraction:
-    - Empty / whitespace-only strings
-    - Dash variants
-    - Cross-references to other params
-    - Tokens not in the approved dformat whitelist
+    Handles JSON format: {"*": "ND"} or {"platform": "NCHW"}.
     """
     s = dformat_desc.strip()
     if not s:
         return False
-    if s in ("-", "—", "–", "－"):
+    try:
+        parsed = json.loads(s)
+        if isinstance(parsed, dict) and parsed:
+            return any(
+                _is_plain_dformat_valid(v)
+                for v in parsed.values()
+                if isinstance(v, str)
+            )
+    except (json.JSONDecodeError, TypeError):
+        pass
+    return _is_plain_dformat_valid(s)
+
+
+def _is_plain_dformat_valid(s: str) -> bool:
+    """Check a plain text dformat value (non-JSON)."""
+    s = s.strip()
+    if not s:
+        return False
+    if is_dash(s):
         return False
     cleaned = s.replace("`", "")
-    if _RELATIVE_REF_RE.match(cleaned):
+    if is_cross_reference(cleaned):
         return False
     tokens = [t.strip().upper() for t in re.split(r"[,、，/]", s) if t.strip()]
     if not tokens:
@@ -96,29 +95,6 @@ async def dformat_extract_node(state: PipelineState) -> dict[str, Any]:
             if p.get("llm_description")
             and (not p.get("dformat_desc") or not _is_dformat_valid(p.get("dformat_desc", "")))
         ]
-        without_desc = [p for p in params if not p.get("llm_description")]
-
-        ctx = get_context()
-        if without_desc and ctx and ctx.manager:
-            for p in without_desc:
-                pn = p.get("param_name", "")
-                fn = p.get("function_name", "")
-                skip_span = ctx.manager.open_span(
-                    run_id=ctx.run_id,
-                    parent_span_id=ctx.current_span_id,
-                    span_type=SpanType.NODE,
-                    name=f"{_STEP_NAME}:{fn}:{pn}",
-                )
-                ctx.manager.close_span(ctx.run_id, skip_span, SpanStatus.SUCCESS)
-                ctx.manager.emit(EventType.PARAM_STEP_ERROR, ctx.run_id, skip_span, {
-                    "agent_id": "doc",
-                    "node_id": _STEP_NAME,
-                    "param_name": pn,
-                    "function_name": fn,
-                    "step_name": _STEP_NAME,
-                    "message": f"参数 {pn} {_STEP_LABEL} 已跳过: 无描述内容",
-                    "error": "无描述内容",
-                })
         if not described:
             logger.info("DFormatExtract: no parameters needing dformat extraction for doc_id=%s, skipping", doc_id)
             return {"error": None}
@@ -137,69 +113,21 @@ async def dformat_extract_node(state: PipelineState) -> dict[str, Any]:
                 len(invalid_clears), doc_id,
             )
 
-        llm = _create_llm()
-        sem = asyncio.Semaphore(_CONCURRENCY_LIMIT)
+        llm = create_llm()
+        sem = asyncio.Semaphore(CONCURRENCY_LIMIT)
 
         async def _extract_one(param: dict) -> dict | None:
-            param_name = param.get("param_name", "")
-            function_name = param.get("function_name", "")
-            parent_span_id = ctx.current_span_id if ctx else None
-            param_span = None
-
-            if ctx and ctx.manager:
-                param_span = ctx.manager.open_span(
-                    run_id=ctx.run_id,
-                    parent_span_id=parent_span_id,
-                    span_type=SpanType.NODE,
-                    name=f"{_STEP_NAME}:{function_name}:{param_name}",
-                )
-                ctx.manager.emit(EventType.PARAM_STEP_START, ctx.run_id, param_span, {
-                    "agent_id": "doc",
-                    "node_id": _STEP_NAME,
-                    "param_name": param_name,
-                    "function_name": function_name,
-                    "step_name": _STEP_NAME,
-                    "message": f"参数 {param_name} {_STEP_LABEL} 开始...",
-                })
-
-            try:
-                async with sem:
-                    result = await _extract_dformat(llm, param)
-
-                dformat_val = result.get("dformat", "") if result else ""
-
-                if ctx and ctx.manager and param_span:
-                    ctx.manager.close_span(ctx.run_id, param_span, SpanStatus.SUCCESS)
-                    ctx.manager.emit(EventType.PARAM_STEP_COMPLETE, ctx.run_id, param_span, {
-                        "agent_id": "doc",
-                        "node_id": _STEP_NAME,
-                        "param_name": param_name,
-                        "function_name": function_name,
-                        "step_name": _STEP_NAME,
-                        "message": f"参数 {param_name} {_STEP_LABEL} 完成",
-                        "result_preview": dformat_val or "",
-                        "has_result": bool(dformat_val),
-                    })
-
-                return result
-
-            except Exception as exc:
-                if ctx and ctx.manager and param_span:
-                    ctx.manager.close_span(ctx.run_id, param_span, SpanStatus.ERROR, error=str(exc))
-                    ctx.manager.emit(EventType.PARAM_STEP_ERROR, ctx.run_id, param_span, {
-                        "agent_id": "doc",
-                        "node_id": _STEP_NAME,
-                        "param_name": param_name,
-                        "function_name": function_name,
-                        "step_name": _STEP_NAME,
-                        "message": f"参数 {param_name} {_STEP_LABEL} 失败: {exc}",
-                        "error": str(exc),
-                    })
-                return None
+            async with sem:
+                return await _extract_dformat(llm, param)
 
         results = await asyncio.gather(*[_extract_one(p) for p in described])
 
         dformat_updates = [r for r in results if r is not None and r.get("dformat")]
+        # Wrap plain text dformat values as JSON: {"*": value}
+        for u in dformat_updates:
+            val = u["dformat"]
+            if isinstance(val, str) and not val.startswith("{"):
+                u["dformat"] = json.dumps({"*": val}, ensure_ascii=False)
         if dformat_updates:
             result = await _mcp_client.update_param_dformat(doc_id, dformat_updates)
             logger.info(
@@ -218,15 +146,6 @@ async def dformat_extract_node(state: PipelineState) -> dict[str, Any]:
         return {"error": str(e)}
 
 
-def _create_llm() -> ChatOpenAI:
-    return ChatOpenAI(
-        api_key=settings.active_api_key,
-        base_url=settings.active_base_url,
-        model=settings.active_model,
-        temperature=0.1,
-    )
-
-
 async def _extract_dformat(llm: ChatOpenAI, param: dict) -> dict | None:
     """Call LLM to extract data format for a single parameter."""
     param_name = param.get("param_name", "")
@@ -237,36 +156,9 @@ async def _extract_dformat(llm: ChatOpenAI, param: dict) -> dict | None:
     response = await llm.ainvoke(prompt)
     text = response.content if hasattr(response, "content") else str(response)
 
-    result = _parse_dformat_response(text)
+    result = parse_json_response(text, dict)
     if result:
         result["function_name"] = function_name
         if result.get("dformat"):
             result["dformat"] = result["dformat"].upper()
     return result
-
-
-def _parse_dformat_response(text: str) -> dict | None:
-    """Parse LLM JSON response into {param_name, dformat} dict."""
-    match = _JSON_BLOCK_RE.search(text)
-    if match:
-        text = match.group(1)
-    text = text.strip()
-
-    try:
-        data = json.loads(text)
-        if isinstance(data, dict):
-            return data
-    except json.JSONDecodeError:
-        pass
-
-    obj_match = re.search(r"\{[^{}]*\}", text)
-    if obj_match:
-        try:
-            data = json.loads(obj_match.group(0))
-            if isinstance(data, dict):
-                return data
-        except json.JSONDecodeError:
-            pass
-
-    logger.warning("DFormatExtract: failed to parse LLM response as JSON: %s", text[:200])
-    return None

@@ -11,16 +11,20 @@ Covers:
 - Edge cases: empty, invalid JSON, markdown code blocks
 """
 
-from agent.nodes.build_param_constraint import (
-    _is_rank_format,
-    _normalize_type,
-    _parse_dimensions_response,
-    _try_deterministic_parse,
+from agent.nodes.build_param_constraint._helpers import _normalize_type
+from agent.nodes.build_param_constraint.allowed_range_build import (
     _try_deterministic_range,
-    _validate_dimensions_alignment,
-    _validate_dimensions_structure,
     _validate_range_source,
     _validate_range_structure,
+)
+from agent.nodes.build_param_constraint.dimensions_agent import (
+    _is_rank_format,
+    _parse_dimensions_response,
+    _try_deterministic_parse,
+    _validate_dimensions_structure,
+)
+from agent.nodes.build_param_constraint.dimensions_build import (
+    _validate_dimensions_alignment,
 )
 
 

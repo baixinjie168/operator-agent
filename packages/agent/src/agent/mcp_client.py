@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 from typing import Any
 
 from mcp import ClientSession, StdioServerParameters
@@ -44,7 +45,12 @@ class MCPClient:
         if not server_command:
             server_command = settings.mcp_server_command
         parts = server_command.split()
-        self._params = StdioServerParameters(command=parts[0], args=parts[1:])
+        # Pass current env explicitly — mcp's stdio_client on Windows only
+        # forwards a minimal env subset (no PYTHONPATH), which causes the
+        # server subprocess to fail with ModuleNotFoundError.
+        self._params = StdioServerParameters(
+            command=parts[0], args=parts[1:], env=dict(os.environ),
+        )
         self._session: ClientSession | None = None
         self._read = None
         self._write = None
@@ -208,6 +214,38 @@ class MCPClient:
         """Batch update only the shape field of parameters."""
         return await self._call_tool("update_param_shape", {
             "doc_id": doc_id,
+            "updates": json.dumps(updates, ensure_ascii=False),
+        })
+
+    async def update_param_platform_attributes(
+        self, doc_id: int, updates: list[dict]
+    ) -> dict:
+        """Batch update the platform_attributes field of parameters."""
+        return await self._call_tool("update_param_platform_attributes", {
+            "doc_id": doc_id,
+            "updates": json.dumps(updates, ensure_ascii=False),
+        })
+
+    async def update_param_usage_notes(
+        self, doc_id: int, updates: list[dict]
+    ) -> dict:
+        """Batch update the usage_notes field of parameters."""
+        return await self._call_tool("update_param_usage_notes", {
+            "doc_id": doc_id,
+            "updates": json.dumps(updates, ensure_ascii=False),
+        })
+
+    async def batch_update_params(self, doc_id: int, field: str, updates: list[dict]) -> dict:
+        """Generic batch update for any parameter field.
+
+        Args:
+            doc_id: Document version ID.
+            field: Target field name (shape, dtype, dformat, is_optional, etc.).
+            updates: List of dicts with function_name, param_name, and value.
+        """
+        return await self._call_tool("batch_update_params", {
+            "doc_id": doc_id,
+            "field": field,
             "updates": json.dumps(updates, ensure_ascii=False),
         })
 
@@ -466,6 +504,56 @@ class MCPClient:
             "json_constraints": json_constraints,
         })
 
+    async def save_implicit_params(
+        self, doc_id: int, mappings_json: str, rendered_text: str
+    ) -> dict:
+        """Persist implicit (non-operator) parameters for traceability."""
+        return await self._call_tool("save_implicit_params", {
+            "doc_id": doc_id,
+            "mappings_json": mappings_json,
+            "rendered_text": rendered_text,
+        })
+
+    async def query_implicit_params_by_doc_id(self, doc_id: int) -> dict | None:
+        """Query implicit parameters for a document version by doc_id."""
+        return await self._call_tool("query_implicit_params_by_doc_id", {
+            "doc_id": doc_id,
+        })
+
+    async def save_platform_constants(
+        self, doc_id: int, constants_json: str
+    ) -> dict:
+        """Persist platform constants (external constants like rankSize)."""
+        return await self._call_tool("save_platform_constants", {
+            "doc_id": doc_id,
+            "constants_json": constants_json,
+        })
+
+    async def query_platform_constants_by_doc_id(
+        self, doc_id: int
+    ) -> dict | None:
+        """Query platform constants for a document version by doc_id."""
+        return await self._call_tool("query_platform_constants_by_doc_id", {
+            "doc_id": doc_id,
+        })
+
+    async def save_parameter_representations(
+        self, doc_id: int, representations_json: str,
+    ) -> dict:
+        """Persist parameter_representation records for a document version."""
+        return await self._call_tool("save_parameter_representations", {
+            "doc_id": doc_id,
+            "representations_json": representations_json,
+        })
+
+    async def query_parameter_representations_by_doc_id(
+        self, doc_id: int,
+    ) -> dict | None:
+        """Query parameter_representation records for a document version by doc_id."""
+        return await self._call_tool("query_parameter_representations_by_doc_id", {
+            "doc_id": doc_id,
+        })
+
     async def query_constraints_result(self, operator_name: str | None = None) -> list[dict]:
         """Query constraints results, optionally filtered by operator name."""
         args: dict[str, Any] = {}
@@ -570,3 +658,7 @@ class MCPClient:
     async def reset_stuck_task_items(self, task_id: int) -> dict:
         """Reset task items stuck in 'running' back to 'pending'."""
         return await self._call_tool("reset_stuck_task_items", {"task_id": task_id})
+
+    async def delete_task(self, task_id: int) -> dict:
+        """Delete a task and all associated operator data."""
+        return await self._call_tool("delete_task", {"task_id": task_id})

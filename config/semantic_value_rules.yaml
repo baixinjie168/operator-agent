@@ -1,0 +1,173 @@
+# ============================================================================
+# 语义推断规则库 (Semantic Value Range Inference Rules)
+# ============================================================================
+#
+# 用途：当算子文档中参数的"取值范围"未显式给出时，根据参数描述中的
+#       关键词推断其隐含的取值约束。
+#
+# 三层归属策略：
+#   Layer 1 — allowed_range_value  : 标量参数值域（闭区间 / 半开区间用 null 边界）
+#   Layer 2 — constraints (self_value_range) : Tensor 参数的元素级值域约束
+#   Layer 3 — constraints (value_dependency) : 跨参数 / 条件约束（不在此文件中定义）
+#
+# 字段说明：
+#   id               : 规则唯一标识
+#   keywords         : 触发匹配的关键词列表（中英文）
+#   description      : 规则的自然语言描述
+#   allowed_range    : 标量参数写入 allowed_range_value 的值
+#                      null 表示无界（半开区间），如 [[1, null]] 表示 >= 1
+#   expr_template    : Tensor 元素级约束的 Python 表达式模板
+#                      用 {param} 作为参数名占位符
+#   expr_type        : 约束的表达式类型
+#                      Layer 1 → "value_range"
+#                      Layer 2 → "self_value_range"
+#   target           : 约束归属层级
+#                      "layer_1" / "layer_2" / "both"
+#                      - 标量参数命中 → layer_1 (allowed_range_value)
+#                      - Tensor 参数命中 → layer_2 (constraints_in_parameters)
+#                      - "both" 表示两者都适用（按参数类型自动选择）
+#   confidence       : 推断置信度 "high" / "medium" / "low"
+#                      high  → 可直接应用
+#                      medium → 建议人工确认
+#                      low  → 仅作参考
+#   notes            : 补充说明（如例外情况）
+# ============================================================================
+
+version: "1.0"
+
+rules:
+  # ===== 正整数约束 (>= 1) =====
+  - id: positive_count
+    keywords:
+      - "token数"
+      - "个数"
+      - "count"
+      - "数量"
+      - "数目"
+      - "总数"
+      - "总专家数"
+    description: "计数类参数，值为正整数 (>= 1)"
+    allowed_range: [[1, null]]
+    expr_template: "all(v >= 1 for v in {param}.range_value)"
+    expr_type: "self_value_range"
+    target: "both"
+    confidence: "high"
+    notes: "计数不可能为0或负数"
+
+  # ===== 维度/大小约束 (>= 1) =====
+  - id: positive_size
+    keywords:
+      - "size"
+      - "维度大小"
+      - "维度数"
+      - "dim"
+      - "层数"
+      - "头数"
+      - "num_layers"
+      - "num_heads"
+    description: "维度/大小类参数，值为正整数 (>= 1)"
+    allowed_range: [[1, null]]
+    expr_template: "all(v >= 1 for v in {param}.range_value)"
+    expr_type: "self_value_range"
+    target: "both"
+    confidence: "high"
+    notes: "维度至少为1"
+
+  # ===== 非负整数约束 (>= 0) =====
+  - id: non_negative_index
+    keywords:
+      - "index"
+      - "索引"
+      - "下标"
+      - "序号"
+      - "位置"
+    description: "索引类参数，值为非负整数 (>= 0)"
+    allowed_range: [[0, null]]
+    expr_template: "all(v >= 0 for v in {param}.range_value)"
+    expr_type: "self_value_range"
+    target: "both"
+    confidence: "high"
+    notes: "索引从0开始"
+
+  # ===== 概率/权重约束 [0, 1] =====
+  - id: probability_range
+    keywords:
+      - "概率"
+      - "probability"
+      - "probs"
+      - "weight"
+      - "权重"
+      - "dropout"
+      - "rate"
+      - "ratio"
+      - "比例"
+    description: "概率/权重类参数，值在 [0, 1] 之间"
+    allowed_range: [[0, 1]]
+    expr_template: "all(0 <= v <= 1 for v in {param}.range_value)"
+    expr_type: "self_value_range"
+    target: "both"
+    confidence: "high"
+    notes: "概率/权重的定义域"
+
+  # ===== 归一化约束 [-1, 1] =====
+  - id: normalized_range
+    keywords:
+      - "归一化"
+      - "normalized"
+      - "tanh"
+    description: "归一化类参数，值在 [-1, 1] 之间"
+    allowed_range: [[-1, 1]]
+    expr_template: "all(-1 <= v <= 1 for v in {param}.range_value)"
+    expr_type: "self_value_range"
+    target: "both"
+    confidence: "medium"
+    notes: "需确认是否为 tanh 类归一化"
+
+  # ===== 正数约束 (> 0) =====
+  - id: positive_scale
+    keywords:
+      - "scale"
+      - "缩放因子"
+      - "缩放"
+      - "温度"
+      - "temperature"
+      - "epsilon"
+      - "eps"
+    description: "缩放/温度类参数，值为正数 (> 0，整数场景 >= 1)"
+    allowed_range: [[1, null]]
+    expr_template: "all(v >= 1 for v in {param}.range_value)"
+    expr_type: "self_value_range"
+    target: "both"
+    confidence: "medium"
+    notes: "浮点场景下 > 0 无法用整数区间精确表达，需人工确认"
+
+  # ===== 布尔值 =====
+  - id: boolean_value
+    keywords:
+      - "是否"
+      - "开关"
+      - "flag"
+      - "enable"
+      - "disable"
+    description: "布尔类参数，取值为 True 或 False"
+    allowed_range: [true, false]
+    expr_template: ""
+    expr_type: "value_range"
+    target: "layer_1"
+    confidence: "high"
+    notes: "布尔类型参数"
+
+  # ===== 无特殊约束（占位，避免误判） =====
+  - id: no_constraint_offset
+    keywords:
+      - "offset"
+      - "偏移量"
+      - "偏移"
+      - "bias"
+    description: "偏移类参数，可正可负，无特殊值域约束"
+    allowed_range: []
+    expr_template: ""
+    expr_type: ""
+    target: "none"
+    confidence: "high"
+    notes: "偏移量通常无值域限制，此规则用于防止其他规则误匹配"

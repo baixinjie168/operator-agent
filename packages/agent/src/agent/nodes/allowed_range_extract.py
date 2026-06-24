@@ -3,26 +3,20 @@
 import asyncio
 import json
 import logging
-import re
 from typing import Any
 
 from langchain_openai import ChatOpenAI
 
-from agent.core.config import settings
 from agent.mcp_client import MCPClient
 from agent.nodes.state import PipelineState
 from agent.prompts import ALLOWED_RANGE_EXTRACT_PROMPT
-from agent.runtime.context import get_context
-from agent.runtime.events import EventType, SpanStatus, SpanType
+from agent.utils.llm_common import CONCURRENCY_LIMIT, create_llm, parse_json_response
+from agent.utils.param_validators import is_bool_type, is_tensor_type, is_ws_function
+from agent.utils.semantic_rules import build_prompt_context
 
 logger = logging.getLogger(__name__)
 
 _mcp_client = MCPClient()
-
-_CONCURRENCY_LIMIT = 5
-
-_STEP_NAME = "allowed_range_extract"
-_STEP_LABEL = "取值范围提取"
 
 _WS_SECTION_TYPES = [
     "params_get_workspace",
@@ -35,12 +29,6 @@ _EXE_SECTION_TYPES = [
     "return_codes_execute",
     "constraints",
 ]
-
-_JSON_BLOCK_RE = re.compile(r"```(?:json)?\s*([\s\S]*?)```", re.IGNORECASE)
-
-
-def _is_ws_function(function_name: str) -> bool:
-    return "GetWorkspaceSize" in function_name
 
 
 async def allowed_range_extract_node(state: PipelineState) -> dict[str, Any]:
@@ -67,98 +55,22 @@ async def allowed_range_extract_node(state: PipelineState) -> dict[str, Any]:
             logger.info("AllowedRangeExtract: no parameters in state, skipping")
             return {"error": None}
 
-        ws_params = [p for p in params if _is_ws_function(p.get("function_name", ""))]
-        exe_params = [p for p in params if not _is_ws_function(p.get("function_name", ""))]
+        ws_params = [p for p in params if is_ws_function(p.get("function_name", ""))]
+        exe_params = [p for p in params if not is_ws_function(p.get("function_name", ""))]
 
         ws_sections_text = await _fetch_sections(doc_id, _WS_SECTION_TYPES) if ws_params else ""
         exe_sections_text = await _fetch_sections(doc_id, _EXE_SECTION_TYPES) if exe_params else ""
 
-        ctx = get_context()
-
         if not ws_sections_text.strip() and not exe_sections_text.strip():
             logger.info("AllowedRangeExtract: no section content for doc_id=%s, skipping", doc_id)
-            if ctx and ctx.manager:
-                for p in params:
-                    pn = p.get("param_name", "")
-                    fn = p.get("function_name", "")
-                    skip_span = ctx.manager.open_span(
-                        run_id=ctx.run_id,
-                        parent_span_id=ctx.current_span_id,
-                        span_type=SpanType.NODE,
-                        name=f"{_STEP_NAME}:{fn}:{pn}",
-                    )
-                    ctx.manager.close_span(ctx.run_id, skip_span, SpanStatus.SUCCESS)
-                    ctx.manager.emit(EventType.PARAM_STEP_ERROR, ctx.run_id, skip_span, {
-                        "agent_id": "doc",
-                        "node_id": _STEP_NAME,
-                        "param_name": pn,
-                        "function_name": fn,
-                        "step_name": _STEP_NAME,
-                        "message": f"参数 {pn} {_STEP_LABEL} 已跳过: 无段落内容",
-                        "error": "无段落内容",
-                    })
             return {"error": None}
 
-        llm = _create_llm()
-        sem = asyncio.Semaphore(_CONCURRENCY_LIMIT)
+        llm = create_llm()
+        sem = asyncio.Semaphore(CONCURRENCY_LIMIT)
 
         async def _extract_one(param: dict, sections_text: str) -> dict | None:
-            param_name = param.get("param_name", "")
-            function_name = param.get("function_name", "")
-            parent_span_id = ctx.current_span_id if ctx else None
-            param_span = None
-
-            if ctx and ctx.manager:
-                param_span = ctx.manager.open_span(
-                    run_id=ctx.run_id,
-                    parent_span_id=parent_span_id,
-                    span_type=SpanType.NODE,
-                    name=f"{_STEP_NAME}:{function_name}:{param_name}",
-                )
-                ctx.manager.emit(EventType.PARAM_STEP_START, ctx.run_id, param_span, {
-                    "agent_id": "doc",
-                    "node_id": _STEP_NAME,
-                    "param_name": param_name,
-                    "function_name": function_name,
-                    "step_name": _STEP_NAME,
-                    "message": f"参数 {param_name} {_STEP_LABEL} 开始...",
-                })
-
-            try:
-                async with sem:
-                    result = await _extract_allowed_range(llm, param, sections_text)
-
-                range_val = result.get("allowed_range_value", "[]") if result else "[]"
-                preview = range_val if len(range_val) <= 50 else range_val[:50] + "…"
-
-                if ctx and ctx.manager and param_span:
-                    ctx.manager.close_span(ctx.run_id, param_span, SpanStatus.SUCCESS)
-                    ctx.manager.emit(EventType.PARAM_STEP_COMPLETE, ctx.run_id, param_span, {
-                        "agent_id": "doc",
-                        "node_id": _STEP_NAME,
-                        "param_name": param_name,
-                        "function_name": function_name,
-                        "step_name": _STEP_NAME,
-                        "message": f"参数 {param_name} {_STEP_LABEL} 完成",
-                        "result_preview": preview,
-                        "has_result": range_val != "[]",
-                    })
-
-                return result
-
-            except Exception as exc:
-                if ctx and ctx.manager and param_span:
-                    ctx.manager.close_span(ctx.run_id, param_span, SpanStatus.ERROR, error=str(exc))
-                    ctx.manager.emit(EventType.PARAM_STEP_ERROR, ctx.run_id, param_span, {
-                        "agent_id": "doc",
-                        "node_id": _STEP_NAME,
-                        "param_name": param_name,
-                        "function_name": function_name,
-                        "step_name": _STEP_NAME,
-                        "message": f"参数 {param_name} {_STEP_LABEL} 失败: {exc}",
-                        "error": str(exc),
-                    })
-                return None
+            async with sem:
+                return await _extract_allowed_range(llm, param, sections_text)
 
         tasks: list = []
         for p in ws_params:
@@ -193,11 +105,6 @@ async def _fetch_sections(doc_id: int, section_types: list[str]) -> str:
     return "\n\n".join(parts)
 
 
-def _is_bool_type(param_type: str) -> bool:
-    """Check if parameter type is bool."""
-    return param_type.lower() == "bool"
-
-
 async def _extract_allowed_range(llm: ChatOpenAI, param: dict, sections_text: str) -> dict | None:
     param_name = param.get("param_name", "")
     param_type = param.get("param_type", "")
@@ -211,7 +118,7 @@ async def _extract_allowed_range(llm: ChatOpenAI, param: dict, sections_text: st
         }
 
     # Bool type: short-circuit with [true, false]
-    if _is_bool_type(param_type):
+    if is_bool_type(param_type):
         return {
             "function_name": function_name,
             "param_name": param_name,
@@ -221,15 +128,26 @@ async def _extract_allowed_range(llm: ChatOpenAI, param: dict, sections_text: st
             ),
         }
 
+    # Tensor types have no scalar value range.  Returning early avoids
+    # wasting an LLM call and prevents dimension text (e.g. "2-8") in the
+    # parameter description from being mis-extracted as a value range.
+    if is_tensor_type(param_type):
+        return {
+            "function_name": function_name,
+            "param_name": param_name,
+            "allowed_range_value": "[]",
+        }
+
     prompt = ALLOWED_RANGE_EXTRACT_PROMPT.format(
         param_name=param_name,
         param_type=param_type,
         sections_text=sections_text,
+        semantic_rules_context=build_prompt_context(),
     )
     response = await llm.ainvoke(prompt)
     text = response.content if hasattr(response, "content") else str(response)
 
-    result = _parse_allowed_range_response(text)
+    result = parse_json_response(text, list)
     if result is not None:
         return {
             "function_name": function_name,
@@ -241,39 +159,3 @@ async def _extract_allowed_range(llm: ChatOpenAI, param: dict, sections_text: st
         "param_name": param_name,
         "allowed_range_value": "[]",
     }
-
-
-def _parse_allowed_range_response(text: str) -> list[dict] | None:
-    """Parse LLM JSON response into list of {platform, allowed_range_value} dicts."""
-    match = _JSON_BLOCK_RE.search(text)
-    if match:
-        text = match.group(1)
-    text = text.strip()
-
-    try:
-        data = json.loads(text)
-        if isinstance(data, list):
-            return data
-    except json.JSONDecodeError:
-        pass
-
-    arr_match = re.search(r"\[[\s\S]*\]", text)
-    if arr_match:
-        try:
-            data = json.loads(arr_match.group(0))
-            if isinstance(data, list):
-                return data
-        except json.JSONDecodeError:
-            pass
-
-    logger.warning("AllowedRangeExtract: failed to parse LLM response: %s", text[:200])
-    return None
-
-
-def _create_llm() -> ChatOpenAI:
-    return ChatOpenAI(
-        api_key=settings.active_api_key,
-        base_url=settings.active_base_url,
-        model=settings.active_model,
-        temperature=0.1,
-    )

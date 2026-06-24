@@ -3,7 +3,8 @@
 import pytest
 
 from agent.nodes.shape_extract import _is_shape_valid
-from agent.nodes.dtype_extract import _is_dtype_valid, _VALID_DTYPES
+from agent.nodes.dtype_extract import _is_dtype_valid
+from agent.utils.param_validators import VALID_DTYPES as _VALID_DTYPES
 from agent.nodes.dformat_extract import _is_dformat_valid, _VALID_DFORMATS
 
 

@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import json
 
-from agent.nodes.allowed_range_extract import (
-    _is_bool_type,
-    _is_tensor_type,
-    _is_ws_function,
-    _parse_allowed_range_response,
+from agent.utils.param_validators import (
+    is_bool_type as _is_bool_type,
+    is_tensor_type as _is_tensor_type,
+    is_ws_function as _is_ws_function,
 )
+from agent.utils.llm_common import parse_json_response as _raw_parse
+
+def _parse_allowed_range_response(text):
+    return _raw_parse(text, list)
 
 
 class TestIsWsFunction:
