@@ -62,12 +62,18 @@ async def case_generate_node(state: PipelineState) -> dict[str, Any]:
         )
         cases_by_product = gen.generate_by_platform(count=count)
 
-        # Save per-product files
+        # Save per-product files. 注入 ``supported_product`` 字段到每条用例 dict，
+        # 这样 ``db.save_test_cases`` / ``/api/v1/test-cases?supported_product=...`` 能按
+        # 产品过滤，前端弹框也可以按产品下拉切换展示。
         output_paths = []
         all_case_dicts: list[dict[str, Any]] = []
         for product, product_cases in cases_by_product.items():
             safe_product = _sanitize_product_name(product)
             product_case_dicts = [c.model_dump() for c in product_cases]
+            for case_dict in product_case_dicts:
+                # 始终以产品名为准；若 CaseConfig 自带 supported_product 也以平台循环变量覆盖，
+                # 避免 generator 输出遗漏或错乱。
+                case_dict["supported_product"] = product
             all_case_dicts.extend(product_case_dicts)
             cases_json = json.dumps(product_case_dicts, ensure_ascii=False)
 
@@ -83,6 +89,12 @@ async def case_generate_node(state: PipelineState) -> dict[str, Any]:
                 "case_generate: %s [%s] → %d cases at %s",
                 operator_name, product, len(product_cases), out_path,
             )
+        # 按产品用例分布日志（便于核对 "x个产品共生成y个用例" 文案）
+        per_product_count = {p: len(cs) for p, cs in cases_by_product.items()}
+        logger.info(
+            "case_generate summary: operator=%s products=%s",
+            operator_name, per_product_count,
+        )
 
         # Use the first product's path as the main cases_path for backward compatibility
         out_path = output_paths[0] if output_paths else ""
