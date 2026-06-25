@@ -7,7 +7,6 @@ import io
 import json
 import logging
 import re
-import shutil
 import zipfile
 from datetime import datetime
 from pathlib import Path
@@ -87,7 +86,9 @@ async def create_task(req: CreateTaskRequest) -> CreateTaskResponse:
             logger.warning("File not found: %s", src)
             continue
         dst = upload_dir / src.name
-        shutil.copy2(str(src), str(dst))
+        # Use plain read/write instead of shutil.copy to avoid
+        # PermissionError on WSL/NTFS (chmod/utime not permitted).
+        dst.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
 
     # Extract operator names from filenames
     items = []

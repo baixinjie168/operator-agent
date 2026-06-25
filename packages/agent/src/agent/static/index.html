@@ -734,8 +734,6 @@
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
         <h2 style="margin:0">批量任务管理</h2>
         <div style="display:flex;gap:8px;align-items:center">
-          <input type="text" id="batchSearchInput" placeholder="搜索算子名..." style="padding:6px 12px;border:1px solid var(--border);border-radius:6px;font-size:.85rem;width:200px" oninput="filterBatchDocs()">
-          <button onclick="loadBatchDocs()" style="padding:6px 14px;background:#4f46e5;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:.85rem">刷新文档列表</button>
           <button onclick="createBatchTask()" id="batchCreateBtn" style="padding:6px 14px;background:#059669;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:.85rem">创建任务</button>
         </div>
       </div>
@@ -743,12 +741,21 @@
       <!-- Summary cards -->
       <div id="batchSummary" style="display:flex;gap:12px;margin-bottom:12px;flex-wrap:wrap"></div>
 
-      <!-- Two-column: doc list + task list -->
+      <!-- Two-column: dir selector + task list -->
       <div style="display:flex;gap:16px;flex:1;min-height:0">
-        <!-- Left: doc selector -->
+        <!-- Left: directory selector -->
         <div style="flex:1;display:flex;flex-direction:column;min-height:0">
-          <div style="font-weight:600;margin-bottom:6px;font-size:.9rem;color:#374151">可选算子文档 <span id="batchDocCount" style="color:#9ca3af;font-weight:400"></span></div>
-          <div id="batchDocList" style="flex:1;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:8px;min-height:200px"></div>
+          <div style="font-weight:600;margin-bottom:6px;font-size:.9rem;color:#374151">选择算子目录</div>
+          <!-- Directory dropdown -->
+          <div style="margin-bottom:8px">
+            <select id="batchDirSelect" onchange="onBatchDirChange()" style="padding:6px 12px;border:1px solid var(--border);border-radius:6px;font-size:.85rem;width:100%;cursor:pointer">
+              <option value="">-- 选择目录 --</option>
+            </select>
+          </div>
+          <!-- Selected directory info -->
+          <div id="batchDirInfo" style="font-size:.82rem;color:#6b7280;margin-bottom:6px;display:none"></div>
+          <!-- File preview list -->
+          <div id="batchDocList" style="flex:1;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:8px;min-height:200px;background:#f9fafb"></div>
         </div>
         <!-- Right: task list -->
         <div style="flex:1;display:flex;flex-direction:column;min-height:0">
@@ -1081,10 +1088,14 @@ async function loadDetail(name) {
     fetch('/api/v1/json-constraints?operator_name=' + encodeURIComponent(name))
       .then(res => res.json())
       .then(jcData => {
+        var jcEl = document.getElementById('tabJsonConstraint');
         if (jcData.success && jcData.json_constraints) {
-          document.getElementById('tabJsonConstraint').innerHTML = '<div class="json-tree"><ul>' + renderJsonTree(jcData.json_constraints) + '</ul></div>';
+          var toolbar = '<div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:8px">' +
+            '<button class="secondary" onclick="downloadJsonConstraint(' + JSON.stringify(name) + ')">⬇ 下载 JSON</button>' +
+            '</div>';
+          jcEl.innerHTML = toolbar + '<div class="json-tree"><ul>' + renderJsonTree(jcData.json_constraints) + '</ul></div>';
         } else {
-          document.getElementById('tabJsonConstraint').innerHTML = '<div class="empty-state">无 JSON Constraint 数据</div>';
+          jcEl.innerHTML = '<div class="empty-state">无 JSON Constraint 数据</div>';
         }
       })
       .catch(err => {
@@ -1164,6 +1175,33 @@ function showDetailTab(el, id) {
   document.querySelectorAll('.detail-content').forEach(c => c.style.display = 'none');
   el.classList.add('active');
   document.getElementById(id).style.display = '';
+}
+
+/* Download the JSON Constraint of a parsed operator as a .json file. */
+function downloadJsonConstraint(name) {
+  fetch('/api/v1/json-constraints?operator_name=' + encodeURIComponent(name))
+    .then(res => res.json())
+    .then(jcData => {
+      if (!jcData.success || !jcData.json_constraints) {
+        alert('无 JSON Constraint 数据可下载');
+        return;
+      }
+      let obj = jcData.json_constraints;
+      if (typeof obj === 'string') {
+        try { obj = JSON.parse(obj); } catch (e) { /* keep raw string */ }
+      }
+      const text = (typeof obj === 'string') ? obj : JSON.stringify(obj, null, 2);
+      const blob = new Blob([text], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = (name || 'constraint') + '.json';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    })
+    .catch(err => alert('下载失败: ' + err.message));
 }
 
 /* ---------- Parameters ---------- */
@@ -2387,6 +2425,250 @@ function showExecResult(result, execResult) {
   document.getElementById('execMetricFailed').textContent = execResult.failed || 0;
   document.getElementById('execMetricTotal').textContent = execResult.total || 0;
   document.getElementById('execResultBody').textContent = JSON.stringify(result, null, 2);
+}
+
+/* ---------- Batch Task Management ---------- */
+let _batchAllDocs = [];
+let _batchSelectedDocs = [];
+let _batchCurrentTaskId = null;
+let _batchPollTimer = null;
+
+const API_BASE = '/api/v1';
+
+async function loadBatchDocs() {
+  try {
+    const res = await fetch(API_BASE + '/task-docs');
+    const data = await res.json();
+    _batchAllDocs = data.documents || [];
+    // Build directory dropdown from categories
+    const categories = new Map();
+    for (const d of _batchAllDocs) {
+      const cat = d.category || '(根目录)';
+      if (!categories.has(cat)) categories.set(cat, []);
+      categories.get(cat).push(d);
+    }
+    const select = document.getElementById('batchDirSelect');
+    select.innerHTML = '<option value="">-- 选择目录 --</option>'
+      + Array.from(categories.keys()).sort().map(cat => {
+        const count = categories.get(cat).length;
+        return '<option value="' + escapeHtml(cat) + '">' + escapeHtml(cat) + ' (' + count + ' 个)</option>';
+      }).join('');
+    // Also store the full list option
+    select.innerHTML += '<option value="__all__">全部目录 (' + _batchAllDocs.length + ' 个)</option>';
+  } catch(e) {
+    document.getElementById('batchDocList').innerHTML = '<div style="color:#ef4444;padding:8px">加载失败: ' + escapeHtml(e.message) + '</div>';
+  }
+}
+
+function onBatchDirChange() {
+  const cat = document.getElementById('batchDirSelect').value;
+  if (!cat) {
+    _batchSelectedDocs = [];
+    document.getElementById('batchDirInfo').style.display = 'none';
+    document.getElementById('batchDocList').innerHTML = '';
+    return;
+  }
+  if (cat === '__all__') {
+    _batchSelectedDocs = _batchAllDocs.slice();
+  } else {
+    _batchSelectedDocs = _batchAllDocs.filter(d => (d.category || '(根目录)') === cat);
+  }
+  // Show info
+  document.getElementById('batchDirInfo').style.display = '';
+  document.getElementById('batchDirInfo').textContent = '已选择 ' + _batchSelectedDocs.length + ' 个算子文档，点击"创建任务"开始批量解析';
+
+  // Render preview list (read-only)
+  const list = document.getElementById('batchDocList');
+  list.innerHTML = _batchSelectedDocs.map(d =>
+    '<div style="padding:3px 6px;font-size:.82rem;color:#374151;border-bottom:1px solid #f3f4f6">'
+    + escapeHtml(d.name)
+    + '<span style="float:right;color:#9ca3af;font-size:.75rem">' + (d.size ? Math.round(d.size/1024)+'KB' : '') + '</span>'
+    + '</div>'
+  ).join('') || '<div style="color:#9ca3af;padding:12px;text-align:center">该目录下无文档</div>';
+}
+
+async function createBatchTask() {
+  if (!_batchSelectedDocs.length) { alert('请先选择一个目录'); return; }
+  const paths = _batchSelectedDocs.map(d => d.path);
+  const btn = document.getElementById('batchCreateBtn');
+  btn.disabled = true; btn.textContent = '创建中...';
+  try {
+    const res = await fetch(API_BASE + '/tasks', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({file_paths: paths})
+    });
+    const data = await res.json();
+    if (data.task_id) {
+      alert('任务 #' + data.task_id + ' 已创建，共 ' + (data.total||paths.length) + ' 个算子');
+      // Reset selection
+      document.getElementById('batchDirSelect').value = '';
+      onBatchDirChange();
+      loadBatchTasks();
+      startBatchPoll(data.task_id);
+    } else {
+      alert('创建失败: ' + (data.detail || data.error || JSON.stringify(data)));
+    }
+  } catch(e) {
+    alert('请求失败: ' + e.message);
+  } finally {
+    btn.disabled = false; btn.textContent = '创建任务';
+  }
+}
+
+async function loadBatchTasks() {
+  try {
+    const [taskRes, sumRes] = await Promise.all([
+      fetch(API_BASE + '/tasks'),
+      fetch(API_BASE + '/tasks-summary')
+    ]);
+    const tasks = await taskRes.json();
+    const summary = await sumRes.json();
+    renderBatchSummary(summary);
+    renderBatchTasks(tasks);
+  } catch(e) {
+    document.getElementById('batchTaskList').innerHTML = '<div style="color:#ef4444;padding:8px">加载失败</div>';
+  }
+}
+
+function renderBatchSummary(s) {
+  const cards = [
+    {label:'总任务', val:s.total||0, color:'#6b7280'},
+    {label:'运行中', val:s.running||0, color:'#3b82f6'},
+    {label:'已完成', val:s.completed||0, color:'#059669'},
+    {label:'失败', val:s.failed||0, color:'#ef4444'},
+    {label:'排队中', val:s.pending||0, color:'#f59e0b'},
+  ];
+  document.getElementById('batchSummary').innerHTML = cards.map(c =>
+    '<div style="background:#f9fafb;border:1px solid var(--border);border-radius:8px;padding:8px 16px;min-width:90px;text-align:center">'
+    + '<div style="font-size:1.4rem;font-weight:700;color:' + c.color + '">' + c.val + '</div>'
+    + '<div style="font-size:.78rem;color:#6b7280">' + c.label + '</div></div>'
+  ).join('');
+}
+
+function renderBatchTasks(tasks) {
+  const list = document.getElementById('batchTaskList');
+  if (!tasks.tasks || !tasks.tasks.length) {
+    list.innerHTML = '<div style="color:#9ca3af;padding:12px;text-align:center">暂无任务</div>';
+    return;
+  }
+  const statusBadge = (s) => {
+    const m = {running:'<span style="color:#3b82f6">运行中</span>',completed:'<span style="color:#059669">已完成</span>',failed:'<span style="color:#ef4444">失败</span>',pending:'<span style="color:#f59e0b">排队中</span>'};
+    return m[s] || s;
+  };
+  list.innerHTML = tasks.tasks.map(t =>
+    '<div onclick="showBatchDetail(' + t.id + ')" style="padding:8px;border-radius:6px;cursor:pointer;border:1px solid transparent" onmouseover="this.style.background=\'#f3f4f6\';this.style.borderColor=\'var(--border)\'" onmouseout="this.style.background=\'\';this.style.borderColor=\'transparent\'">'
+    + '<div style="display:flex;justify-content:space-between;align-items:center">'
+    + '<span style="font-weight:600;font-size:.88rem">任务 #' + t.id + '</span>'
+    + statusBadge(t.status)
+    + '</div>'
+    + '<div style="font-size:.78rem;color:#6b7280;margin-top:2px">'
+    + (t.total||0) + ' 个算子 · 成功 ' + (t.completed_count||0) + ' · 失败 ' + (t.failed_count||0)
+    + ' · ' + escapeHtml(t.created_at||'')
+    + '</div></div>'
+  ).join('');
+}
+
+async function showBatchDetail(taskId) {
+  _batchCurrentTaskId = taskId;
+  document.getElementById('batchTaskDetail').style.display = '';
+  document.getElementById('batchDetailTitle').textContent = '#' + taskId;
+  await refreshBatchDetail();
+}
+
+async function refreshBatchDetail() {
+  if (!_batchCurrentTaskId) return;
+  try {
+    const res = await fetch(API_BASE + '/tasks/' + _batchCurrentTaskId);
+    const data = await res.json();
+    const body = document.getElementById('batchDetailBody');
+    const items = data.items || [];
+    const statusBadge = (s) => {
+      const m = {completed:'<span style="color:#059669;font-size:.78rem">✓</span>',failed:'<span style="color:#ef4444;font-size:.78rem">✗</span>',running:'<span style="color:#3b82f6;font-size:.78rem">⟳</span>',pending:'<span style="color:#f59e0b;font-size:.78rem">○</span>'};
+      return m[s] || s;
+    };
+    body.innerHTML = '<table style="width:100%;border-collapse:collapse;font-size:.82rem">'
+      + '<thead><tr><th style="text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)">状态</th><th style="text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)">算子名</th><th style="text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)">耗时</th><th style="text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)">错误信息</th></tr></thead>'
+      + '<tbody>' + items.map(it =>
+        '<tr><td style="padding:3px 8px">' + statusBadge(it.status) + '</td>'
+        + '<td style="padding:3px 8px">' + escapeHtml(it.operator_name||'') + '</td>'
+        + '<td style="padding:3px 8px;color:#9ca3af">' + (it.duration_sec ? it.duration_sec+'s' : '-') + '</td>'
+        + '<td style="padding:3px 8px;color:#ef4444;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + escapeHtml(it.error_message||'') + '</td></tr>'
+      ).join('') + '</tbody></table>';
+    const isRunning = data.status === 'running';
+    const hasFailed = (data.failed_count||0) > 0;
+    const hasCompleted = (data.completed_count||0) > 0;
+    document.getElementById('batchResumeBtn').style.display = (data.status === 'pending' || isRunning) ? '' : 'none';
+    document.getElementById('batchRetryBtn').style.display = hasFailed ? '' : 'none';
+    document.getElementById('batchDownloadBtn').style.display = hasCompleted ? '' : 'none';
+    document.getElementById('batchDeleteBtn').style.display = '';
+  } catch(e) {
+    document.getElementById('batchDetailBody').innerHTML = '<div style="color:#ef4444">加载失败</div>';
+  }
+}
+
+function startBatchPoll(taskId) {
+  if (_batchPollTimer) clearInterval(_batchPollTimer);
+  _batchCurrentTaskId = taskId;
+  _batchPollTimer = setInterval(async () => {
+    await loadBatchTasks();
+    await refreshBatchDetail();
+    try {
+      const res = await fetch(API_BASE + '/tasks/' + taskId);
+      const data = await res.json();
+      if (data.status !== 'running' && data.status !== 'pending') {
+        clearInterval(_batchPollTimer);
+        _batchPollTimer = null;
+      }
+    } catch(e) {}
+  }, 5000);
+}
+
+async function resumeBatchTask() {
+  if (!_batchCurrentTaskId) return;
+  try {
+    await fetch(API_BASE + '/tasks/' + _batchCurrentTaskId + '/resume', {method:'POST'});
+    startBatchPoll(_batchCurrentTaskId);
+    await loadBatchTasks();
+  } catch(e) { alert('恢复失败: ' + e.message); }
+}
+
+async function retryBatchTask() {
+  if (!_batchCurrentTaskId) return;
+  try {
+    const res = await fetch(API_BASE + '/tasks/' + _batchCurrentTaskId + '/retry-failed', {method:'POST'});
+    const data = await res.json();
+    if (data.success) {
+      alert('已创建重试任务 #' + (data.new_task_id || '?') + '，包含 ' + (data.failed_count || 0) + ' 个失败算子');
+      await loadBatchTasks();
+      // Switch to the newly created retry task to show its live progress.
+      if (data.new_task_id) {
+        await showBatchDetail(data.new_task_id);
+        startBatchPoll(data.new_task_id);
+      } else {
+        startBatchPoll(_batchCurrentTaskId);
+      }
+    } else {
+      alert('重试失败: ' + (data.error || '未知错误'));
+    }
+  } catch(e) { alert('重试失败: ' + e.message); }
+}
+
+async function downloadBatchTask() {
+  if (!_batchCurrentTaskId) return;
+  window.open(API_BASE + '/tasks/' + _batchCurrentTaskId + '/download', '_blank');
+}
+
+async function deleteBatchTask() {
+  if (!_batchCurrentTaskId) return;
+  if (!confirm('确认删除任务 #' + _batchCurrentTaskId + '?')) return;
+  try {
+    await fetch(API_BASE + '/tasks/' + _batchCurrentTaskId, {method:'DELETE'});
+    document.getElementById('batchTaskDetail').style.display = 'none';
+    _batchCurrentTaskId = null;
+    if (_batchPollTimer) { clearInterval(_batchPollTimer); _batchPollTimer = null; }
+    await loadBatchTasks();
+  } catch(e) { alert('删除失败: ' + e.message); }
 }
 
 </script>

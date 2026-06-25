@@ -109,10 +109,6 @@ async def assemble_result_node(state: PipelineState) -> dict[str, Any]:
         )
         dtype_support = _build_dtype_support(dtype_combos)
 
-        # Step 3f: Inject platform_constants into constraints_in_parameters
-        if platform_constants:
-            _inject_platform_constants(constraints_ip, platform_constants)
-
         # Step 3g: Inject parameter_representation records into constraints_in_parameters
         param_reprs_data = await _mcp_client.query_parameter_representations_by_doc_id(doc_id)
         if param_reprs_data and (
@@ -448,43 +444,6 @@ def _build_inputs_outputs(
     return inputs, outputs
 
 
-def _inject_platform_constants(
-    constraints_ip: dict[str, list[dict]],
-    platform_constants: list[dict],
-) -> None:
-    """Inject platform_constants into constraints_in_parameters per product.
-
-    Modifies constraints_ip in place: adds a "platform_constants" key
-    to each platform's constraint list (as a special metadata entry).
-
-    Args:
-        constraints_ip: {platform_name: [relation_object]} dict.
-        platform_constants: List of platform constant dicts from DB.
-    """
-    if not platform_constants:
-        return
-
-    # Build {platform: [constant_info]} mapping
-    const_by_platform: dict[str, list[dict]] = {}
-    for pc in platform_constants:
-        for pv in pc.get("platform_values", []):
-            plat = pv["platform"]
-            const_by_platform.setdefault(plat, []).append({
-                "name": pc["const_name"],
-                "description": pc.get("description", ""),
-                "values": pv["values"],
-            })
-
-    # Inject into each platform's constraint list
-    for plat, consts in const_by_platform.items():
-        if plat in constraints_ip:
-            # Prepend platform_constants as metadata entry
-            constraints_ip[plat].insert(0, {
-                "_type": "platform_constants",
-                "platform_constants": consts,
-            })
-
-
 def _inject_parameter_representations(
     constraints_ip: dict[str, list[dict]],
     param_reprs_data: dict,
@@ -522,15 +481,8 @@ def _inject_parameter_representations(
         if not inserts:
             continue
 
-        # Insert after platform_constants metadata if present
-        insert_at = 0
-        if (
-            constraint_list
-            and isinstance(constraint_list[0], dict)
-            and constraint_list[0].get("_type") == "platform_constants"
-        ):
-            insert_at = 1
-        constraint_list[insert_at:insert_at] = inserts
+        # Prepend parameter representations to the constraint list
+        constraint_list[0:0] = inserts
 
 
 def _build_constraints_in_parameters(
