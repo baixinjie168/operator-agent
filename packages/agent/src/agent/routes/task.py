@@ -12,6 +12,7 @@ import zipfile
 from datetime import datetime
 from pathlib import Path
 
+import yaml
 from fastapi import APIRouter, Query
 from fastapi.responses import Response
 
@@ -37,6 +38,32 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1", tags=["task"])
 
 _mcp_client = MCPClient()
+
+# Cached parallel config loaded from task_config.yaml
+_parallel_config_cache: dict | None = None
+
+
+def _get_max_workers() -> int:
+    """Read max_workers from task_config.yaml (cached).
+
+    Falls back to settings.task_max_workers if the config file is
+    missing or doesn't specify parallel.max_workers.
+    """
+    global _parallel_config_cache
+    if _parallel_config_cache is None:
+        config_path = Path(settings.task_config_file)
+        if config_path.exists():
+            try:
+                with open(config_path, encoding="utf-8") as f:
+                    _parallel_config_cache = yaml.safe_load(f) or {}
+            except Exception:
+                logger.warning("Failed to load task_config.yaml, using default max_workers")
+                _parallel_config_cache = {}
+        else:
+            _parallel_config_cache = {}
+
+    parallel_cfg = _parallel_config_cache.get("parallel", {})
+    return parallel_cfg.get("max_workers", settings.task_max_workers)
 
 
 @router.get("/task-docs", response_model=TaskDocsResponse)
@@ -227,7 +254,12 @@ async def create_task(req: CreateTaskRequest) -> CreateTaskResponse:
 
         # Start background execution
         asyncio.create_task(
-            run_task(task_id, manager=manager, batch_run_ids=batch_run_ids)
+            run_task(
+                task_id,
+                max_workers=_get_max_workers(),
+                manager=manager,
+                batch_run_ids=batch_run_ids,
+            )
         )
 
         return CreateTaskResponse(

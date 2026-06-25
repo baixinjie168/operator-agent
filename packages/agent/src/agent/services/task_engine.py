@@ -626,7 +626,8 @@ async def resume_task(task_id: int) -> dict:
     )
 
     # Re-run the task (acquires lock internally)
-    asyncio.create_task(run_task(task_id))
+    from agent.routes.task import _get_max_workers
+    asyncio.create_task(run_task(task_id, max_workers=_get_max_workers()))
 
     return {"reset_count": reset_count, "task_id": task_id}
 
