@@ -10,7 +10,10 @@ import random
 from collections import defaultdict
 from typing import List, Dict, Optional
 
-import torch
+try:
+    import torch
+except ImportError:
+    torch = None
 
 from agent.generators.atk_common_utils.case_config import CaseConfig
 from agent.generators.common_utils.common_dispatcher import CommonDispatcher

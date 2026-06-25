@@ -1,8 +1,6 @@
 import os
 import re
 
-import torch
-
 
 class GlobalConfig:
     """全局配置"""
@@ -122,23 +120,32 @@ class ParamModelConfig:
 class DataMatchMap:
     """配置各类数据映射字典"""
     # 在生成实际数据的时候使用，用于设置tensor中数值的数据类型
-    TENSOR_DTYPE_TRANSFER_TORCH_MAP = {"ACL_FLOAT": torch.float, "ACL_FLOAT16": torch.float16, "ACL_INT8": torch.int8,
-                                       "ACL_INT32": torch.int32, "ACL_UINT8": torch.uint8, "ACL_INT16": torch.int16,
-                                       "ACL_UINT16": torch.uint16, "ACL_UINT32": torch.uint32, "ACL_INT64": torch.int64,
-                                       "ACL_UINT64": torch.uint64, "ACL_DOUBLE": torch.float64, "ACL_BOOL": torch.bool,
-                                       "ACL_STRING": str, "ACL_COMPLEX64": torch.complex64,
-                                       "ACL_COMPLEX128": torch.complex128,
-                                       "ACL_BF16": torch.bfloat16, "ACL_INT4": torch.int, "ACL_UINT1": torch.uint8,
-                                       "ACL_COMPLEX32": torch.complex32, "FLOAT": torch.float32,
-                                       "FLOAT16": torch.float16,
-                                       "FLOAT32": torch.float32, "FLOAT64": torch.float64, "BFLOAT16": torch.bfloat16,
-                                       "float32": torch.float32, "float16": torch.float16, "float64": torch.float64,
-                                       "bfloat16": torch.bfloat16, "INT4": torch.int, "INT8": torch.int8,
-                                       "INT16": torch.int16, "INT32": torch.int32, "UINT8": torch.uint8,
-                                       "UINT16": torch.uint16, "UINT32": torch.uint32, "UINT64": torch.uint64,
-                                       "INT64": torch.int64, "COMPLEX64": torch.complex64,
-                                       "COMPLEX128": torch.complex128,
-                                       "DOUBLE": torch.float64}
+    _TENSOR_DTYPE_TRANSFER_TORCH_MAP = None
+
+    @classmethod
+    def get_torch_dtype_transfer_map(cls):
+        """Lazily build the ACL→torch dtype map. Requires torch to be installed."""
+        if cls._TENSOR_DTYPE_TRANSFER_TORCH_MAP is None:
+            import torch
+            cls._TENSOR_DTYPE_TRANSFER_TORCH_MAP = {
+                "ACL_FLOAT": torch.float, "ACL_FLOAT16": torch.float16, "ACL_INT8": torch.int8,
+                "ACL_INT32": torch.int32, "ACL_UINT8": torch.uint8, "ACL_INT16": torch.int16,
+                "ACL_UINT16": torch.uint16, "ACL_UINT32": torch.uint32, "ACL_INT64": torch.int64,
+                "ACL_UINT64": torch.uint64, "ACL_DOUBLE": torch.float64, "ACL_BOOL": torch.bool,
+                "ACL_STRING": str, "ACL_COMPLEX64": torch.complex64,
+                "ACL_COMPLEX128": torch.complex128,
+                "ACL_BF16": torch.bfloat16, "ACL_INT4": torch.int, "ACL_UINT1": torch.uint8,
+                "ACL_COMPLEX32": torch.complex32, "FLOAT": torch.float32,
+                "FLOAT16": torch.float16,
+                "FLOAT32": torch.float32, "FLOAT64": torch.float64, "BFLOAT16": torch.bfloat16,
+                "float32": torch.float32, "float16": torch.float16, "float64": torch.float64,
+                "bfloat16": torch.bfloat16, "INT4": torch.int, "INT8": torch.int8,
+                "INT16": torch.int16, "INT32": torch.int32, "UINT8": torch.uint8,
+                "UINT16": torch.uint16, "UINT32": torch.uint32, "UINT64": torch.uint64,
+                "INT64": torch.int64, "COMPLEX64": torch.complex64,
+                "COMPLEX128": torch.complex128,
+                "DOUBLE": torch.float64}
+        return cls._TENSOR_DTYPE_TRANSFER_TORCH_MAP
 
     # 在case_config中只生成数据生成方法字段，不生成实际数据时使用，用于适配ATK框架
     ACL_DTYPE_TRANSFER_TENSOR_MAP = {"INT4": "int", "INT8": "int8", "INT16": "int16", "INT32": "int32",
