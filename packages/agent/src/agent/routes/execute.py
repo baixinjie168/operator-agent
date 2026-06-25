@@ -79,6 +79,32 @@ async def run_execute(body: ExecuteRunRequest, request: Request) -> ExecuteRunRe
         except Exception as e:
             logger.warning("Failed to fetch server info: %s", e)
 
+    # Fail fast on missing / incomplete server info — no point kicking off
+    # the async pipeline just to error out at the SSH-connect step.
+    if not server_info:
+        return ExecuteRunResponse(
+            success=False, task_id="", operator_name=operator_name,
+            error=(
+                "server_id is required and must reference a valid row in the "
+                "``servers`` table. 当前没有可用的执行服务器，请先在「服务器管理」"
+                "中配置并选择一个服务器后再执行用例。"
+            ),
+        )
+
+    missing_fields = [
+        f for f in ("ip", "username", "password")
+        if not server_info.get(f)
+    ]
+    if missing_fields:
+        server_name = server_info.get("name") or f"server_id={body.server_id}"
+        return ExecuteRunResponse(
+            success=False, task_id="", operator_name=operator_name,
+            error=(
+                f"服务器「{server_name}」信息不完整，缺少字段: "
+                f"{', '.join(missing_fields)}。请在「服务器管理」中补全后再执行。"
+            ),
+        )
+
     if db_cases:
         cases_data = [c["case_data"] for c in db_cases]
         logger.info("execute: loaded %d cases from DB for operator=%s", len(db_cases), operator_name)
@@ -182,7 +208,11 @@ async def run_execute(body: ExecuteRunRequest, request: Request) -> ExecuteRunRe
     )
 
     asyncio.create_task(
-        _run_execute_pipeline(run_id, operator_name, str(cases_path), len(cases_data), case_ids, manager, server_info)
+        _run_execute_pipeline(
+            run_id, operator_name, str(cases_path), len(cases_data),
+            case_ids, manager, server_info,
+            task_type=body.task_type, execution_count=body.execution_count,
+        )
     )
 
     return ExecuteRunResponse(
@@ -193,6 +223,7 @@ async def run_execute(body: ExecuteRunRequest, request: Request) -> ExecuteRunRe
 async def _run_execute_pipeline(
     run_id: str, operator_name: str, cases_path: str, cases_count: int,
     case_ids: list[int], manager: RuntimeManager, server_info: dict | None = None,
+    task_type: str = "precision", execution_count: int = 1,
 ) -> None:
     """Run the 3-step execution sub-graph with RuntimeManager observability."""
     ctx = manager.enter_context(run_id)
@@ -202,7 +233,7 @@ async def _run_execute_pipeline(
 
     await asyncio.sleep(0.3)
 
-    server_name = server_info["name"] if server_info else "本地执行"
+    server_name = server_info.get("name") or f"server_id={server_info.get('id', '?')}"
 
     manager.emit(EventType.WORKFLOW_START, run_id, run.spans[run_id], {
         "agent_id": "execute",
@@ -229,6 +260,8 @@ async def _run_execute_pipeline(
         "cases_count": cases_count,
         "content": operator_doc,
         "server_info": server_info,
+        "task_type": task_type,
+        "execution_count": execution_count,
     }
 
     try:
@@ -256,20 +289,41 @@ async def _run_execute_pipeline(
         error = result.get("error")
         status = "completed" if not error else "failed"
 
-        # Save exec results to exec_results table
+        # Save exec results to exec_results table.
+        # Prefer the structured ``report_records`` from run_atk (each record
+        # carries its own id/run_result/failure_reason); fall back to the
+        # simple positional ``passed`` counter for backward compat.
         if not error and case_ids and exec_result:
             try:
                 from agent.db import save_exec_results as db_save_exec_results
 
+                report_records = (exec_result.get("task_report_data") or {}).get("report_records") or []
                 total = exec_result.get("total", 0)
                 passed = exec_result.get("passed", 0)
-                exec_records = []
-                for i, cid in enumerate(case_ids):
-                    exec_records.append({
-                        "case_id": cid,
-                        "passed": 1 if i < passed else 0,
-                        "cpu_precision_passed": 1,
-                    })
+
+                exec_records: list[dict] = []
+                if report_records and len(report_records) == len(case_ids):
+                    # Real mapping: align report_records[i] with case_ids[i]
+                    for cid, rec in zip(case_ids, report_records):
+                        run_result = (rec.get("run_result") or "").strip().lower()
+                        passed_flag = run_result in {
+                            "pass", "passed", "success", "ok", "成功", "通过", "1", "true", "yes",
+                        }
+                        exec_records.append({
+                            "case_id": cid,
+                            "passed": 1 if passed_flag else 0,
+                            "cpu_precision_passed": 1 if passed_flag else 0,
+                            "error_message": rec.get("failure_reason"),
+                        })
+                else:
+                    # Fallback: positional passed counter (legacy behaviour)
+                    for i, cid in enumerate(case_ids):
+                        exec_records.append({
+                            "case_id": cid,
+                            "passed": 1 if i < passed else 0,
+                            "cpu_precision_passed": 1,
+                        })
+
                 db_save_exec_results(
                     task_id=run_id,
                     operator_name=operator_name,
