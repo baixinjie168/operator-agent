@@ -79,6 +79,32 @@ async def run_execute(body: ExecuteRunRequest, request: Request) -> ExecuteRunRe
         except Exception as e:
             logger.warning("Failed to fetch server info: %s", e)
 
+    # Fail fast on missing / incomplete server info — no point kicking off
+    # the async pipeline just to error out at the SSH-connect step.
+    if not server_info:
+        return ExecuteRunResponse(
+            success=False, task_id="", operator_name=operator_name,
+            error=(
+                "server_id is required and must reference a valid row in the "
+                "``servers`` table. 当前没有可用的执行服务器，请先在「服务器管理」"
+                "中配置并选择一个服务器后再执行用例。"
+            ),
+        )
+
+    missing_fields = [
+        f for f in ("ip", "username", "password")
+        if not server_info.get(f)
+    ]
+    if missing_fields:
+        server_name = server_info.get("name") or f"server_id={body.server_id}"
+        return ExecuteRunResponse(
+            success=False, task_id="", operator_name=operator_name,
+            error=(
+                f"服务器「{server_name}」信息不完整，缺少字段: "
+                f"{', '.join(missing_fields)}。请在「服务器管理」中补全后再执行。"
+            ),
+        )
+
     if db_cases:
         cases_data = [c["case_data"] for c in db_cases]
         logger.info("execute: loaded %d cases from DB for operator=%s", len(db_cases), operator_name)
@@ -207,7 +233,7 @@ async def _run_execute_pipeline(
 
     await asyncio.sleep(0.3)
 
-    server_name = server_info["name"] if server_info else "本地执行"
+    server_name = server_info.get("name") or f"server_id={server_info.get('id', '?')}"
 
     manager.emit(EventType.WORKFLOW_START, run_id, run.spans[run_id], {
         "agent_id": "execute",

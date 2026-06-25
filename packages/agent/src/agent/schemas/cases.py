@@ -59,7 +59,10 @@ class ExecuteRunRequest(BaseModel):
 
     operator_name: str = Field(..., min_length=1, description="Operator name (e.g. 'aclnnAdaLayerNorm').")
     cases_json: str = Field(..., min_length=2, description="Test cases JSON array string.")
-    server_id: int | None = Field(default=None, description="Server ID for remote execution. If not provided, uses local execution.")
+    server_id: int | None = Field(
+        default=None,
+        description="Server ID for remote execution. REQUIRED — must reference a row in the ``servers`` table with ip / username / password populated. Requests without a valid ``server_id`` are rejected synchronously.",
+    )
     task_type: str = Field(
         default="precision",
         description="ATK task type forwarded to ``atk task --task``. Common values: precision / performance / function.",
