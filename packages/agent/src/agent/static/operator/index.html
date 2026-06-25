@@ -4804,6 +4804,11 @@ function _execViewCases() {
 
 function _loadExecViewCases(product) {
   var state = window._execViewCasesState || {};
+  // 需求 3: 若调用方没传 product 且产品列表非空，强制回退到第一个产品，
+  // 保证弹框默认仅展示一个产品的用例。
+  if (!product && state.allProducts && state.allProducts.length > 0) {
+    product = state.allProducts[0];
+  }
   window._execViewCasesState.currentProduct = product;
 
   _fetchCasesFromDB(state.operator, state.taskId, product)
@@ -4815,20 +4820,20 @@ function _loadExecViewCases(product) {
       var products = state.allProducts || [];
       var jsonStr = JSON.stringify(cases, null, 2);
 
-      // Build product dropdown selector
+      // Build product dropdown selector. 需求 3: 去掉"全部产品"选项，
+      // 仅保留各产品下拉项；产品数 <= 1 时隐藏下拉。
       var productSelectorHtml = '';
-      if (products.length > 0) {
+      if (products.length > 1) {
         productSelectorHtml = '<div style="margin-bottom:10px;display:flex;align-items:center;gap:8px">'
           + '<span style="font-size:11px;color:var(--text-muted)"><i class="fa-solid fa-filter" style="margin-right:4px"></i>产品筛选:</span>'
           + '<select id="execViewProductSelect" style="background:rgba(0,0,0,0.3);border:1px solid var(--border);border-radius:4px;'
           + 'color:var(--text);font-size:11px;padding:5px 8px;outline:none;cursor:pointer;max-width:260px">'
-          + '<option value=""' + (!product ? ' selected' : '') + '>全部产品</option>'
           + products.map(function(p) {
             return '<option value="' + escHtml(p) + '"' + (p === product ? ' selected' : '') + '>' + escHtml(p) + '</option>';
           }).join('')
           + '</select>'
           + '<span style="font-size:10px;color:var(--text-muted)">'
-          + (product ? '当前 ' + cases.length + ' 个用例' : '共 ' + cases.length + ' 个用例')
+          + '当前 ' + cases.length + ' 个用例'
           + '</span>'
           + '</div>';
       }
@@ -5435,6 +5440,8 @@ function _caseFinishAll() {
   // Final summary INSIDE the GeneratorAgent dialog (not the chat area).
   // Format: "执行完成，<N>个产品共生成 <M> 个用例" with a 查看详情
   // entry-point in the shared .timeline-footer that opens the case modal.
+  // 文案统一在 GeneratorAgent 卡片内部展示，不再向 chat-messages 流额外输出，
+  // 避免与卡片内 summary 重复。
   var count = _lastCaseCount || 0;
   var summaryText = document.getElementById("caseSummaryText");
   if (summaryText) {
@@ -5527,9 +5534,17 @@ function _resetCaseAgentState() {
 // Used by both the case detail panel's "查看用例" link and the GeneratorAgent
 // dialog's "查看详情" button.
 // Supports product-based filtering: cases are grouped by product, default shows first product.
+// 需求 3: 弹框默认仅展示一个产品（下拉切换），不再保留"全部产品"选项。
 function _renderCaseJsonTreeModal(allCases, products, currentProduct) {
   window._caseModalAllCases = allCases;
   window._caseModalProducts = products || [];
+  window._caseModalCurrentProduct = currentProduct;
+
+  // 如果调用方没传 currentProduct 但产品列表非空，强制回退到第一个产品，
+  // 保证弹框始终只展示一个产品的用例（符合需求 3）。
+  if (!currentProduct && products && products.length > 0) {
+    currentProduct = products[0];
+  }
   window._caseModalCurrentProduct = currentProduct;
 
   // Filter cases by current product
@@ -5540,14 +5555,14 @@ function _renderCaseJsonTreeModal(allCases, products, currentProduct) {
     });
   }
 
-  // Build product dropdown
+  // Build product dropdown. 需求 3: 去掉"全部产品"选项，
+  // 仅保留各产品的下拉项；产品数 <= 1 时隐藏下拉。
   var productDropdownHtml = '';
-  if (products && products.length > 0) {
+  if (products && products.length > 1) {
     productDropdownHtml = '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">'
       + '<span style="font-size:11px;color:var(--text-muted)"><i class="fa-solid fa-filter" style="margin-right:4px"></i>产品:</span>'
       + '<select id="caseModalProductSelect" style="background:rgba(0,0,0,0.3);border:1px solid var(--border);border-radius:4px;'
       + 'color:var(--text);font-size:11px;padding:4px 8px;outline:none;cursor:pointer">'
-      + '<option value=""' + (!currentProduct ? ' selected' : '') + '>全部产品 (' + allCases.length + '个)</option>'
       + products.map(function(p) {
         var count = allCases.filter(function(c) { return (c.supported_product || "") === p; }).length;
         return '<option value="' + escHtml(p) + '"' + (p === currentProduct ? ' selected' : '') + '>'
@@ -6022,6 +6037,10 @@ function renderCaseDetail() {
       if (!window._caseDetailCurrentProduct && products.length > 0) {
         window._caseDetailCurrentProduct = products[0];
       }
+      // 需求 3: 强制回退到第一个产品，保证弹框默认仅展示一个产品。
+      if (!window._caseDetailCurrentProduct && products.length > 0) {
+        window._caseDetailCurrentProduct = products[0];
+      }
       var currentProduct = window._caseDetailCurrentProduct || null;
 
       // Filter cases by current product
@@ -6039,12 +6058,12 @@ function renderCaseDetail() {
       window._caseListData = casesArr;
       window._selectedCaseIdx = safeIdx;
 
-      // Build product dropdown in title
+      // Build product dropdown in title. 需求 3: 去掉"全部"选项，
+      // 仅展示各产品下拉；产品数 <= 1 时隐藏下拉。
       var productSelectorHtml = '';
-      if (products.length > 0) {
+      if (products.length > 1) {
         productSelectorHtml = '<select id="caseDetailProductSelect" style="background:rgba(0,0,0,0.3);border:1px solid var(--border);border-radius:4px;'
           + 'color:var(--text);font-size:10px;padding:3px 6px;outline:none;cursor:pointer;margin-left:auto;max-width:140px;flex-shrink:0">'
-          + '<option value=""' + (!currentProduct ? ' selected' : '') + '>全部 (' + allCases.length + ')</option>'
           + products.map(function(p) {
             var count = allCases.filter(function(c) { return (c.supported_product || "") === p; }).length;
             return '<option value="' + escHtml(p) + '"' + (p === currentProduct ? ' selected' : '') + '>'
