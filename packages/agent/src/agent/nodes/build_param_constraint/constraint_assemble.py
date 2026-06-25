@@ -137,6 +137,8 @@ async def constraint_assemble_node(state: BuildParamConstraintState) -> dict[str
                 if enum_values:
                     ar_value = enum_values
 
+            ar_src_text = ar_data.get("src_text", "")
+
             # usage_notes is internal-only (used above for enum fallback and
             # elsewhere for null-pointer dtype=N/A detection); drop it from
             # the final output JSON.
@@ -145,7 +147,7 @@ async def constraint_assemble_node(state: BuildParamConstraintState) -> dict[str
             constraint[plat] = {
                 **attrs,
                 "dimensions": {"value": dimensions_value, "src_text": shape_raw},
-                "allowed_range_value": {"value": ar_value, "type": ar_type, "src_text": ""},
+                "allowed_range_value": {"value": ar_value, "type": ar_type, "src_text": ar_src_text},
             }
 
         # Expand "common" key to per-platform entries before DB save

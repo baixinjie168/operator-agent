@@ -135,6 +135,10 @@ _DIMENSION_PATTERNS: list[tuple[str, Any]] = [
     ),
     (r"^1[- ]?D$", [1, 1]),
     (r"^(\d+)[- ]?D$", lambda m: [int(m.group(1)), int(m.group(1))]),
+    # Chinese dimension: "N维" → [N,N], "N维，最大长度M" → [N,N] (ignore size info)
+    (r"^(\d+)维(?:[，,]|$)", lambda m: [int(m.group(1)), int(m.group(1))]),
+    # Chinese dimension range: "N维~M维" → [N,M]
+    (r"^(\d+)维\s*[~-]\s*(\d+)维$", lambda m: [int(m.group(1)), int(m.group(2))]),
     (r"^\(([^)]+)\)$", lambda m: [len(m.group(1).split(","))] * 2),
     (
         r"^\[([^\]]+)\]$",

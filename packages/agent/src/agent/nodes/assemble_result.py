@@ -464,9 +464,9 @@ def _inject_parameter_representations(
     - Platform-agnostic tensor-dim representations (e.g.
       ``BS.range_value == x1.shape[0]``) are inserted into every platform.
 
-    Insertion point is right after any ``_type: platform_constants``
-    metadata entry so the final per-platform ordering is:
-    ``[platform_constants, parameter_representations..., <other constraints>]``.
+    Records are prepended to each platform's constraint list so the final
+    per-platform ordering is:
+    ``[parameter_representations..., <other constraints>]``.
     """
     tensor_reps: list[dict] = param_reprs_data.get("representations", []) or []
     platform_reps: dict[str, list[dict]] = (

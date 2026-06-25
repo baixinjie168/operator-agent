@@ -137,6 +137,13 @@ def _validate_range_structure(
         return True, ""
 
     for i, r in enumerate(ranges):
+        # For enum type, None is a valid element (represents "empty configuration"
+        # for aclIntArray params, e.g. "配置空或者[-2,-1]")
+        if r is None:
+            if ar_type == "enum":
+                continue
+            return False, f"range[{i}] must be a list, got NoneType"
+
         if not isinstance(r, list):
             return False, f"range[{i}] must be a list, got {type(r).__name__}"
 
@@ -206,28 +213,40 @@ def _validate_range_source(
 
 
 def _parse_allowed_range_response(text: str) -> dict[str, Any]:
-    """Parse LLM response: {"type": "range"|"enum", "value": [[min,max], ...]}.
+    """Parse LLM response: {"type": "range"|"enum", "value": [[min,max], ...], "src_text": "..."}.
 
     Backward compatible: if LLM returns a plain array [[min,max], ...],
     treats it as {"type": "range", "value": [...]}.
+
+    For "enum" type, null values are preserved (they represent "empty"
+    configurations for aclIntArray params, e.g. "配置空或者[-2,-1]").
+    For "range" type, non-list items are converted to [] (invalid ranges).
     """
     # Try parsing as JSON object with type+value
     data = parse_json_response(text, dict)
     if isinstance(data, dict):
         ar_type = data.get("type", "range")
         ar_value = data.get("value", [])
+        src_text = data.get("src_text", "")
         if isinstance(ar_value, list):
-            ar_value = [item if isinstance(item, list) else [] for item in ar_value]
-            return {"type": ar_type, "value": ar_value}
+            if ar_type == "enum":
+                # Preserve None values; convert other non-list items to []
+                ar_value = [
+                    item if (isinstance(item, list) or item is None) else []
+                    for item in ar_value
+                ]
+            else:
+                ar_value = [item if isinstance(item, list) else [] for item in ar_value]
+            return {"type": ar_type, "value": ar_value, "src_text": src_text}
 
     # Try parsing as plain array (backward compatible)
     data = parse_json_response(text, list)
     if isinstance(data, list):
         ar_value = [item if isinstance(item, list) else [] for item in data]
-        return {"type": "range", "value": ar_value}
+        return {"type": "range", "value": ar_value, "src_text": ""}
 
     logger.warning("BuildParamConstraint: failed to parse allowed_range: %s", text[:200])
-    return {"type": "range", "value": []}
+    return {"type": "range", "value": [], "src_text": ""}
 
 
 async def allowed_range_build_node(state: BuildParamConstraintState) -> dict[str, Any]:
@@ -356,6 +375,16 @@ async def allowed_range_build_node(state: BuildParamConstraintState) -> dict[str
         if not llm_desc.strip() and not constraints_text.strip():
             key = f"{p['function_name']}::{p['param_name']}"
             result[key] = _EMPTY
+            continue
+
+        # aclIntArray params: skip deterministic regex — the regex matches
+        # specific array values like [-2,-1] as numeric ranges, but for
+        # aclIntArray these are enum array values, not continuous ranges.
+        # Let the LLM handle them (prompt rule #9 covers this case).
+        ptype = p.get("param_type", "")
+        is_int_array = "aclIntArray" in ptype
+        if is_int_array:
+            llm_needed.append(p)
             continue
 
         deterministic = _try_deterministic_range(llm_desc)

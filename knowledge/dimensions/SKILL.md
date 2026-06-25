@@ -26,6 +26,15 @@ license: MIT
 | `"2D"` / `"3-D"` | `[2, 2]` / `[3, 3]` | Rank exact (D suffix) |
 | `"1D~8D"` | `[1, 8]` | Rank range with D suffix |
 | `"2维~8维"` | `[2, 8]` | Chinese dimension range |
+| `"1维"` / `"3维"` | `[1, 1]` / `[3, 3]` | Chinese rank exact (维 suffix) |
+| `"1维，最大长度256"` | `[1, 1]` | Chinese rank + size info (only rank matters) |
+
+**重要：维数与长度的区分**
+- "N维" 描述的是 tensor 的**维度数**（rank），应输出 `[N, N]`
+- "最大长度M" / "最大长度为M" 描述的是某一维的**大小限制**，不属于 dimensions，
+  应由 constraints_in_parameters 中的 `self_shape_dim_range` 约束表达
+- 例如 "1维，最大长度256" → dimensions `[1, 1]`，长度限制 256 在 constraints 中
+- **不要**将 "1维，最大长度256" 解析为 `[[1, 256]]`（per-dim 格式），这是错误的
 
 ### Tuple / bracket patterns
 | Shape text | Output | Rule |

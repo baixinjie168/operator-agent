@@ -104,6 +104,13 @@
   .detail-tab { padding: 6px 14px; border-radius: 6px; font-size: .85rem; cursor: pointer; background: #f3f4f6; border: 1px solid #e5e7eb; color: #555; transition: .15s; }
   .detail-tab.active { background: #4f46e5; color: #fff; border-color: #4f46e5; }
 
+  /* JSON Constraint tab: fill available space with internal scroll on the tree */
+  #tabJsonConstraint { height: 100%; display: flex; flex-direction: column; overflow: hidden; }
+  #tabJsonConstraint > .json-tree { flex: 1; min-height: 0; overflow: auto; }
+
+  /* Query detail view: flex column so tabs stay fixed and content scrolls below */
+  #queryDetailView { display: flex; flex-direction: column; }
+
   .section-card { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px; padding: 16px; margin-bottom: 10px; }
   .section-card h4 { font-size: .9rem; margin-bottom: 8px; color: #374151; }
   .section-card .section-body { font-size: .85rem; color: #555; white-space: pre-wrap; word-break: break-word; max-height: 300px; overflow-y: auto; background: #fff; padding: 12px; border-radius: 4px; border: 1px solid #e5e7eb; }
@@ -339,8 +346,8 @@
   .bt-task-panel { flex: 1; min-width: 0; background: #fff; border: 1px solid var(--bt-border); border-radius: 10px; overflow: hidden; display: flex; flex-direction: column; }
   .bt-task-panel-header { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--bt-border); }
   .bt-task-panel-header h3 { font-size: .95rem; font-weight: 600; margin: 0; }
-  .bt-btn-refresh { padding: 4px 11px; background: #f1f5f9; border: 1px solid var(--bt-border); border-radius: 6px; font-size: .75rem; color: var(--bt-dim); cursor: pointer; }
-  .bt-btn-refresh:hover { background: #e2e8f0; }
+  button.bt-btn-refresh { padding: 4px 11px; background: #f1f5f9; border: 1px solid var(--bt-border); border-radius: 6px; font-size: .75rem; color: var(--bt-dim); cursor: pointer; }
+  button.bt-btn-refresh:hover { background: #e2e8f0; }
   .bt-task-table-wrap { flex: 1; overflow-y: auto; }
   .bt-task-table { width: 100%; border-collapse: collapse; }
   .bt-task-table th { text-align: left; padding: 8px 14px; font-size: .72rem; font-weight: 600; color: var(--bt-dim); border-bottom: 1px solid var(--bt-border); background: #f8fafc; white-space: nowrap; position: sticky; top: 0; z-index: 1; }
@@ -365,18 +372,18 @@
   .bt-progress-text { font-size: .72rem; color: var(--bt-dim); white-space: nowrap; }
   .bt-time-cell { font-size: .72rem; color: var(--bt-dim); line-height: 1.5; white-space: nowrap; }
   .bt-time-cell .start { color: #1e293b; }
-  .bt-btn-action { padding: 3px 9px; border: 1px solid var(--bt-border); border-radius: 6px; font-size: .72rem; cursor: pointer; background: #fff; color: #374151; transition: all .1s; white-space: nowrap; }
-  .bt-btn-action:hover { background: #f1f5f9; border-color: #cbd5e1; }
-  .bt-btn-action.btn-download { color: var(--bt-primary); border-color: #c7d2fe; }
-  .bt-btn-action.btn-download:hover { background: var(--bt-primaryL); }
-  .bt-btn-action.btn-retry { color: var(--bt-amber); border-color: #fde68a; }
-  .bt-btn-action.btn-retry:hover { background: var(--bt-amberL); }
-  .bt-btn-action.btn-delete { color: var(--bt-red); border-color: #fecaca; }
-  .bt-btn-action.btn-delete:hover { background: var(--bt-redL); }
-  .bt-btn-action.btn-stop { color: var(--bt-red); border-color: #fecaca; }
-  .bt-btn-action.btn-stop:hover { background: var(--bt-redL); }
-  .bt-btn-action.btn-resume { color: var(--bt-amber); border-color: #fde68a; }
-  .bt-btn-action.btn-resume:hover { background: var(--bt-amberL); }
+  button.bt-btn-action { padding: 3px 9px; border: 1px solid var(--bt-border); border-radius: 6px; font-size: .72rem; cursor: pointer; background: #fff; color: #374151; transition: all .1s; white-space: nowrap; }
+  button.bt-btn-action:hover { background: #f1f5f9; border-color: #cbd5e1; }
+  button.bt-btn-action.btn-download { color: var(--bt-primary); border-color: #c7d2fe; }
+  button.bt-btn-action.btn-download:hover { background: var(--bt-primaryL); }
+  button.bt-btn-action.btn-retry { color: var(--bt-amber); border-color: #fde68a; }
+  button.bt-btn-action.btn-retry:hover { background: var(--bt-amberL); }
+  button.bt-btn-action.btn-delete { color: var(--bt-red); border-color: #fecaca; }
+  button.bt-btn-action.btn-delete:hover { background: var(--bt-redL); }
+  button.bt-btn-action.btn-stop { color: var(--bt-red); border-color: #fecaca; }
+  button.bt-btn-action.btn-stop:hover { background: var(--bt-redL); }
+  button.bt-btn-action.btn-resume { color: var(--bt-amber); border-color: #fde68a; }
+  button.bt-btn-action.btn-resume:hover { background: var(--bt-amberL); }
 
   /* Expandable detail row */
   .bt-task-detail { display: none; background: #f8fafc; }
@@ -539,11 +546,11 @@
         <div class="status" id="queryStatus"></div>
       </div>
 
-      <div id="queryDetailView" style="display:none;flex:1;min-height:0;overflow-y:auto">
+      <div id="queryDetailView" style="display:none;flex:1;min-height:0;flex-direction:column;overflow:hidden">
         <span class="back-link" onclick="showList()">&larr; 返回列表</span>
         <div id="detailMeta" class="meta"></div>
         <div class="detail-tabs" id="detailTabs"></div>
-        <div id="detailContent"></div>
+        <div id="detailContent" style="flex:1;min-height:0;overflow-y:auto"></div>
       </div>
     </div>
   </div>
@@ -1278,7 +1285,7 @@ async function loadDetail(name) {
         var jcEl = document.getElementById('tabJsonConstraint');
         if (jcData.success && jcData.json_constraints) {
           var toolbar = '<div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:8px">' +
-            '<button class="secondary" onclick="downloadJsonConstraint(' + JSON.stringify(name) + ')">⬇ 下载 JSON</button>' +
+            '<button class="secondary" onclick="downloadJsonConstraint(\'' + name + '\')">⬇ 下载 JSON</button>' +
             '</div>';
           jcEl.innerHTML = toolbar + '<div class="json-tree"><ul>' + renderJsonTree(jcData.json_constraints) + '</ul></div>';
         } else {
