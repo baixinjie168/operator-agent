@@ -339,6 +339,46 @@ async def resume_task(task_id: int) -> dict:
     return {"reset_count": reset_count, "task_id": task_id}
 
 
+async def retry_item(task_id: int, item_id: int) -> dict:
+    """Retry a single failed task item.
+
+    Resets the item to 'pending' (clearing error and timestamps), then
+    re-runs the task.  ``run_task`` picks up all pending items — typically
+    just the one we reset.
+
+    Args:
+        task_id: The task that owns the item.
+        item_id: The specific task item to retry.
+
+    Returns:
+        dict with task_id and item_id.
+
+    Raises:
+        ValueError: If the task is not found or still running.
+    """
+    mcp = MCPClient()
+
+    task = await mcp.get_task(task_id)
+    if task is None:
+        raise ValueError(f"Task {task_id} not found")
+    if task["status"] == "running":
+        raise ValueError("Cannot retry an item while the task is still running")
+
+    # Reset the specific item to pending
+    await mcp.reset_task_item(item_id)
+
+    # Set task status to pending so run_task can pick it up
+    await mcp.update_task_status(task_id, "pending")
+
+    logger.info("Retrying item %s in task %s", item_id, task_id)
+
+    # Re-run the task (acquires lock internally)
+    from agent.routes.task import _get_max_workers
+    asyncio.create_task(run_task(task_id, max_workers=_get_max_workers()))
+
+    return {"task_id": task_id, "item_id": item_id}
+
+
 async def stop_task(task_id: int) -> dict:
     """Stop a running task (called from the HTTP route layer).
 

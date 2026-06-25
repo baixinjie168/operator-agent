@@ -2892,28 +2892,38 @@ async function loadBatchDetail(taskId) {
     const total = data.total_count || items.length || 0;
     const completed = data.completed_count || 0;
     const failed = data.failed_count || 0;
+    const taskStatus = data.status;
 
     let subtitle = '';
-    if (data.status === 'completed') {
+    if (taskStatus === 'completed') {
       subtitle = ' — 全部成功';
-    } else if (data.status === 'failed' || data.status === 'cancelled') {
+    } else if (taskStatus === 'failed' || taskStatus === 'cancelled') {
       subtitle = ' — ' + completed + ' 成功 / ' + failed + ' 失败';
     }
+
+    // Show "操作" column only when task is not running
+    const showActions = taskStatus !== 'running' && taskStatus !== 'pending';
 
     let itemsHtml = '<h4>算子明细（' + total + ' 个）' + subtitle + '</h4>';
     itemsHtml += '<table class="bt-item-table"><thead><tr>'
       + '<th>状态</th><th>算子名</th><th>耗时</th><th>错误</th>'
+      + (showActions ? '<th>操作</th>' : '')
       + '</tr></thead><tbody>';
     for (const it of items) {
       const icon = BT_ITEM_ICON[it.status] || '?';
       const duration = it.status === 'running' && it.started_at
         ? '...'
         : _btDuration(it.started_at, it.finished_at);
+      let actionHtml = '';
+      if (showActions && (it.status === 'failed' || it.status === 'completed')) {
+        actionHtml = '<button class="bt-btn-action btn-retry" onclick="retryBatchItem(' + taskId + ',' + it.id + ')">重试</button>';
+      }
       itemsHtml += '<tr>'
         + '<td><span class="bt-item-badge ' + (it.status || 'pending') + '">' + icon + '</span></td>'
         + '<td>' + escapeHtml(it.operator_name || '') + '</td>'
         + '<td style="color:#9ca3af">' + duration + '</td>'
         + '<td style="color:var(--bt-red);max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + escapeHtml(it.error || '') + '</td>'
+        + (showActions ? '<td>' + actionHtml + '</td>' : '')
         + '</tr>';
     }
     itemsHtml += '</tbody></table>';
@@ -2921,6 +2931,21 @@ async function loadBatchDetail(taskId) {
   } catch(e) {
     wrap.innerHTML = '<div style="color:#ef4444;font-size:.8rem">加载失败</div>';
   }
+}
+
+async function retryBatchItem(taskId, itemId) {
+  try {
+    const res = await fetch(BT_API + '/tasks/' + taskId + '/items/' + itemId + '/retry', { method: 'POST' });
+    const data = await res.json();
+    if (data.success) {
+      await loadBatchTasks();
+      _batchExpandedTaskId = taskId;
+      await renderBatchTaskTable();
+      startBatchPoll(taskId);
+    } else {
+      alert('重试失败: ' + (data.error || '未知错误'));
+    }
+  } catch(e) { alert('重试失败: ' + e.message); }
 }
 
 /* ----- Polling ----- */

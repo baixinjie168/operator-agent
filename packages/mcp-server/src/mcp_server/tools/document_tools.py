@@ -408,7 +408,7 @@ def query_params_by_doc_id(doc_id: int) -> list[dict]:
         "SELECT id, function_name, param_name, param_type, direction, "
         "src_content, dtype_desc, dformat_desc, shape, is_optional, "
         "is_support_discontinuous, array_length, param_desc, allowed_range_value, "
-        "param_constraint, llm_description "
+        "param_constraint, llm_description, usage_notes "
         "FROM parameters WHERE doc_id = ? ORDER BY function_name, direction, param_name",
         (doc_id,),
     ).fetchall()
@@ -430,6 +430,7 @@ def query_params_by_doc_id(doc_id: int) -> list[dict]:
             "allowed_range_value": r[13],
             "param_constraint": r[14],
             "llm_description": r[15],
+            "usage_notes": r[16],
         }
         for r in rows
     ]

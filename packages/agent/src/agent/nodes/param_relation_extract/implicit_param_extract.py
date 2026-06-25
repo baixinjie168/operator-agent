@@ -83,6 +83,13 @@ _EXCLUDE_WORDS = frozenset({
     "INT8", "INT16", "INT32", "INT64",
     "UINT8", "UINT16", "UINT32", "UINT64",
     "BOOL", "STRING",
+    # -- CANN parameter type names --
+    # These appear in type annotations like "x（aclTensor*）" and must not
+    # be mistaken for dimension variables when the shape-tuple regex
+    # matches the parentheses in type annotations.
+    "aclTensor", "aclTensorList", "aclScalar",
+    "aclIntArray", "aclFloatArray", "aclBoolArray",
+    "aclOpExecutor",
     # -- Common non-variable identifiers from Markdown / URLs --
     "common", "md", "html", "http", "https", "www",
     "aclnn", "aclrt", "device", "host",

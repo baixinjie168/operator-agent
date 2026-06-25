@@ -26,6 +26,61 @@ from agent.utils.semantic_rules import (
 logger = logging.getLogger(__name__)
 
 
+# ---------------------------------------------------------------------------
+# Bool narrowing helpers (Phase 0)
+# ---------------------------------------------------------------------------
+
+# Patterns that indicate a bool param cannot be True (or False).
+# Matches: "暂不支持配为True", "不支持配为True", "不能为True", "仅支持False"
+_BOOL_NOT_TRUE_RE = re.compile(
+    r"不支持.*(?:配|设|置).*True|暂不支持.*True|不能.*True|仅支持.*False|只支持.*False",
+    re.IGNORECASE,
+)
+_BOOL_NOT_FALSE_RE = re.compile(
+    r"不支持.*(?:配|设|置).*False|暂不支持.*False|不能.*False|仅支持.*True|只支持.*True",
+    re.IGNORECASE,
+)
+
+
+def _collect_bool_param_text(param: dict) -> str:
+    """Collect all text that may contain bool constraint info for a param.
+
+    usage_notes is stored as a JSON string like '{"*": "..."}' or
+    '{"platform": "..."}'.  We parse and flatten it to plain text.
+    """
+    parts: list[str] = []
+    for field in ("usage_notes", "llm_description", "param_desc"):
+        raw = param.get(field, "") or ""
+        if not raw:
+            continue
+        # usage_notes may be a JSON {platform: text} dict
+        try:
+            parsed = json.loads(raw) if isinstance(raw, str) and raw.startswith("{") else None
+        except (json.JSONDecodeError, TypeError):
+            parsed = None
+        if isinstance(parsed, dict):
+            parts.extend(str(v) for v in parsed.values() if v)
+        else:
+            parts.append(str(raw))
+    return " ".join(parts)
+
+
+def _narrow_bool_from_text(text: str) -> bool | None:
+    """Check if text constrains a bool param to a single value.
+
+    Returns:
+        False  — if text says "不支持配为True" (can only be False)
+        True   — if text says "不支持配为False" (can only be True)
+        None   — if no constraint found (keep default [True, False])
+    """
+    if not text:
+        return None
+    if _BOOL_NOT_TRUE_RE.search(text):
+        return False
+    if _BOOL_NOT_FALSE_RE.search(text):
+        return True
+    return None
+
 
 # ---------------------------------------------------------------------------
 # Phase 1: Deterministic preprocessing for allowed_range_value
@@ -286,7 +341,14 @@ async def allowed_range_build_node(state: BuildParamConstraintState) -> dict[str
 
     for p in bool_params:
         key = f"{p['function_name']}::{p['param_name']}"
-        result[key] = {"type": "range", "value": [True, False]}
+        # Check usage_notes / llm_description for "不支持配为True/False" patterns
+        # before defaulting to [True, False].
+        bool_text = _collect_bool_param_text(p)
+        narrowed = _narrow_bool_from_text(bool_text)
+        if narrowed is not None:
+            result[key] = {"type": "range", "value": [narrowed]}
+        else:
+            result[key] = {"type": "range", "value": [True, False]}
 
     # Tensor types have no scalar value range — dimensions describe shape rank,
     # not value bounds.  Skip all extraction phases to prevent the deterministic
@@ -307,6 +369,7 @@ async def allowed_range_build_node(state: BuildParamConstraintState) -> dict[str
         ar_raw = p.get("allowed_range_value", "") or ""
         if ptype in ("char", "const char") and ar_raw.strip() and ar_raw.strip() != "[]":
             key = f"{p['function_name']}::{p['param_name']}"
+
             try:
                 ar_list = json.loads(ar_raw) if isinstance(ar_raw, str) else ar_raw
             except (json.JSONDecodeError, TypeError):
@@ -318,6 +381,22 @@ async def allowed_range_build_node(state: BuildParamConstraintState) -> dict[str
                     if isinstance(item, dict) and item.get("type") == "enum":
                         ar_type = "enum"
                         break
+
+                # For char*/const char* params, "range" type values are almost
+                # always string LENGTH constraints (e.g. "字符串长度要求(0, 128)"),
+                # not value ranges.  A string parameter's legitimate value range
+                # is always "enum" (discrete string values like activation names).
+                # Skip "range" type to avoid putting length constraints into
+                # allowed_range_value — they belong in constraints_in_parameters.
+                if ar_type == "range":
+                    result[key] = _EMPTY
+                    string_ar_count += 1
+                    logger.info(
+                        "BuildParamConstraint: skipped range-type allowed_range for "
+                        "char* param %s (likely string length constraint, not value range)",
+                        p.get("param_name", ""),
+                    )
+                    continue
 
                 if ar_type == "enum":
                     # Split comma-separated enum values into individual items

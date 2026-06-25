@@ -646,6 +646,10 @@ class MCPClient:
         """Stop a running task: reset running items, set status to cancelled."""
         return await self._call_tool("stop_task", {"task_id": task_id})
 
+    async def reset_task_item(self, item_id: int) -> dict:
+        """Reset a single task item to pending, clearing error and timestamps."""
+        return await self._call_tool("reset_task_item", {"item_id": item_id})
+
     async def delete_task(self, task_id: int) -> dict:
         """Delete a task and all associated operator data."""
         return await self._call_tool("delete_task", {"task_id": task_id})
