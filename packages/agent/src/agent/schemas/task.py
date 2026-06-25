@@ -20,10 +20,16 @@ class TaskDocsResponse(BaseModel):
 
 
 class CreateTaskRequest(BaseModel):
-    """Request body for POST /api/v1/tasks."""
+    """Request body for POST /api/v1/tasks.
+
+    Either ``file_paths`` (individual file paths) or ``categories``
+    (operator directory names) may be used.  When both are provided they
+    are merged and de-duplicated.
+    """
 
     name: str | None = None
-    file_paths: list[str]
+    file_paths: list[str] = []
+    categories: list[str] | None = None
 
 
 class CreateTaskResponse(BaseModel):

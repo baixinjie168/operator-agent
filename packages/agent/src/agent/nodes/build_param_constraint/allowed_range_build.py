@@ -13,7 +13,7 @@ import re
 from typing import Any
 
 from agent.core.config import settings
-from agent.nodes.build_param_constraint._helpers import _normalize_type
+from agent.nodes.build_param_constraint._helpers import _normalize_type, _split_csv
 from agent.nodes.build_param_constraint.state import BuildParamConstraintState
 from agent.prompts import ALLOWED_RANGE_VALUE_BUILD_PROMPT
 from agent.utils.llm_common import CONCURRENCY_LIMIT, create_llm, parse_json_response
@@ -293,21 +293,47 @@ async def allowed_range_build_node(state: BuildParamConstraintState) -> dict[str
             except (json.JSONDecodeError, TypeError):
                 ar_list = []
             if ar_list:
-                # Store the raw text descriptions (not numeric ranges)
-                # Format: list of {"platform": ..., "allowed_range_value": ..., "type": ...}
-                # Convert to a flat list of range text strings for the constraint JSON
-                texts = [
-                    item.get("allowed_range_value", "")
-                    for item in ar_list
-                    if isinstance(item, dict) and item.get("allowed_range_value")
-                ]
                 # Detect type from first item (default "range")
                 ar_type = "range"
                 for item in ar_list:
                     if isinstance(item, dict) and item.get("type") == "enum":
                         ar_type = "enum"
                         break
-                result[key] = {"type": ar_type, "value": texts if texts else []}
+
+                if ar_type == "enum":
+                    # Split comma-separated enum values into individual items
+                    # and preserve platform dimension (Bug #1 + #2 fix).
+                    # Each platform gets its own key: fn::pn::platform.
+                    # Also store a generic-key fallback (first platform's values)
+                    # in case platform names don't match exactly downstream.
+                    first_split: list[str] = []
+                    for item in ar_list:
+                        if not isinstance(item, dict):
+                            continue
+                        plat = item.get("platform", "")
+                        raw = item.get("allowed_range_value", "")
+                        if not raw:
+                            continue
+                        split_values = _split_csv(raw)
+                        if not split_values:
+                            continue
+                        if not first_split:
+                            first_split = split_values
+                        if plat:
+                            result[f"{key}::{plat}"] = {"type": "enum", "value": split_values}
+                        else:
+                            result[key] = {"type": "enum", "value": split_values}
+                    # Generic-key fallback for platform name mismatches
+                    if first_split and key not in result:
+                        result[key] = {"type": "enum", "value": first_split}
+                else:
+                    # Range type: keep raw text as-is (no splitting needed)
+                    texts = [
+                        item.get("allowed_range_value", "")
+                        for item in ar_list
+                        if isinstance(item, dict) and item.get("allowed_range_value")
+                    ]
+                    result[key] = {"type": "range", "value": texts if texts else []}
                 string_ar_count += 1
                 continue
         still_remaining.append(p)

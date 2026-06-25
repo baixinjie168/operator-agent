@@ -4,9 +4,13 @@ Provides zero-LLM-cost tools for handling platform information in param_relation
 - normalize_platform_name: standardize platform name format
 - split_platforms: split multi-platform strings into individual platforms
 - resolve_target_platforms: resolve platform string to target platform list
+- expand_common_in_constraint: expand "common" key in param_constraint to per-platform
+- expand_common_in_relations: expand platform="common" relations to per-platform rows
 """
 
 from __future__ import annotations
+
+import copy
 
 # Mapping of common non-standard platform name variants to standard names
 PLATFORM_ALIASES: dict[str, str] = {
@@ -96,9 +100,71 @@ def resolve_target_platforms(
     """
     platforms = split_platforms(platform_str)
 
-    # Empty platform means all supported platforms
-    if not platforms or platforms == [""]:
+    # Empty string or "common" means all supported platforms
+    if not platforms or platforms == [""] or platforms == ["common"]:
         return list(supported_platforms)
 
     # Filter to only include platforms that are in the supported list
     return [p for p in platforms if p in supported_platforms]
+
+
+def expand_common_in_constraint(
+    constraint: dict, supported_platforms: list[str]
+) -> dict:
+    """Expand the "common" key in a param_constraint dict to per-platform entries.
+
+    If *constraint* contains a ``"common"`` key, its value is deep-copied to
+    every platform in *supported_platforms* that does not already have an
+    explicit entry.  The ``"common"`` key itself is removed.
+
+    Used for ``parameters.param_constraint`` and the ``inputs``/``outputs``
+    sections of the final JSON, where the structure is::
+
+        {platform_name: {description, type, ...}}
+
+    Args:
+        constraint: Dict mapping platform names (or "common") to constraint data.
+        supported_platforms: Platform names from platform_support where is_supported=1.
+
+    Returns:
+        The same dict with "common" expanded (modified in place).
+    """
+    if not isinstance(constraint, dict) or "common" not in constraint:
+        return constraint
+    common_data = constraint.pop("common")
+    for plat in supported_platforms:
+        if plat not in constraint:
+            constraint[plat] = copy.deepcopy(common_data)
+    return constraint
+
+
+def expand_common_in_relations(
+    relations: list[dict], supported_platforms: list[str]
+) -> list[dict]:
+    """Expand relations with platform="common" to one row per supported platform.
+
+    For each relation whose ``platform`` field equals ``"common"``, a deep
+    copy is created for every platform in *supported_platforms* with the
+    ``platform`` field set to that platform name.  Relations with other
+    platform values are kept as-is.
+
+    Used before saving to the ``param_relations`` table so that each row
+    has a concrete platform name.
+
+    Args:
+        relations: List of relation dicts with a "platform" field.
+        supported_platforms: Platform names from platform_support where is_supported=1.
+
+    Returns:
+        New list with "common" relations expanded.
+    """
+    expanded: list[dict] = []
+    for rel in relations:
+        if rel.get("platform") == "common":
+            for plat in supported_platforms:
+                new_rel = copy.deepcopy(rel)
+                new_rel["platform"] = plat
+                expanded.append(new_rel)
+        else:
+            expanded.append(rel)
+    return expanded

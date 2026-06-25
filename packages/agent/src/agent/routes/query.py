@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Query
+from pydantic import BaseModel
 
 from agent.mcp_client import MCPClient
 from agent.schemas.query import (
@@ -42,6 +43,46 @@ async def list_operators() -> OperatorListResponse:
         for item in result
     ]
     return OperatorListResponse(operators=operators)
+
+
+class DeleteOperatorRequest(BaseModel):
+    """Request body for batch operator deletion."""
+    operator_names: list[str]
+
+
+class DeleteOperatorResponse(BaseModel):
+    """Response for operator deletion."""
+    success: bool = True
+    deleted: list[str] = []
+    errors: list[dict] = []
+
+
+@router.delete("/operators/{operator_name}", response_model=DeleteOperatorResponse)
+async def delete_operator(operator_name: str) -> DeleteOperatorResponse:
+    """Delete a single operator and all its associated data."""
+    try:
+        await _mcp_client.delete_operator(operator_name)
+        return DeleteOperatorResponse(success=True, deleted=[operator_name])
+    except Exception as e:
+        return DeleteOperatorResponse(success=False, errors=[{"name": operator_name, "error": str(e)}])
+
+
+@router.delete("/operators", response_model=DeleteOperatorResponse)
+async def delete_operators_batch(body: DeleteOperatorRequest) -> DeleteOperatorResponse:
+    """Batch delete operators and all their associated data."""
+    deleted: list[str] = []
+    errors: list[dict] = []
+    for name in body.operator_names:
+        try:
+            await _mcp_client.delete_operator(name)
+            deleted.append(name)
+        except Exception as e:
+            errors.append({"name": name, "error": str(e)})
+    return DeleteOperatorResponse(
+        success=len(errors) == 0,
+        deleted=deleted,
+        errors=errors,
+    )
 
 
 @router.get("/operators/{operator_name}", response_model=OperatorDetailResponse)

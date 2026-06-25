@@ -264,6 +264,97 @@ def list_all_operators() -> list[dict]:
     ]
 
 
+def delete_operator(operator_name: str) -> dict:
+    """Delete an operator and ALL associated data (cascade delete).
+
+    Deletion order:
+    1. Find all doc_ids from document_versions for this operator
+    2. Delete child table rows for each doc_id
+    3. Delete document_versions rows
+    4. Delete the operator record from operators table
+    5. Clean up task_items references
+
+    Args:
+        operator_name: Name of the operator to delete.
+
+    Returns:
+        dict with deleted_operator, deleted_doc_versions count.
+    """
+    db = get_db()
+    conn = db.conn
+
+    # Find operator
+    op = conn.execute(
+        "SELECT id FROM operators WHERE name = ?", (operator_name,)
+    ).fetchone()
+    if op is None:
+        raise ValueError(f"Operator '{operator_name}' not found")
+
+    operator_id = op[0]
+
+    # Collect all doc_ids for this operator
+    doc_rows = conn.execute(
+        "SELECT id FROM document_versions WHERE operator_id = ?", (operator_id,)
+    ).fetchall()
+    doc_ids = [r[0] for r in doc_rows]
+
+    # Delete child table rows for each doc_id.
+    # These tables all have a doc_id column referencing document_versions.id.
+    child_tables = [
+        "parameters",
+        "param_relations",
+        "function_signatures",
+        "platform_support",
+        "return_codes",
+        "dtype_combinations",
+        "constraints_result",
+        "implicit_params",
+        "platform_constants",
+        "parameter_representations",
+        "shape_dim_mappings",
+        "pipeline_runs",
+    ]
+    for doc_id in doc_ids:
+        # Collect run_ids from pipeline_runs BEFORE deleting them,
+        # so we can clean up pipeline_events (which uses run_id, not doc_id).
+        run_ids = [r[0] for r in conn.execute(
+            "SELECT run_id FROM pipeline_runs WHERE doc_id = ?", (doc_id,)
+        ).fetchall()]
+
+        # Delete child table rows that reference doc_id
+        for table in child_tables:
+            conn.execute(f"DELETE FROM {table} WHERE doc_id = ?", (doc_id,))
+
+        # Delete pipeline_events via run_id (no doc_id column in this table)
+        for run_id in run_ids:
+            conn.execute("DELETE FROM pipeline_events WHERE run_id = ?", (run_id,))
+
+        # test_cases uses constraint_doc_id — clear references
+        conn.execute(
+            "UPDATE test_cases SET constraint_doc_id = NULL WHERE constraint_doc_id = ?",
+            (doc_id,),
+        )
+
+    # Delete document_versions
+    conn.execute("DELETE FROM document_versions WHERE operator_id = ?", (operator_id,))
+
+    # Clean up task_items that reference these doc_ids
+    for doc_id in doc_ids:
+        conn.execute(
+            "UPDATE task_items SET doc_id = NULL WHERE doc_id = ?", (doc_id,)
+        )
+
+    # Delete the operator record
+    conn.execute("DELETE FROM operators WHERE id = ?", (operator_id,))
+
+    conn.commit()
+
+    return {
+        "deleted_operator": operator_name,
+        "deleted_doc_versions": len(doc_ids),
+    }
+
+
 def save_parameters(doc_id: int, parameters: list[dict]) -> dict:
     """Save parsed parameters for a specific document version.
 

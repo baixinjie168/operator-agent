@@ -16,6 +16,7 @@ from agent.mcp_client import MCPClient
 from agent.nodes.build_param_constraint._helpers import _extract_enum_from_text
 from agent.nodes.build_param_constraint.state import BuildParamConstraintState
 from agent.utils.param_validators import is_bool_type
+from agent.utils.platform_utils import expand_common_in_constraint
 
 logger = logging.getLogger(__name__)
 
@@ -124,8 +125,10 @@ async def constraint_assemble_node(state: BuildParamConstraintState) -> dict[str
             dims_key = f"{fn_name}::{pname}::{shape_raw}"
             dimensions_value = dimensions_map.get(dims_key, [])
 
-            # allowed_range_value (with usage_notes enum fallback)
-            ar_data = ar_map.get(map_key, {"type": "range", "value": []})
+            # allowed_range_value: try platform-specific key first (char_enum
+            # produces fn::pn::platform), then fallback to generic key (fn::pn).
+            plat_key = f"{fn_name}::{pname}::{plat}"
+            ar_data = ar_map.get(plat_key) or ar_map.get(map_key, {"type": "range", "value": []})
             ar_value = ar_data.get("value", [])
             ar_type = ar_data.get("type", "range")
             usage_val = attrs.get("usage_notes", {}).get("value", "")
@@ -144,6 +147,9 @@ async def constraint_assemble_node(state: BuildParamConstraintState) -> dict[str
                 "dimensions": {"value": dimensions_value, "src_text": shape_raw},
                 "allowed_range_value": {"value": ar_value, "type": ar_type, "src_text": ""},
             }
+
+        # Expand "common" key to per-platform entries before DB save
+        expand_common_in_constraint(constraint, supported_platforms)
 
         updates.append({
             "function_name": fn_name,

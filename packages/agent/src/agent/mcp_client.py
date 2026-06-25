@@ -166,6 +166,12 @@ class MCPClient:
         """List all registered operators."""
         return await self._call_tool("query_operators", {})
 
+    async def delete_operator(self, operator_name: str) -> dict:
+        """Delete an operator and all associated data (cascade delete)."""
+        return await self._call_tool("delete_operator_tool", {
+            "operator_name": operator_name,
+        })
+
     async def save_parsed(self, operator_name: str, version: int, parsed_data: dict) -> str:
         """Save parsed data to the database."""
         return await self._call_tool("save_parsed", {
@@ -635,6 +641,10 @@ class MCPClient:
     async def reset_stuck_task_items(self, task_id: int) -> dict:
         """Reset task items stuck in 'running' back to 'pending'."""
         return await self._call_tool("reset_stuck_task_items", {"task_id": task_id})
+
+    async def stop_task(self, task_id: int) -> dict:
+        """Stop a running task: reset running items, set status to cancelled."""
+        return await self._call_tool("stop_task", {"task_id": task_id})
 
     async def delete_task(self, task_id: int) -> dict:
         """Delete a task and all associated operator data."""
