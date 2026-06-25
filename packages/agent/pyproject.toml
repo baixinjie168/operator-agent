@@ -13,6 +13,7 @@ dependencies = [
     "langchain-openai>=0.3",
     "langgraph>=0.4",
     "asyncssh>=2.14",
+    "openpyxl>=3.1",
 ]
 
 [build-system]

@@ -61,4 +61,17 @@ def create_app() -> FastAPI:
 
     app.mount("/static", StaticFiles(directory=settings.static_dir), name="static")
 
+    # 前端用户主操作台（迁移自 operator-agent-ui 项目，2026-06-24）
+    # - 目录：packages/agent/src/agent/static/operator/
+    # - 用途：算子测试工作台（用户主交互面），不是管理面
+    # - 同级 index.html（/ 路由）才是管理面；请勿混淆
+    # - 该目录结构见 static/operator/README.md
+    operator_ui_dir = settings.static_dir / "operator"
+    if operator_ui_dir.exists():
+        app.mount(
+            "/operator",
+            StaticFiles(directory=operator_ui_dir, html=True),
+            name="operator-ui",
+        )
+
     return app
