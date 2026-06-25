@@ -65,5 +65,8 @@ class PipelineState(TypedDict, total=False):
     atk_executor_path: Annotated[str | None, last_value]
     atk_executor_code: Annotated[str, last_value]
     exec_result: dict[str, Any]
+    # ── ATK execution parameters (forwarded to remote ATK command) ──
+    task_type: str  # e.g. "precision" / "performance" / "function"
+    execution_count: int  # -e flag value passed to ``atk task``
     # ── Server info for remote execution ──
     server_info: dict[str, Any] | None
