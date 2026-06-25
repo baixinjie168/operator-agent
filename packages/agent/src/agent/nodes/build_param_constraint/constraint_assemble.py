@@ -234,7 +234,7 @@ async def constraint_assemble_node(state: BuildParamConstraintState) -> dict[str
                     for d in dims:
                         if isinstance(d, list) and len(d) == 2:
                             lo, hi = d[0], d[1]
-                            if hi > 2**31:
+                            if hi is not None and hi > 2**31:
                                 dim_align_failed.append(plat)
                                 break
 
