@@ -90,10 +90,26 @@
   .op-item .op-name { font-weight: 600; font-size: .95rem; }
   .op-item .op-meta { font-size: .8rem; color: #888; }
   .op-item .op-ver { font-size: .8rem; color: #6b7280; }
+  .op-item .op-actions { display: flex; align-items: center; gap: 8px; }
+  .op-item input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; }
+  .op-del-btn { padding: 3px 10px; border: 1px solid #fecaca; border-radius: 6px; font-size: .72rem; cursor: pointer; background: #fff; color: #ef4444; white-space: nowrap; transition: all .1s; }
+  .op-del-btn:hover { background: #fef2f2; }
+  .op-batch-bar { display: flex; align-items: center; gap: 10px; }
+  .op-batch-btn { padding: 5px 14px; border: 1px solid #fecaca; border-radius: 6px; font-size: .82rem; cursor: pointer; background: #fff; color: #ef4444; transition: all .1s; }
+  .op-batch-btn:hover { background: #fef2f2; }
+  .op-batch-btn:disabled { opacity: .5; cursor: not-allowed; }
+  .op-select-all { display: flex; align-items: center; gap: 4px; font-size: .82rem; color: #6b7280; cursor: pointer; }
 
   .detail-tabs { display: flex; gap: 8px; margin-bottom: 12px; }
   .detail-tab { padding: 6px 14px; border-radius: 6px; font-size: .85rem; cursor: pointer; background: #f3f4f6; border: 1px solid #e5e7eb; color: #555; transition: .15s; }
   .detail-tab.active { background: #4f46e5; color: #fff; border-color: #4f46e5; }
+
+  /* JSON Constraint tab: fill available space with internal scroll on the tree */
+  #tabJsonConstraint { height: 100%; display: flex; flex-direction: column; overflow: hidden; }
+  #tabJsonConstraint > .json-tree { flex: 1; min-height: 0; overflow: auto; }
+
+  /* Query detail view: flex column so tabs stay fixed and content scrolls below */
+  #queryDetailView { display: flex; flex-direction: column; }
 
   .section-card { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px; padding: 16px; margin-bottom: 10px; }
   .section-card h4 { font-size: .9rem; margin-bottom: 8px; color: #374151; }
@@ -272,6 +288,119 @@
   .exec-right-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; flex: 1; color: #c0c7d0; text-align: center; gap: 10px; }
   .exec-right-empty svg { width: 56px; height: 56px; opacity: .35; }
   .exec-right-empty p { font-size: .9rem; }
+
+  /* ── Batch Task Management (prototype-matched) ────────────────────── */
+  :root {
+    --bt-border: #e2e8f0;
+    --bt-primary: #4f46e5;
+    --bt-primaryL: #eef2ff;
+    --bt-green: #059669;   --bt-greenL: #ecfdf5;
+    --bt-red: #ef4444;     --bt-redL: #fef2f2;
+    --bt-amber: #d97706;   --bt-amberL: #fffbeb;
+    --bt-dim: #64748b;
+  }
+  #panelBatch { overflow: hidden; }
+  .bt-wrap { display: flex; flex-direction: column; flex: 1; min-height: 0; gap: 16px; }
+  .bt-header { display: flex; justify-content: space-between; align-items: center; }
+  .bt-header h2 { font-size: 1.1rem; margin: 0; }
+  .bt-header .sub { font-size: .78rem; color: var(--bt-dim); margin-top: 2px; }
+
+  /* Stats cards */
+  .bt-stats { display: flex; gap: 12px; }
+  .bt-stat { flex: 1; background: #fff; border: 1px solid var(--bt-border); border-radius: 10px; padding: 14px 18px; text-align: center; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+  .bt-stat .num { font-size: 1.6rem; font-weight: 700; line-height: 1.2; }
+  .bt-stat .label { font-size: .72rem; color: var(--bt-dim); margin-top: 2px; }
+  .bt-stat.s-total .num { color: #1e293b; }
+  .bt-stat.s-running .num { color: var(--bt-primary); }
+  .bt-stat.s-done .num { color: var(--bt-green); }
+  .bt-stat.s-fail .num { color: var(--bt-red); }
+
+  /* Two-column layout */
+  .bt-layout { display: flex; gap: 16px; flex: 1; min-height: 0; }
+
+  /* Left: create panel */
+  .bt-create { width: 300px; flex-shrink: 0; background: #fff; border: 1px solid var(--bt-border); border-radius: 10px; padding: 18px; display: flex; flex-direction: column; overflow-y: auto; }
+  .bt-create h3 { font-size: .95rem; font-weight: 600; margin: 0 0 14px; }
+  .bt-field { margin-bottom: 14px; }
+  .bt-field > label { display: block; font-size: .8rem; font-weight: 600; margin-bottom: 5px; color: #374151; }
+  .bt-field input[type="text"] { width: 100%; padding: 8px 11px; border: 1px solid var(--bt-border); border-radius: 7px; font-size: .85rem; outline: none; transition: border .15s; }
+  .bt-field input[type="text"]:focus { border-color: var(--bt-primary); box-shadow: 0 0 0 3px var(--bt-primaryL); }
+  .bt-folder-list { border: 1px solid var(--bt-border); border-radius: 8px; overflow: hidden; max-height: 260px; overflow-y: auto; }
+  .bt-folder-item { display: flex; align-items: center; gap: 8px; padding: 9px 12px; cursor: pointer; border-bottom: 1px solid var(--bt-border); transition: background .1s; }
+  .bt-folder-item:last-child { border-bottom: none; }
+  .bt-folder-item:hover { background: #f8fafc; }
+  .bt-folder-item.selected { background: var(--bt-primaryL); }
+  .bt-folder-item.selected .bt-folder-check { opacity: 1; }
+  .bt-folder-icon { width: 18px; height: 18px; flex-shrink: 0; color: var(--bt-dim); }
+  .bt-folder-item.selected .bt-folder-icon { color: var(--bt-primary); }
+  .bt-folder-name { flex: 1; font-size: .83rem; font-weight: 500; }
+  .bt-folder-count { font-size: .7rem; color: var(--bt-dim); background: #f1f5f9; padding: 2px 7px; border-radius: 10px; }
+  .bt-folder-item.selected .bt-folder-count { background: var(--bt-primary); color: #fff; }
+  .bt-folder-check { opacity: 0; color: var(--bt-primary); font-size: 14px; flex-shrink: 0; }
+  .bt-folder-info { font-size: .75rem; color: var(--bt-dim); margin-bottom: 12px; padding: 7px 11px; background: #f8fafc; border-radius: 7px; }
+  .bt-btn-create { width: 100%; padding: 10px; border: none; border-radius: 8px; background: var(--bt-primary); color: #fff; font-size: .85rem; font-weight: 600; cursor: pointer; transition: background .15s; }
+  .bt-btn-create:hover { background: #4338ca; }
+  .bt-btn-create:disabled { background: #c7d2fe; cursor: not-allowed; }
+
+  /* Right: task table */
+  .bt-task-panel { flex: 1; min-width: 0; background: #fff; border: 1px solid var(--bt-border); border-radius: 10px; overflow: hidden; display: flex; flex-direction: column; }
+  .bt-task-panel-header { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--bt-border); }
+  .bt-task-panel-header h3 { font-size: .95rem; font-weight: 600; margin: 0; }
+  button.bt-btn-refresh { padding: 4px 11px; background: #f1f5f9; border: 1px solid var(--bt-border); border-radius: 6px; font-size: .75rem; color: var(--bt-dim); cursor: pointer; }
+  button.bt-btn-refresh:hover { background: #e2e8f0; }
+  .bt-task-table-wrap { flex: 1; overflow-y: auto; }
+  .bt-task-table { width: 100%; border-collapse: collapse; }
+  .bt-task-table th { text-align: left; padding: 8px 14px; font-size: .72rem; font-weight: 600; color: var(--bt-dim); border-bottom: 1px solid var(--bt-border); background: #f8fafc; white-space: nowrap; position: sticky; top: 0; z-index: 1; }
+  .bt-task-table td { padding: 10px 14px; font-size: .8rem; border-bottom: 1px solid var(--bt-border); vertical-align: middle; }
+  .bt-task-table tbody tr.bt-row { cursor: pointer; }
+  .bt-task-table tbody tr.bt-row:hover td { background: #f8fafc; }
+  .bt-badge { display: inline-flex; align-items: center; gap: 4px; padding: 3px 9px; border-radius: 20px; font-size: .72rem; font-weight: 600; white-space: nowrap; }
+  .bt-badge .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+  .bt-badge-running { background: var(--bt-primaryL); color: var(--bt-primary); }
+  .bt-badge-done { background: var(--bt-greenL); color: var(--bt-green); }
+  .bt-badge-failed { background: var(--bt-redL); color: var(--bt-red); }
+  .bt-badge-pending { background: var(--bt-amberL); color: var(--bt-amber); }
+  .bt-badge-cancelled { background: #f1f5f9; color: #64748b; }
+  .bt-progress { display: flex; align-items: center; gap: 6px; }
+  .bt-progress-bar { width: 70px; height: 6px; background: #e2e8f0; border-radius: 3px; overflow: hidden; }
+  .bt-progress-fill { height: 100%; border-radius: 3px; }
+  .bt-progress-fill.done { background: var(--bt-green); }
+  .bt-progress-fill.fail { background: var(--bt-red); }
+  .bt-progress-fill.running { background: var(--bt-primary); }
+  .bt-progress-fill.pending { background: #e2e8f0; }
+  .bt-progress-fill.cancelled { background: #cbd5e1; }
+  .bt-progress-text { font-size: .72rem; color: var(--bt-dim); white-space: nowrap; }
+  .bt-time-cell { font-size: .72rem; color: var(--bt-dim); line-height: 1.5; white-space: nowrap; }
+  .bt-time-cell .start { color: #1e293b; }
+  button.bt-btn-action { padding: 3px 9px; border: 1px solid var(--bt-border); border-radius: 6px; font-size: .72rem; cursor: pointer; background: #fff; color: #374151; transition: all .1s; white-space: nowrap; }
+  button.bt-btn-action:hover { background: #f1f5f9; border-color: #cbd5e1; }
+  button.bt-btn-action.btn-download { color: var(--bt-primary); border-color: #c7d2fe; }
+  button.bt-btn-action.btn-download:hover { background: var(--bt-primaryL); }
+  button.bt-btn-action.btn-retry { color: var(--bt-amber); border-color: #fde68a; }
+  button.bt-btn-action.btn-retry:hover { background: var(--bt-amberL); }
+  button.bt-btn-action.btn-delete { color: var(--bt-red); border-color: #fecaca; }
+  button.bt-btn-action.btn-delete:hover { background: var(--bt-redL); }
+  button.bt-btn-action.btn-stop { color: var(--bt-red); border-color: #fecaca; }
+  button.bt-btn-action.btn-stop:hover { background: var(--bt-redL); }
+  button.bt-btn-action.btn-resume { color: var(--bt-amber); border-color: #fde68a; }
+  button.bt-btn-action.btn-resume:hover { background: var(--bt-amberL); }
+
+  /* Expandable detail row */
+  .bt-task-detail { display: none; background: #f8fafc; }
+  .bt-task-detail.open { display: table-row; }
+  .bt-task-detail td { padding: 0 !important; border: none !important; }
+  .bt-detail-wrap { padding: 10px 16px 10px 36px; }
+  .bt-detail-wrap h4 { font-size: .78rem; font-weight: 600; margin-bottom: 6px; color: var(--bt-dim); }
+  .bt-item-table { width: 100%; border-collapse: collapse; font-size: .72rem; }
+  .bt-item-table th { text-align: left; padding: 5px 9px; color: var(--bt-dim); font-weight: 500; border-bottom: 1px solid var(--bt-border); }
+  .bt-item-table td { padding: 4px 9px; border-bottom: 1px solid #f1f5f9; }
+  .bt-item-badge { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 50%; font-size: 11px; }
+  .bt-item-badge.completed { background: var(--bt-greenL); color: var(--bt-green); }
+  .bt-item-badge.failed { background: var(--bt-redL); color: var(--bt-red); }
+  .bt-item-badge.running { background: var(--bt-primaryL); color: var(--bt-primary); }
+  .bt-item-badge.pending { background: var(--bt-amberL); color: var(--bt-amber); }
+  .bt-item-badge.cancelled { background: #f1f5f9; color: #64748b; }
+  .bt-empty { text-align: center; padding: 40px; color: #9ca3af; font-size: .85rem; }
 </style>
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 </head>
@@ -407,17 +536,21 @@
       <div id="queryListView" style="flex:1;min-height:0;overflow-y:auto">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
           <h2 style="margin:0">已解析的 Operator 列表</h2>
-          <button class="secondary" onclick="loadOperators()">刷新</button>
+          <div class="op-batch-bar">
+            <label class="op-select-all"><input type="checkbox" id="opSelectAll" onchange="toggleSelectAll(this)"> 全选</label>
+            <button class="op-batch-btn" id="opBatchDelete" onclick="batchDeleteOperators()" disabled>批量删除</button>
+            <button class="secondary" onclick="loadOperators()">刷新</button>
+          </div>
         </div>
         <div id="operatorList"></div>
         <div class="status" id="queryStatus"></div>
       </div>
 
-      <div id="queryDetailView" style="display:none;flex:1;min-height:0;overflow-y:auto">
+      <div id="queryDetailView" style="display:none;flex:1;min-height:0;flex-direction:column;overflow:hidden">
         <span class="back-link" onclick="showList()">&larr; 返回列表</span>
         <div id="detailMeta" class="meta"></div>
         <div class="detail-tabs" id="detailTabs"></div>
-        <div id="detailContent"></div>
+        <div id="detailContent" style="flex:1;min-height:0;overflow-y:auto"></div>
       </div>
     </div>
   </div>
@@ -730,52 +863,55 @@
 
   <!-- Batch Task Panel -->
   <div class="panel" id="panelBatch">
-    <div class="card" style="display:flex;flex-direction:column;flex:1;min-height:0">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-        <h2 style="margin:0">批量任务管理</h2>
-        <div style="display:flex;gap:8px;align-items:center">
-          <button onclick="createBatchTask()" id="batchCreateBtn" style="padding:6px 14px;background:#059669;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:.85rem">创建任务</button>
+    <div class="bt-wrap">
+      <!-- Header -->
+      <div class="bt-header">
+        <div>
+          <h2>批量任务管理</h2>
+          <div class="sub">选择算子分类目录，批量解析所有算子文档</div>
         </div>
       </div>
 
-      <!-- Summary cards -->
-      <div id="batchSummary" style="display:flex;gap:12px;margin-bottom:12px;flex-wrap:wrap"></div>
-
-      <!-- Two-column: dir selector + task list -->
-      <div style="display:flex;gap:16px;flex:1;min-height:0">
-        <!-- Left: directory selector -->
-        <div style="flex:1;display:flex;flex-direction:column;min-height:0">
-          <div style="font-weight:600;margin-bottom:6px;font-size:.9rem;color:#374151">选择算子目录</div>
-          <!-- Directory dropdown -->
-          <div style="margin-bottom:8px">
-            <select id="batchDirSelect" onchange="onBatchDirChange()" style="padding:6px 12px;border:1px solid var(--border);border-radius:6px;font-size:.85rem;width:100%;cursor:pointer">
-              <option value="">-- 选择目录 --</option>
-            </select>
-          </div>
-          <!-- Selected directory info -->
-          <div id="batchDirInfo" style="font-size:.82rem;color:#6b7280;margin-bottom:6px;display:none"></div>
-          <!-- File preview list -->
-          <div id="batchDocList" style="flex:1;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:8px;min-height:200px;background:#f9fafb"></div>
-        </div>
-        <!-- Right: task list -->
-        <div style="flex:1;display:flex;flex-direction:column;min-height:0">
-          <div style="font-weight:600;margin-bottom:6px;font-size:.9rem;color:#374151">任务列表 <button onclick="loadBatchTasks()" style="margin-left:8px;padding:2px 8px;background:#e5e7eb;border:none;border-radius:4px;cursor:pointer;font-size:.8rem;color:#374151">刷新</button></div>
-          <div id="batchTaskList" style="flex:1;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:8px;min-height:200px"></div>
-        </div>
+      <!-- Stats cards -->
+      <div class="bt-stats" id="btStats">
+        <div class="bt-stat s-total"><div class="num">0</div><div class="label">总任务</div></div>
+        <div class="bt-stat s-running"><div class="num">0</div><div class="label">运行中</div></div>
+        <div class="bt-stat s-done"><div class="num">0</div><div class="label">已完成</div></div>
+        <div class="bt-stat s-fail"><div class="num">0</div><div class="label">失败</div></div>
       </div>
 
-      <!-- Task detail panel -->
-      <div id="batchTaskDetail" style="display:none;margin-top:12px;border-top:1px solid var(--border);padding-top:12px">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-          <h3 style="margin:0;font-size:1rem">任务详情: <span id="batchDetailTitle"></span></h3>
-          <div style="display:flex;gap:6px">
-            <button id="batchResumeBtn" onclick="resumeBatchTask()" style="padding:4px 12px;background:#f59e0b;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:.82rem;display:none">恢复</button>
-            <button id="batchRetryBtn" onclick="retryBatchTask()" style="padding:4px 12px;background:#ef4444;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:.82rem;display:none">重试失败</button>
-            <button id="batchDownloadBtn" onclick="downloadBatchTask()" style="padding:4px 12px;background:#3b82f6;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:.82rem;display:none">下载结果</button>
-            <button id="batchDeleteBtn" onclick="deleteBatchTask()" style="padding:4px 12px;background:#6b7280;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:.82rem;display:none">删除</button>
+      <!-- Two-column: create + task table -->
+      <div class="bt-layout">
+        <!-- Left: create panel -->
+        <div class="bt-create">
+          <h3>创建任务</h3>
+          <div class="bt-field">
+            <label>任务名称</label>
+            <input type="text" id="btTaskName" placeholder="例如：trans-ten 全量解析">
+          </div>
+          <div class="bt-field">
+            <label>选择算子目录（可多选）</label>
+            <div class="bt-folder-list" id="btFolderList"></div>
+          </div>
+          <div class="bt-folder-info" id="btFolderInfo">请至少选择一个目录</div>
+          <button class="bt-btn-create" id="btCreateBtn" onclick="createBatchTask()">创建任务</button>
+        </div>
+
+        <!-- Right: task table -->
+        <div class="bt-task-panel">
+          <div class="bt-task-panel-header">
+            <h3>任务列表</h3>
+            <button class="bt-btn-refresh" onclick="loadBatchTasks()">刷新</button>
+          </div>
+          <div class="bt-task-table-wrap">
+            <table class="bt-task-table">
+              <thead><tr><th>任务名称</th><th>状态</th><th>进度</th><th>开始时间</th><th>结束时间</th><th>操作</th></tr></thead>
+              <tbody id="btTaskBody">
+                <tr><td colspan="6"><div class="bt-empty">加载中...</div></td></tr>
+              </tbody>
+            </table>
           </div>
         </div>
-        <div id="batchDetailBody" style="max-height:300px;overflow-y:auto"></div>
       </div>
     </div>
   </div>
@@ -800,7 +936,7 @@ function switchTab(name, el) {
   if (name === 'result') { loadResultOperators(); loadConstraintsResult(); }
   if (name === 'cases') { loadAllCaseOperators(); }
   if (name === 'execute') { loadExecCaseOperators(); }
-  if (name === 'batch') { loadBatchDocs(); loadBatchTasks(); }
+  if (name === 'batch') { loadBatchCategories(); loadBatchTasks(); }
 }
 
 /* ---------- Parse step helpers ---------- */
@@ -955,16 +1091,74 @@ async function loadOperators() {
       return;
     }
     listEl.innerHTML = '<ul class="op-list">' + data.operators.map(op => `
-      <li class="op-item" onclick="loadDetail('${op.name}')">
-        <div>
-          <div class="op-name">${op.name}</div>
-          <div class="op-meta">${op.source_url || ''} ${op.created_at || ''}</div>
+      <li class="op-item">
+        <div style="display:flex;align-items:center;gap:10px;flex:1" onclick="loadDetail('${op.name}')">
+          <input type="checkbox" class="op-checkbox" value="${op.name}" onchange="updateBatchDeleteBtn()">
+          <div>
+            <div class="op-name">${op.name}</div>
+            <div class="op-meta">${op.source_url || ''} ${op.created_at || ''}</div>
+          </div>
         </div>
-        <div class="op-ver">v${op.latest_version ?? '-'}</div>
+        <div class="op-actions">
+          <div class="op-ver">v${op.latest_version ?? '-'}</div>
+          <button class="op-del-btn" onclick="deleteOperator('${op.name}', event)">删除</button>
+        </div>
       </li>`).join('') + '</ul>';
     queryStatus.textContent = '共 ' + data.operators.length + ' 个 Operator';
   } catch (err) {
     queryStatus.textContent = '加载失败: ' + err.message;
+  }
+}
+
+async function deleteOperator(name, event) {
+  if (event) event.stopPropagation();
+  if (!confirm('确认删除算子 "' + name + '" 及其所有数据？此操作不可恢复。')) return;
+  try {
+    const res = await fetch('/api/v1/operators/' + encodeURIComponent(name), { method: 'DELETE' });
+    const data = await res.json();
+    if (data.success) {
+      alert('已删除: ' + name);
+      loadOperators();
+    } else {
+      alert('删除失败: ' + (data.errors?.[0]?.error || '未知错误'));
+    }
+  } catch (err) {
+    alert('删除失败: ' + err.message);
+  }
+}
+
+function updateBatchDeleteBtn() {
+  const checked = document.querySelectorAll('.op-checkbox:checked');
+  const btn = document.getElementById('opBatchDelete');
+  btn.disabled = checked.length === 0;
+  btn.textContent = checked.length > 0 ? '批量删除(' + checked.length + ')' : '批量删除';
+  const all = document.querySelectorAll('.op-checkbox');
+  document.getElementById('opSelectAll').checked = all.length > 0 && checked.length === all.length;
+}
+
+function toggleSelectAll(checkbox) {
+  document.querySelectorAll('.op-checkbox').forEach(cb => { cb.checked = checkbox.checked; });
+  updateBatchDeleteBtn();
+}
+
+async function batchDeleteOperators() {
+  const checked = document.querySelectorAll('.op-checkbox:checked');
+  if (checked.length === 0) return;
+  const names = Array.from(checked).map(cb => cb.value);
+  if (!confirm('确认删除选中的 ' + names.length + ' 个算子及其所有数据？此操作不可恢复。')) return;
+  try {
+    const res = await fetch('/api/v1/operators', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ operator_names: names }),
+    });
+    const data = await res.json();
+    const msg = '已删除 ' + data.deleted.length + ' 个算子' +
+      (data.errors.length > 0 ? '\n失败: ' + data.errors.map(e => e.name + '(' + e.error + ')').join(', ') : '');
+    alert(msg);
+    loadOperators();
+  } catch (err) {
+    alert('批量删除失败: ' + err.message);
   }
 }
 
@@ -1091,7 +1285,7 @@ async function loadDetail(name) {
         var jcEl = document.getElementById('tabJsonConstraint');
         if (jcData.success && jcData.json_constraints) {
           var toolbar = '<div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:8px">' +
-            '<button class="secondary" onclick="downloadJsonConstraint(' + JSON.stringify(name) + ')">⬇ 下载 JSON</button>' +
+            '<button class="secondary" onclick="downloadJsonConstraint(\'' + name + '\')">⬇ 下载 JSON</button>' +
             '</div>';
           jcEl.innerHTML = toolbar + '<div class="json-tree"><ul>' + renderJsonTree(jcData.json_constraints) + '</ul></div>';
         } else {
@@ -2428,86 +2622,147 @@ function showExecResult(result, execResult) {
 }
 
 /* ---------- Batch Task Management ---------- */
-let _batchAllDocs = [];
-let _batchSelectedDocs = [];
-let _batchCurrentTaskId = null;
+let _batchCategories = [];
+let _batchSelectedCategories = new Set();
+let _batchExpandedTaskId = null;
 let _batchPollTimer = null;
 
-const API_BASE = '/api/v1';
+const BT_API = '/api/v1';
 
-async function loadBatchDocs() {
+const BT_STATUS_MAP = {
+  running:   { label: '运行中', cls: 'bt-badge-running',   fill: 'running' },
+  completed: { label: '已完成', cls: 'bt-badge-done',      fill: 'done' },
+  failed:    { label: '失败',   cls: 'bt-badge-failed',    fill: 'fail' },
+  pending:   { label: '排队中', cls: 'bt-badge-pending',   fill: 'pending' },
+  cancelled: { label: '已停止', cls: 'bt-badge-cancelled', fill: 'cancelled' },
+};
+
+const BT_ITEM_ICON = {
+  completed: '✓', failed: '✕', running: '⟳', pending: '○', cancelled: '⊘',
+};
+
+function _btBadge(status) {
+  const m = BT_STATUS_MAP[status] || { label: status, cls: 'bt-badge-pending', fill: 'pending' };
+  return '<span class="bt-badge ' + m.cls + '"><span class="dot"></span>' + m.label + '</span>';
+}
+
+function _btProgress(completed, failed, total, status) {
+  if (!total) total = 0;
+  const done = (completed || 0) + (failed || 0);
+  const pct = total > 0 ? Math.round(done / total * 100) : 0;
+  const fillCls = (BT_STATUS_MAP[status] || {fill:'pending'}).fill;
+  return '<div class="bt-progress">'
+    + '<div class="bt-progress-bar"><div class="bt-progress-fill ' + fillCls + '" style="width:' + pct + '%"></div></div>'
+    + '<span class="bt-progress-text">' + done + '/' + total + '</span>'
+    + '</div>';
+}
+
+function _btFmtTime(iso) {
+  if (!iso) return '—';
   try {
-    const res = await fetch(API_BASE + '/task-docs');
+    const d = new Date(iso);
+    const pad = n => String(n).padStart(2, '0');
+    return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate())
+      + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+  } catch { return iso; }
+}
+
+function _btDuration(startedAt, finishedAt) {
+  if (!startedAt || !finishedAt) return '—';
+  try {
+    const s = new Date(startedAt).getTime();
+    const f = new Date(finishedAt).getTime();
+    const sec = Math.round((f - s) / 1000);
+    if (sec < 60) return sec + 's';
+    const min = Math.floor(sec / 60);
+    return min + 'm' + (sec % 60) + 's';
+  } catch { return '—'; }
+}
+
+/* ----- Load categories (folder list) ----- */
+async function loadBatchCategories() {
+  try {
+    const res = await fetch(BT_API + '/task-categories');
     const data = await res.json();
-    _batchAllDocs = data.documents || [];
-    // Build directory dropdown from categories
-    const categories = new Map();
-    for (const d of _batchAllDocs) {
-      const cat = d.category || '(根目录)';
-      if (!categories.has(cat)) categories.set(cat, []);
-      categories.get(cat).push(d);
-    }
-    const select = document.getElementById('batchDirSelect');
-    select.innerHTML = '<option value="">-- 选择目录 --</option>'
-      + Array.from(categories.keys()).sort().map(cat => {
-        const count = categories.get(cat).length;
-        return '<option value="' + escapeHtml(cat) + '">' + escapeHtml(cat) + ' (' + count + ' 个)</option>';
-      }).join('');
-    // Also store the full list option
-    select.innerHTML += '<option value="__all__">全部目录 (' + _batchAllDocs.length + ' 个)</option>';
+    _batchCategories = data.categories || [];
+    renderBatchFolders();
   } catch(e) {
-    document.getElementById('batchDocList').innerHTML = '<div style="color:#ef4444;padding:8px">加载失败: ' + escapeHtml(e.message) + '</div>';
+    document.getElementById('btFolderList').innerHTML =
+      '<div style="color:#ef4444;padding:8px;font-size:.8rem">加载失败: ' + escapeHtml(e.message) + '</div>';
   }
 }
 
-function onBatchDirChange() {
-  const cat = document.getElementById('batchDirSelect').value;
-  if (!cat) {
-    _batchSelectedDocs = [];
-    document.getElementById('batchDirInfo').style.display = 'none';
-    document.getElementById('batchDocList').innerHTML = '';
+function renderBatchFolders() {
+  const list = document.getElementById('btFolderList');
+  if (!_batchCategories.length) {
+    list.innerHTML = '<div style="color:#9ca3af;padding:12px;text-align:center;font-size:.8rem">无可用目录</div>';
     return;
   }
-  if (cat === '__all__') {
-    _batchSelectedDocs = _batchAllDocs.slice();
-  } else {
-    _batchSelectedDocs = _batchAllDocs.filter(d => (d.category || '(根目录)') === cat);
-  }
-  // Show info
-  document.getElementById('batchDirInfo').style.display = '';
-  document.getElementById('batchDirInfo').textContent = '已选择 ' + _batchSelectedDocs.length + ' 个算子文档，点击"创建任务"开始批量解析';
-
-  // Render preview list (read-only)
-  const list = document.getElementById('batchDocList');
-  list.innerHTML = _batchSelectedDocs.map(d =>
-    '<div style="padding:3px 6px;font-size:.82rem;color:#374151;border-bottom:1px solid #f3f4f6">'
-    + escapeHtml(d.name)
-    + '<span style="float:right;color:#9ca3af;font-size:.75rem">' + (d.size ? Math.round(d.size/1024)+'KB' : '') + '</span>'
-    + '</div>'
-  ).join('') || '<div style="color:#9ca3af;padding:12px;text-align:center">该目录下无文档</div>';
+  const folderSvg = '<svg class="bt-folder-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>';
+  list.innerHTML = _batchCategories.map((c, i) => {
+    const name = c.name || '(根目录)';
+    const isSelected = _batchSelectedCategories.has(c.name);
+    return '<div class="bt-folder-item' + (isSelected ? ' selected' : '') + '" onclick="toggleBatchFolder(' + i + ')">'
+      + folderSvg
+      + '<span class="bt-folder-name">' + escapeHtml(name) + '</span>'
+      + '<span class="bt-folder-count">' + c.count + '</span>'
+      + '<span class="bt-folder-check">&#10003;</span>'
+      + '</div>';
+  }).join('');
+  updateBatchFolderInfo();
 }
 
+function toggleBatchFolder(index) {
+  const cat = _batchCategories[index];
+  if (!cat) return;
+  if (_batchSelectedCategories.has(cat.name)) {
+    _batchSelectedCategories.delete(cat.name);
+  } else {
+    _batchSelectedCategories.add(cat.name);
+  }
+  renderBatchFolders();
+}
+
+function updateBatchFolderInfo() {
+  const selected = _batchCategories.filter(c => _batchSelectedCategories.has(c.name));
+  const totalDocs = selected.reduce((s, c) => s + c.count, 0);
+  const info = document.getElementById('btFolderInfo');
+  if (selected.length > 0) {
+    info.innerHTML = '已选择 <strong style="color:var(--bt-primary)">' + selected.length + '</strong> 个目录，共 <strong style="color:var(--bt-primary)">' + totalDocs + '</strong> 个算子文档';
+  } else {
+    info.textContent = '请至少选择一个目录';
+  }
+}
+
+/* ----- Create task ----- */
 async function createBatchTask() {
-  if (!_batchSelectedDocs.length) { alert('请先选择一个目录'); return; }
-  const paths = _batchSelectedDocs.map(d => d.path);
-  const btn = document.getElementById('batchCreateBtn');
+  if (_batchSelectedCategories.size === 0) {
+    alert('请至少选择一个目录');
+    return;
+  }
+  const name = document.getElementById('btTaskName').value.trim() || undefined;
+  const categories = Array.from(_batchSelectedCategories);
+  const btn = document.getElementById('btCreateBtn');
   btn.disabled = true; btn.textContent = '创建中...';
   try {
-    const res = await fetch(API_BASE + '/tasks', {
+    const res = await fetch(BT_API + '/tasks', {
       method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({file_paths: paths})
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: name, categories: categories }),
     });
     const data = await res.json();
-    if (data.task_id) {
-      alert('任务 #' + data.task_id + ' 已创建，共 ' + (data.total||paths.length) + ' 个算子');
+    if (data.success !== false && data.task_id) {
       // Reset selection
-      document.getElementById('batchDirSelect').value = '';
-      onBatchDirChange();
-      loadBatchTasks();
+      _batchSelectedCategories.clear();
+      document.getElementById('btTaskName').value = '';
+      renderBatchFolders();
+      await loadBatchTasks();
+      // Expand the new task and start polling
+      _batchExpandedTaskId = data.task_id;
+      await renderBatchTaskTable();
       startBatchPoll(data.task_id);
     } else {
-      alert('创建失败: ' + (data.detail || data.error || JSON.stringify(data)));
+      alert('创建失败: ' + (data.error || JSON.stringify(data)));
     }
   } catch(e) {
     alert('请求失败: ' + e.message);
@@ -2516,137 +2771,211 @@ async function createBatchTask() {
   }
 }
 
+/* ----- Load tasks (stats + table) ----- */
 async function loadBatchTasks() {
   try {
     const [taskRes, sumRes] = await Promise.all([
-      fetch(API_BASE + '/tasks'),
-      fetch(API_BASE + '/tasks-summary')
+      fetch(BT_API + '/tasks'),
+      fetch(BT_API + '/tasks-summary'),
     ]);
-    const tasks = await taskRes.json();
-    const summary = await sumRes.json();
-    renderBatchSummary(summary);
-    renderBatchTasks(tasks);
+    const tasksData = await taskRes.json();
+    const sumData = await sumRes.json();
+    renderBatchStats(sumData.task_counts || {});
+    _batchTasksCache = tasksData.tasks || [];
+    await renderBatchTaskTable();
   } catch(e) {
-    document.getElementById('batchTaskList').innerHTML = '<div style="color:#ef4444;padding:8px">加载失败</div>';
+    document.getElementById('btTaskBody').innerHTML =
+      '<tr><td colspan="6"><div class="bt-empty">加载失败</div></td></tr>';
   }
 }
 
-function renderBatchSummary(s) {
+let _batchTasksCache = [];
+
+function renderBatchStats(tc) {
   const cards = [
-    {label:'总任务', val:s.total||0, color:'#6b7280'},
-    {label:'运行中', val:s.running||0, color:'#3b82f6'},
-    {label:'已完成', val:s.completed||0, color:'#059669'},
-    {label:'失败', val:s.failed||0, color:'#ef4444'},
-    {label:'排队中', val:s.pending||0, color:'#f59e0b'},
+    { sel: '.s-total .num',   val: tc.total || 0 },
+    { sel: '.s-running .num', val: tc.running || 0 },
+    { sel: '.s-done .num',    val: tc.completed || 0 },
+    { sel: '.s-fail .num',    val: tc.failed || 0 },
   ];
-  document.getElementById('batchSummary').innerHTML = cards.map(c =>
-    '<div style="background:#f9fafb;border:1px solid var(--border);border-radius:8px;padding:8px 16px;min-width:90px;text-align:center">'
-    + '<div style="font-size:1.4rem;font-weight:700;color:' + c.color + '">' + c.val + '</div>'
-    + '<div style="font-size:.78rem;color:#6b7280">' + c.label + '</div></div>'
-  ).join('');
+  cards.forEach(c => {
+    const el = document.querySelector('#btStats ' + c.sel);
+    if (el) el.textContent = c.val;
+  });
 }
 
-function renderBatchTasks(tasks) {
-  const list = document.getElementById('batchTaskList');
-  if (!tasks.tasks || !tasks.tasks.length) {
-    list.innerHTML = '<div style="color:#9ca3af;padding:12px;text-align:center">暂无任务</div>';
+function _btActions(t) {
+  const status = t.status;
+  const completed = t.completed_count || 0;
+  const failed = t.failed_count || 0;
+  let btns = '';
+  // Stop — for running tasks
+  if (status === 'running') {
+    btns += '<button class="bt-btn-action btn-stop" onclick="event.stopPropagation();stopBatchTask(' + t.id + ')">停止</button> ';
+  }
+  // Resume — for pending or cancelled tasks
+  if (status === 'pending' || status === 'cancelled') {
+    btns += '<button class="bt-btn-action btn-resume" onclick="event.stopPropagation();resumeBatchTask(' + t.id + ')">恢复</button> ';
+  }
+  // Retry failed — for failed or cancelled tasks with failures
+  if ((status === 'failed' || status === 'cancelled') && failed > 0) {
+    btns += '<button class="bt-btn-action btn-retry" onclick="event.stopPropagation();retryBatchTask(' + t.id + ')">重试失败</button> ';
+  }
+  // Download — for tasks with completed items
+  if (completed > 0 && status !== 'running' && status !== 'pending') {
+    btns += '<button class="bt-btn-action btn-download" onclick="event.stopPropagation();downloadBatchTask(' + t.id + ')">下载结果</button> ';
+  }
+  // Delete — for non-running tasks
+  if (status !== 'running') {
+    btns += '<button class="bt-btn-action btn-delete" onclick="event.stopPropagation();deleteBatchTask(' + t.id + ')">删除</button>';
+  }
+  return btns || '—';
+}
+
+async function renderBatchTaskTable() {
+  const body = document.getElementById('btTaskBody');
+  if (!_batchTasksCache.length) {
+    body.innerHTML = '<tr><td colspan="6"><div class="bt-empty">暂无任务</div></td></tr>';
     return;
   }
-  const statusBadge = (s) => {
-    const m = {running:'<span style="color:#3b82f6">运行中</span>',completed:'<span style="color:#059669">已完成</span>',failed:'<span style="color:#ef4444">失败</span>',pending:'<span style="color:#f59e0b">排队中</span>'};
-    return m[s] || s;
-  };
-  list.innerHTML = tasks.tasks.map(t =>
-    '<div onclick="showBatchDetail(' + t.id + ')" style="padding:8px;border-radius:6px;cursor:pointer;border:1px solid transparent" onmouseover="this.style.background=\'#f3f4f6\';this.style.borderColor=\'var(--border)\'" onmouseout="this.style.background=\'\';this.style.borderColor=\'transparent\'">'
-    + '<div style="display:flex;justify-content:space-between;align-items:center">'
-    + '<span style="font-weight:600;font-size:.88rem">任务 #' + t.id + '</span>'
-    + statusBadge(t.status)
-    + '</div>'
-    + '<div style="font-size:.78rem;color:#6b7280;margin-top:2px">'
-    + (t.total||0) + ' 个算子 · 成功 ' + (t.completed_count||0) + ' · 失败 ' + (t.failed_count||0)
-    + ' · ' + escapeHtml(t.created_at||'')
-    + '</div></div>'
-  ).join('');
-}
-
-async function showBatchDetail(taskId) {
-  _batchCurrentTaskId = taskId;
-  document.getElementById('batchTaskDetail').style.display = '';
-  document.getElementById('batchDetailTitle').textContent = '#' + taskId;
-  await refreshBatchDetail();
-}
-
-async function refreshBatchDetail() {
-  if (!_batchCurrentTaskId) return;
-  try {
-    const res = await fetch(API_BASE + '/tasks/' + _batchCurrentTaskId);
-    const data = await res.json();
-    const body = document.getElementById('batchDetailBody');
-    const items = data.items || [];
-    const statusBadge = (s) => {
-      const m = {completed:'<span style="color:#059669;font-size:.78rem">✓</span>',failed:'<span style="color:#ef4444;font-size:.78rem">✗</span>',running:'<span style="color:#3b82f6;font-size:.78rem">⟳</span>',pending:'<span style="color:#f59e0b;font-size:.78rem">○</span>'};
-      return m[s] || s;
-    };
-    body.innerHTML = '<table style="width:100%;border-collapse:collapse;font-size:.82rem">'
-      + '<thead><tr><th style="text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)">状态</th><th style="text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)">算子名</th><th style="text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)">耗时</th><th style="text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)">错误信息</th></tr></thead>'
-      + '<tbody>' + items.map(it =>
-        '<tr><td style="padding:3px 8px">' + statusBadge(it.status) + '</td>'
-        + '<td style="padding:3px 8px">' + escapeHtml(it.operator_name||'') + '</td>'
-        + '<td style="padding:3px 8px;color:#9ca3af">' + (it.duration_sec ? it.duration_sec+'s' : '-') + '</td>'
-        + '<td style="padding:3px 8px;color:#ef4444;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + escapeHtml(it.error_message||'') + '</td></tr>'
-      ).join('') + '</tbody></table>';
-    const isRunning = data.status === 'running';
-    const hasFailed = (data.failed_count||0) > 0;
-    const hasCompleted = (data.completed_count||0) > 0;
-    document.getElementById('batchResumeBtn').style.display = (data.status === 'pending' || isRunning) ? '' : 'none';
-    document.getElementById('batchRetryBtn').style.display = hasFailed ? '' : 'none';
-    document.getElementById('batchDownloadBtn').style.display = hasCompleted ? '' : 'none';
-    document.getElementById('batchDeleteBtn').style.display = '';
-  } catch(e) {
-    document.getElementById('batchDetailBody').innerHTML = '<div style="color:#ef4444">加载失败</div>';
+  // Render main rows
+  let html = '';
+  for (const t of _batchTasksCache) {
+    const isOpen = _batchExpandedTaskId === t.id;
+    html += '<tr class="bt-row" onclick="toggleBatchDetail(' + t.id + ')">'
+      + '<td><strong>' + escapeHtml(t.name || ('#' + t.id)) + '</strong></td>'
+      + '<td>' + _btBadge(t.status) + '</td>'
+      + '<td>' + _btProgress(t.completed_count, t.failed_count, t.total_count, t.status) + '</td>'
+      + '<td class="bt-time-cell"><span class="start">' + _btFmtTime(t.created_at) + '</span></td>'
+      + '<td class="bt-time-cell">' + (t.status === 'running' || t.status === 'pending' ? '—' : _btFmtTime(t.updated_at)) + '</td>'
+      + '<td>' + _btActions(t) + '</td>'
+      + '</tr>';
+    // Detail row
+    html += '<tr class="bt-task-detail' + (isOpen ? ' open' : '') + '" id="btDetail' + t.id + '">'
+      + '<td colspan="6"><div class="bt-detail-wrap" id="btDetailWrap' + t.id + '">'
+      + (isOpen ? '<h4>加载中...</h4>' : '')
+      + '</div></td></tr>';
+  }
+  body.innerHTML = html;
+  // If a task is expanded, load its detail
+  if (_batchExpandedTaskId) {
+    await loadBatchDetail(_batchExpandedTaskId);
   }
 }
 
+async function toggleBatchDetail(taskId) {
+  if (_batchExpandedTaskId === taskId) {
+    // Collapse
+    _batchExpandedTaskId = null;
+    const row = document.getElementById('btDetail' + taskId);
+    if (row) row.classList.remove('open');
+  } else {
+    // Collapse previous, expand new
+    if (_batchExpandedTaskId) {
+      const prev = document.getElementById('btDetail' + _batchExpandedTaskId);
+      if (prev) prev.classList.remove('open');
+    }
+    _batchExpandedTaskId = taskId;
+    const row = document.getElementById('btDetail' + taskId);
+    if (row) row.classList.add('open');
+    await loadBatchDetail(taskId);
+  }
+}
+
+async function loadBatchDetail(taskId) {
+  const wrap = document.getElementById('btDetailWrap' + taskId);
+  if (!wrap) return;
+  try {
+    const res = await fetch(BT_API + '/tasks/' + taskId);
+    const data = await res.json();
+    const items = data.items || [];
+    const total = data.total_count || items.length || 0;
+    const completed = data.completed_count || 0;
+    const failed = data.failed_count || 0;
+
+    let subtitle = '';
+    if (data.status === 'completed') {
+      subtitle = ' — 全部成功';
+    } else if (data.status === 'failed' || data.status === 'cancelled') {
+      subtitle = ' — ' + completed + ' 成功 / ' + failed + ' 失败';
+    }
+
+    let itemsHtml = '<h4>算子明细（' + total + ' 个）' + subtitle + '</h4>';
+    itemsHtml += '<table class="bt-item-table"><thead><tr>'
+      + '<th>状态</th><th>算子名</th><th>耗时</th><th>错误</th>'
+      + '</tr></thead><tbody>';
+    for (const it of items) {
+      const icon = BT_ITEM_ICON[it.status] || '?';
+      const duration = it.status === 'running' && it.started_at
+        ? '...'
+        : _btDuration(it.started_at, it.finished_at);
+      itemsHtml += '<tr>'
+        + '<td><span class="bt-item-badge ' + (it.status || 'pending') + '">' + icon + '</span></td>'
+        + '<td>' + escapeHtml(it.operator_name || '') + '</td>'
+        + '<td style="color:#9ca3af">' + duration + '</td>'
+        + '<td style="color:var(--bt-red);max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + escapeHtml(it.error || '') + '</td>'
+        + '</tr>';
+    }
+    itemsHtml += '</tbody></table>';
+    wrap.innerHTML = itemsHtml;
+  } catch(e) {
+    wrap.innerHTML = '<div style="color:#ef4444;font-size:.8rem">加载失败</div>';
+  }
+}
+
+/* ----- Polling ----- */
 function startBatchPoll(taskId) {
   if (_batchPollTimer) clearInterval(_batchPollTimer);
-  _batchCurrentTaskId = taskId;
+  _batchExpandedTaskId = taskId;
   _batchPollTimer = setInterval(async () => {
     await loadBatchTasks();
-    await refreshBatchDetail();
-    try {
-      const res = await fetch(API_BASE + '/tasks/' + taskId);
-      const data = await res.json();
-      if (data.status !== 'running' && data.status !== 'pending') {
-        clearInterval(_batchPollTimer);
-        _batchPollTimer = null;
-      }
-    } catch(e) {}
+    // Check if any task is still running or pending
+    const hasActive = _batchTasksCache.some(t => t.status === 'running' || t.status === 'pending');
+    if (!hasActive) {
+      clearInterval(_batchPollTimer);
+      _batchPollTimer = null;
+    }
   }, 5000);
 }
 
-async function resumeBatchTask() {
-  if (!_batchCurrentTaskId) return;
+/* ----- Task actions ----- */
+async function stopBatchTask(taskId) {
+  if (!confirm('确认停止任务 #' + taskId + '?')) return;
   try {
-    await fetch(API_BASE + '/tasks/' + _batchCurrentTaskId + '/resume', {method:'POST'});
-    startBatchPoll(_batchCurrentTaskId);
-    await loadBatchTasks();
+    const res = await fetch(BT_API + '/tasks/' + taskId + '/stop', { method: 'POST' });
+    const data = await res.json();
+    if (data.success) {
+      await loadBatchTasks();
+    } else {
+      alert('停止失败: ' + (data.error || '未知错误'));
+    }
+  } catch(e) { alert('停止失败: ' + e.message); }
+}
+
+async function resumeBatchTask(taskId) {
+  try {
+    const res = await fetch(BT_API + '/tasks/' + taskId + '/resume', { method: 'POST' });
+    const data = await res.json();
+    if (data.success !== false) {
+      await loadBatchTasks();
+      startBatchPoll(taskId);
+    } else {
+      alert('恢复失败: ' + (data.error || '未知错误'));
+    }
   } catch(e) { alert('恢复失败: ' + e.message); }
 }
 
-async function retryBatchTask() {
-  if (!_batchCurrentTaskId) return;
+async function retryBatchTask(taskId) {
   try {
-    const res = await fetch(API_BASE + '/tasks/' + _batchCurrentTaskId + '/retry-failed', {method:'POST'});
+    const res = await fetch(BT_API + '/tasks/' + taskId + '/retry-failed', { method: 'POST' });
     const data = await res.json();
     if (data.success) {
       alert('已创建重试任务 #' + (data.new_task_id || '?') + '，包含 ' + (data.failed_count || 0) + ' 个失败算子');
       await loadBatchTasks();
-      // Switch to the newly created retry task to show its live progress.
       if (data.new_task_id) {
-        await showBatchDetail(data.new_task_id);
+        _batchExpandedTaskId = data.new_task_id;
+        await renderBatchTaskTable();
         startBatchPoll(data.new_task_id);
-      } else {
-        startBatchPoll(_batchCurrentTaskId);
       }
     } else {
       alert('重试失败: ' + (data.error || '未知错误'));
@@ -2654,20 +2983,21 @@ async function retryBatchTask() {
   } catch(e) { alert('重试失败: ' + e.message); }
 }
 
-async function downloadBatchTask() {
-  if (!_batchCurrentTaskId) return;
-  window.open(API_BASE + '/tasks/' + _batchCurrentTaskId + '/download', '_blank');
+function downloadBatchTask(taskId) {
+  window.open(BT_API + '/tasks/' + taskId + '/download', '_blank');
 }
 
-async function deleteBatchTask() {
-  if (!_batchCurrentTaskId) return;
-  if (!confirm('确认删除任务 #' + _batchCurrentTaskId + '?')) return;
+async function deleteBatchTask(taskId) {
+  if (!confirm('确认删除任务 #' + taskId + '?')) return;
   try {
-    await fetch(API_BASE + '/tasks/' + _batchCurrentTaskId, {method:'DELETE'});
-    document.getElementById('batchTaskDetail').style.display = 'none';
-    _batchCurrentTaskId = null;
-    if (_batchPollTimer) { clearInterval(_batchPollTimer); _batchPollTimer = null; }
-    await loadBatchTasks();
+    const res = await fetch(BT_API + '/tasks/' + taskId, { method: 'DELETE' });
+    const data = await res.json();
+    if (data.success) {
+      if (_batchExpandedTaskId === taskId) _batchExpandedTaskId = null;
+      await loadBatchTasks();
+    } else {
+      alert('删除失败: ' + (data.error || '未知错误'));
+    }
   } catch(e) { alert('删除失败: ' + e.message); }
 }
 

@@ -26,6 +26,7 @@ from langchain_openai import ChatOpenAI
 from agent.mcp_client import MCPClient
 from agent.nodes.state import PipelineState
 from agent.utils.semantic_rules import get_expr_for_tensor, build_prompt_context
+from agent.utils.platform_utils import expand_common_in_relations
 from agent.runtime.context import get_context
 from agent.runtime.events import EventType, Span, SpanType
 
@@ -596,6 +597,12 @@ async def build_single_param_constraint_node(
         # Step 6: Append to param_relations
         if all_new:
             merged = existing + all_new
+            # Expand platform="common" to per-platform rows before DB save
+            platforms = await _mcp_client.query_platform_support_by_doc_id(doc_id)
+            supported_platforms = [
+                p["platform_name"] for p in platforms if p.get("is_supported") == 1
+            ]
+            merged = expand_common_in_relations(merged, supported_platforms)
             result = await _mcp_client.save_param_relations(doc_id, merged)
             logger.info(
                 "SingleParamConstraint: saved %d total relations "

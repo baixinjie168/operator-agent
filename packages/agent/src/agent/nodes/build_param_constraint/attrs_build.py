@@ -116,14 +116,32 @@ async def attrs_build_node(state: BuildParamConstraintState) -> dict[str, Any]:
             else:
                 dtypes = _split_csv(dtype_raw)
 
-            # format
+            # format: 2-level fallback (mirrors dtype logic)
+            #
+            # Level 1: dformat_desc JSON field -> resolve_platform_value per platform
+            # Level 2: data_format field -> _parse_json_field -> resolve_platform_value
+            #
+            # dformat_desc and data_format are aliases of the SAME DB column
+            # (both map to r[7] in query_params_by_doc_id).  However, in the
+            # state pipeline they may be set by different nodes at different
+            # times, so level 2 acts as a safety net when level 1 is empty.
+            #
+            # The old code fed the raw JSON string (e.g. '{"*": "ND"}')
+            # directly to _split_csv, producing ['{"*": "ND"}'] instead of
+            # ['ND'].  The fix routes the fallback through _parse_json_field
+            # + resolve_platform_value so the value is properly extracted
+            # before _split_csv.
             if not is_tensor:
                 fmt: list | str = "N/A"
             else:
                 fmt_raw = resolve_platform_value(fmt_json, plat)
                 if not fmt_raw:
-                    fmt_raw = param.get("data_format", "") or ""
-                fmt = _split_csv(fmt_raw)
+                    raw = param.get("data_format", "") or ""
+                    if raw:
+                        fmt_raw = resolve_platform_value(
+                            _parse_json_field(raw), plat
+                        )
+                fmt = _split_csv(fmt_raw) if fmt_raw else []
 
             # is_support_discontinuous
             disc_raw = param.get("is_support_discontinuous", "") or ""

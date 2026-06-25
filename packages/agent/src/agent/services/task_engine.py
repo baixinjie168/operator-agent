@@ -17,6 +17,17 @@ logger = logging.getLogger(__name__)
 # Global lock: only one task runs at a time to avoid LLM concurrency limits
 _run_lock = asyncio.Lock()
 
+# Cancellation registry: task_id -> asyncio.Event (cooperative cancel flag)
+_cancel_flags: dict[int, asyncio.Event] = {}
+# Running task handles: task_id -> asyncio.Task (for hard cancellation)
+_task_handles: dict[int, asyncio.Task] = {}
+
+
+def _is_cancelled(task_id: int) -> bool:
+    """Check whether a task has been flagged for cancellation."""
+    evt = _cancel_flags.get(task_id)
+    return evt is not None and evt.is_set()
+
 
 def _now_iso() -> str:
     """Return current UTC time as ISO 8601 string."""
@@ -116,76 +127,107 @@ async def run_task(task_id: int, max_workers: int | None = None) -> None:
     After the first pass, failed items are automatically retried up to
     settings.task_max_retries times (default 1).
 
+    Supports cooperative cancellation via ``stop_task``: a cancellation
+    flag is checked before each item and between retry rounds.  If the
+    flag is set, remaining items are skipped and the task is marked
+    'cancelled'.
+
     Args:
         task_id: The task to execute.
         max_workers: Override for parallelism (None = use settings.task_max_workers).
     """
-    async with _run_lock:
-        mcp = MCPClient()
-        graph = build_pipeline([PipelineStage.EXTRACT])
-        workers = max_workers if max_workers is not None else settings.task_max_workers
-        max_retries = settings.task_max_retries
+    # Register cancellation flag and current task handle
+    cancel_event = asyncio.Event()
+    _cancel_flags[task_id] = cancel_event
+    current = asyncio.current_task()
+    if current is not None:
+        _task_handles[task_id] = current
 
-        # Set task to running
-        await mcp.update_task_status(task_id, "running")
+    try:
+        async with _run_lock:
+            mcp = MCPClient()
+            graph = build_pipeline([PipelineStage.EXTRACT])
+            workers = max_workers if max_workers is not None else settings.task_max_workers
+            max_retries = settings.task_max_retries
 
-        # Get all pending items
-        items = await mcp.get_pending_task_items(task_id)
+            # Set task to running
+            await mcp.update_task_status(task_id, "running")
 
-        logger.info(
-            "Task %s: processing %d items with max_workers=%d, max_retries=%d",
-            task_id, len(items), workers, max_retries,
-        )
-
-        # Process items in parallel with Semaphore-controlled concurrency
-        sem = asyncio.Semaphore(workers)
-
-        async def _process_with_sem(item: dict) -> None:
-            async with sem:
-                await _process_item(item, graph, mcp)
-                # Refresh task progress after each item completes
-                await mcp.refresh_task_progress(task_id)
-
-        await asyncio.gather(*[_process_with_sem(item) for item in items])
-
-        # Retry loop: re-process failed items
-        for retry_round in range(1, max_retries + 1):
-            failed_items = await _get_failed_items(mcp, task_id)
-            if not failed_items:
-                logger.info(
-                    "Task %s: no failed items after pass, skipping retry",
-                    task_id,
-                )
-                break
+            # Get all pending items
+            items = await mcp.get_pending_task_items(task_id)
 
             logger.info(
-                "Task %s: retry round %d/%d — %d failed items",
-                task_id, retry_round, max_retries, len(failed_items),
+                "Task %s: processing %d items with max_workers=%d, max_retries=%d",
+                task_id, len(items), workers, max_retries,
             )
 
-            # Reset failed items to pending for re-processing
-            await _reset_items_to_pending(mcp, failed_items)
+            # Process items in parallel with Semaphore-controlled concurrency
+            sem = asyncio.Semaphore(workers)
 
-            # Re-process failed items in parallel
-            await asyncio.gather(
-                *[_process_with_sem(item) for item in failed_items]
-            )
+            async def _process_with_sem(item: dict) -> None:
+                async with sem:
+                    # Cooperative cancellation: skip if task was stopped
+                    if _is_cancelled(task_id):
+                        return
+                    await _process_item(item, graph, mcp)
+                    # Refresh task progress after each item completes
+                    await mcp.refresh_task_progress(task_id)
 
-        # Set final task status
-        task = await mcp.get_task(task_id)
-        if task is None:
-            logger.error("Task %s not found after execution", task_id)
-            return
+            await asyncio.gather(*[_process_with_sem(item) for item in items])
 
-        final_status = "completed" if task["failed_count"] == 0 else "failed"
-        await mcp.update_task_status(task_id, final_status)
-        logger.info(
-            "Task %s finished: %s (completed=%d, failed=%d)",
-            task_id,
-            final_status,
-            task["completed_count"],
-            task["failed_count"],
-        )
+            # Retry loop: re-process failed items
+            for retry_round in range(1, max_retries + 1):
+                # Check cancellation before each retry round
+                if _is_cancelled(task_id):
+                    logger.info("Task %s: cancelled, skipping retry", task_id)
+                    break
+
+                failed_items = await _get_failed_items(mcp, task_id)
+                if not failed_items:
+                    logger.info(
+                        "Task %s: no failed items after pass, skipping retry",
+                        task_id,
+                    )
+                    break
+
+                logger.info(
+                    "Task %s: retry round %d/%d — %d failed items",
+                    task_id, retry_round, max_retries, len(failed_items),
+                )
+
+                # Reset failed items to pending for re-processing
+                await _reset_items_to_pending(mcp, failed_items)
+
+                # Re-process failed items in parallel
+                await asyncio.gather(
+                    *[_process_with_sem(item) for item in failed_items]
+                )
+
+            # Set final task status
+            task = await mcp.get_task(task_id)
+            if task is None:
+                logger.error("Task %s not found after execution", task_id)
+                return
+
+            if _is_cancelled(task_id):
+                # Cooperative cancellation path: clean up and mark cancelled
+                await mcp.reset_stuck_task_items(task_id)
+                await mcp.update_task_status(task_id, "cancelled")
+                logger.info("Task %s cancelled by user", task_id)
+            else:
+                final_status = "completed" if task["failed_count"] == 0 else "failed"
+                await mcp.update_task_status(task_id, final_status)
+                logger.info(
+                    "Task %s finished: %s (completed=%d, failed=%d)",
+                    task_id,
+                    final_status,
+                    task["completed_count"],
+                    task["failed_count"],
+                )
+    finally:
+        # Always clean up the registries, even if cancelled via CancelledError
+        _cancel_flags.pop(task_id, None)
+        _task_handles.pop(task_id, None)
 
 
 async def retry_failed_task(task_id: int) -> dict:
@@ -294,3 +336,67 @@ async def resume_task(task_id: int) -> dict:
     asyncio.create_task(run_task(task_id))
 
     return {"reset_count": reset_count, "task_id": task_id}
+
+
+async def stop_task(task_id: int) -> dict:
+    """Stop a running task (called from the HTTP route layer).
+
+    Uses a dual cancellation strategy:
+
+    1. **Cooperative**: set an ``asyncio.Event`` flag so that
+       ``run_task`` skips items that have not yet started processing.
+    2. **Interruptive**: ``cancel()`` the ``asyncio.Task`` handle to
+       interrupt in-flight LLM calls.  ``CancelledError`` is a
+       ``BaseException`` and is *not* caught by ``_process_item``'s
+       ``except Exception``, so items may be left in 'running'.
+    3. **Database cleanup**: after the task handle exits, call the MCP
+       ``stop_task`` tool to reset any 'running' items to 'pending' and
+       set the task status to 'cancelled'.
+
+    Args:
+        task_id: The task to stop.
+
+    Returns:
+        dict with task_id and reset_count.
+
+    Raises:
+        ValueError: If the task is not found or is not running.
+    """
+    mcp = MCPClient()
+
+    # Verify task exists and is running
+    task = await mcp.get_task(task_id)
+    if task is None:
+        raise ValueError(f"Task {task_id} not found")
+    if task["status"] != "running":
+        raise ValueError(
+            f"Task {task_id} is not running (status={task['status']})"
+        )
+
+    # 1. Set cooperative cancellation flag
+    evt = _cancel_flags.get(task_id)
+    if evt:
+        evt.set()
+
+    # 2. Interruptive: cancel the asyncio task handle
+    handle = _task_handles.get(task_id)
+    if handle:
+        handle.cancel()
+        try:
+            await handle
+        except (asyncio.CancelledError, Exception):
+            pass
+
+    # 3. Database-side cleanup (reset running items, set status to cancelled)
+    result = await mcp.stop_task(task_id)
+
+    logger.info(
+        "Stopped task %s: reset %d running items",
+        task_id, result.get("reset_count", 0),
+    )
+
+    return {
+        "task_id": task_id,
+        "reset_count": result.get("reset_count", 0),
+    }
+

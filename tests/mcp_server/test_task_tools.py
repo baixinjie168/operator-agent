@@ -1,4 +1,4 @@
-"""Tests for mcp_server task_tools — reset_stuck_task_items."""
+"""Tests for mcp_server task_tools — reset_stuck_task_items and stop_task."""
 
 from __future__ import annotations
 
@@ -14,8 +14,10 @@ from mcp_server.tools.task_tools import (
     create_task_items,
     get_pending_task_items,
     get_task,
+    get_task_with_items,
     refresh_task_progress,
     reset_stuck_task_items,
+    stop_task,
     update_task_item_status,
     update_task_status,
 )
@@ -155,3 +157,147 @@ class TestResetStuckTaskItems:
         # Items 2, 3, 4, 5 should all be pending
         pending = get_pending_task_items(task_with_items)
         assert len(pending) == 4
+
+
+class TestStopTask:
+    """Test stop_task function."""
+
+    def test_stops_running_task(self, db: Database, task_with_items: int) -> None:
+        """A running task should be stopped and marked as 'cancelled'."""
+        # Simulate a running task with one item in progress
+        update_task_status(task_with_items, "running")
+        update_task_item_status(3, "running", started_at="2026-01-01T00:00:00Z")
+
+        result = stop_task(task_with_items)
+
+        assert result["reset_count"] == 1
+        task = get_task(task_with_items)
+        assert task["status"] == "cancelled"
+
+    def test_resets_running_items_to_pending(
+        self, db: Database, task_with_items: int
+    ) -> None:
+        """Running items should be reset to 'pending'."""
+        update_task_status(task_with_items, "running")
+        update_task_item_status(2, "running", started_at="2026-01-01T00:00:00Z")
+        update_task_item_status(4, "running", started_at="2026-01-01T00:00:00Z")
+
+        result = stop_task(task_with_items)
+        assert result["reset_count"] == 2
+
+        pending = get_pending_task_items(task_with_items)
+        pending_ids = [p["id"] for p in pending]
+        assert 2 in pending_ids
+        assert 4 in pending_ids
+
+    def test_preserves_completed_and_failed(
+        self, db: Database, task_with_items: int
+    ) -> None:
+        """Completed and failed items should not be affected."""
+        update_task_status(task_with_items, "running")
+        update_task_item_status(1, "completed", doc_id=100)
+        update_task_item_status(2, "failed", error="err")
+        update_task_item_status(3, "running", started_at="2026-01-01T00:00:00Z")
+
+        stop_task(task_with_items)
+
+        detail = get_task_with_items(task_with_items)
+        items_by_id = {it["id"]: it for it in detail["items"]}
+        assert items_by_id[1]["status"] == "completed"
+        assert items_by_id[2]["status"] == "failed"
+        assert items_by_id[3]["status"] == "pending"
+
+    def test_refreshes_progress(self, db: Database, task_with_items: int) -> None:
+        """Progress counts should be refreshed after stop."""
+        update_task_status(task_with_items, "running")
+        update_task_item_status(1, "completed", doc_id=100)
+        update_task_item_status(2, "failed", error="err")
+        update_task_item_status(3, "running", started_at="2026-01-01T00:00:00Z")
+
+        result = stop_task(task_with_items)
+        assert result["completed_count"] == 1
+        assert result["failed_count"] == 1
+
+    def test_rejects_non_running_task(self, db: Database, task_with_items: int) -> None:
+        """Stopping a non-running task should raise ValueError."""
+        # Task is 'pending' by default
+        with pytest.raises(ValueError, match="not running"):
+            stop_task(task_with_items)
+
+        update_task_status(task_with_items, "completed")
+        with pytest.raises(ValueError, match="not running"):
+            stop_task(task_with_items)
+
+    def test_rejects_unknown_task(self, db: Database) -> None:
+        """Stopping a non-existent task should raise ValueError."""
+        with pytest.raises(ValueError, match="not found"):
+            stop_task(99999)
+
+    def test_cancelled_task_is_deletable(self, db: Database, task_with_items: int) -> None:
+        """A cancelled task should be deletable (unlike running)."""
+        update_task_status(task_with_items, "running")
+        update_task_item_status(3, "running", started_at="2026-01-01T00:00:00Z")
+
+        stop_task(task_with_items)
+
+        task = get_task(task_with_items)
+        assert task["status"] == "cancelled"
+        # delete_task should succeed for cancelled tasks
+        from mcp_server.tools.task_tools import delete_task
+        result = delete_task(task_with_items)
+        assert result["deleted_task_id"] == task_with_items
+
+    def test_delete_with_child_tables_fk(
+        self, db: Database, task_with_items: int
+    ) -> None:
+        """delete_task should succeed even when parameter_representations,
+        pipeline_runs, and test_cases reference the same doc_id.
+
+        This tests the FOREIGN KEY constraint fix: previously these tables
+        were missing from _DOC_ID_CHILD_TABLES, causing
+        'FOREIGN KEY constraint failed' errors.
+        """
+        from mcp_server.tools.task_tools import delete_task
+
+        # Simulate a completed task item with a doc_id
+        update_task_item_status(1, "completed", doc_id=100)
+        update_task_status(task_with_items, "completed")
+
+        # Insert rows into tables that reference document_versions(id)
+        conn = db.conn
+        # operators + document_versions rows (FK targets must exist)
+        conn.execute(
+            "INSERT INTO operators (id, name) VALUES (1, 'op100')"
+        )
+        conn.execute(
+            "INSERT INTO document_versions (id, operator_id, content, content_hash) "
+            "VALUES (100, 1, 'test', 'hash100')"
+        )
+        # parameters row
+        conn.execute(
+            "INSERT INTO parameters (doc_id, function_name, param_name, param_type) "
+            "VALUES (100, 'fn', 'p', 'int')"
+        )
+        # parameter_representations row
+        conn.execute(
+            "INSERT INTO parameter_representations (doc_id, representations) "
+            "VALUES (100, '{}')"
+        )
+        # pipeline_runs row
+        conn.execute(
+            "INSERT INTO pipeline_runs (run_id, operator_id, doc_id, "
+            "operator_name, content_hash) "
+            "VALUES ('run-100', 1, 100, 'op100', 'hash100')"
+        )
+        # test_cases row with constraint_doc_id
+        conn.execute(
+            "INSERT INTO test_cases (task_id, operator_name, case_index, "
+            "case_name, case_data, constraint_doc_id) "
+            "VALUES ('run-100', 'op100', 0, 'case0', '{}', 100)"
+        )
+        conn.commit()
+
+        # delete_task should succeed without FOREIGN KEY constraint failure
+        result = delete_task(task_with_items)
+        assert result["deleted_task_id"] == task_with_items
+        assert result["deleted_docs"] == 1

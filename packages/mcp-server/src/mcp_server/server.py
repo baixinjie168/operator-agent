@@ -11,6 +11,7 @@ from mcp.server.fastmcp import FastMCP
 from mcp_server.db import get_db
 from mcp_server.tools.document_tools import (
     check_document_version,
+    delete_operator,
     do_save_product_support,
     get_parsed_document,
     get_section_by_type,
@@ -203,6 +204,9 @@ from mcp_server.tools.test_case_tools import (
 from mcp_server.tools.task_tools import (
     delete_task as _delete_task,
 )
+from mcp_server.tools.task_tools import (
+    stop_task as _stop_task,
+)
 
 mcp = FastMCP("operator-agent-mcp-server")
 
@@ -316,6 +320,26 @@ def query_operators() -> str:
         JSON array of operators with name, source_url, latest_version, created_at.
     """
     result = list_all_operators()
+    return json.dumps(result, ensure_ascii=False)
+
+
+@mcp.tool()
+def delete_operator_tool(operator_name: str) -> str:
+    """Delete an operator and ALL associated data (cascade delete).
+
+    Deletes: parameters, param_relations, function_signatures,
+    platform_support, return_codes, dtype_combinations,
+    constraints_result, implicit_params, platform_constants,
+    parameter_representations, pipeline_events, document_versions,
+    and the operator record itself.
+
+    Args:
+        operator_name: Name of the operator to delete.
+
+    Returns:
+        JSON string with deleted_operator and deleted_doc_versions count.
+    """
+    result = delete_operator(operator_name)
     return json.dumps(result, ensure_ascii=False)
 
 
@@ -1379,6 +1403,24 @@ def delete_task(task_id: int) -> str:
         JSON string with deleted_task_id, deleted_docs, deleted_items.
     """
     result = _delete_task(task_id)
+    return json.dumps(result, ensure_ascii=False)
+
+
+@mcp.tool()
+def stop_task(task_id: int) -> str:
+    """Stop a running task.
+
+    Resets all in-progress ('running') items back to 'pending' and sets the
+    task status to 'cancelled'.  Only tasks with status 'running' can be
+    stopped.
+
+    Args:
+        task_id: Task ID to stop.
+
+    Returns:
+        JSON string with task_id, reset_count, completed_count, failed_count.
+    """
+    result = _stop_task(task_id)
     return json.dumps(result, ensure_ascii=False)
 
 

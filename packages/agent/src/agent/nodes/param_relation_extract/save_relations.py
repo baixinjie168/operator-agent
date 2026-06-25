@@ -7,6 +7,7 @@ from agent.mcp_client import MCPClient
 from agent.nodes.param_relation_extract.state import RelationExtractState
 from agent.runtime.context import get_context
 from agent.runtime.events import EventType, SpanStatus, SpanType
+from agent.utils.platform_utils import expand_common_in_relations
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +74,13 @@ async def save_relations_node(state: RelationExtractState) -> dict[str, Any]:
             )
 
     try:
+        # Expand platform="common" to per-platform rows before DB save
+        platforms = await _mcp_client.query_platform_support_by_doc_id(doc_id)
+        supported_platforms = [
+            p["platform_name"] for p in platforms if p.get("is_supported") == 1
+        ]
+        merged = expand_common_in_relations(merged, supported_platforms)
+
         result = await _mcp_client.save_param_relations(doc_id, merged)
         logger.info(
             "SaveRelations: saved %d relations (doc_id=%s)",

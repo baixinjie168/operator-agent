@@ -27,7 +27,7 @@ from agent.schemas.task import (
     TaskListResponse,
     TaskSummary,
 )
-from agent.services.task_engine import resume_task, retry_failed_task, run_task
+from agent.services.task_engine import resume_task, retry_failed_task, run_task, stop_task
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1", tags=["task"])
@@ -63,11 +63,76 @@ async def list_task_docs(search: str | None = Query(default=None)) -> TaskDocsRe
     return TaskDocsResponse(documents=docs, total=len(docs))
 
 
+@router.get("/task-categories")
+async def list_task_categories() -> dict:
+    """List operator sub-directories (categories) with their .md document counts.
+
+    This is a lightweight endpoint for the folder-selection panel in the
+    UI prototype — it returns only category names and counts rather than
+    the full document list.
+    """
+    ops_dir = Path(settings.operators_dir)
+    if not ops_dir.exists():
+        return {"categories": [], "total": 0}
+
+    categories: list[dict] = []
+    total = 0
+
+    # Sub-directories
+    for sub in sorted(ops_dir.iterdir(), key=lambda p: p.name):
+        if sub.is_dir():
+            count = sum(1 for _ in sub.rglob("*.md"))
+            if count > 0:
+                categories.append({"name": sub.name, "count": count})
+                total += count
+
+    # Loose .md files in the operators root (category = "")
+    root_count = sum(1 for _ in ops_dir.glob("*.md"))
+    if root_count > 0:
+        categories.append({"name": "", "count": root_count})
+        total += root_count
+
+    return {"categories": categories, "total": total}
+
+
 @router.post("/tasks", response_model=CreateTaskResponse)
 async def create_task(req: CreateTaskRequest) -> CreateTaskResponse:
-    """Create a new batch task, copy files, and start background execution."""
-    if not req.file_paths:
-        return CreateTaskResponse(success=False, error="file_paths is empty")
+    """Create a new batch task, copy files, and start background execution.
+
+    Accepts either ``file_paths`` (individual file paths relative to the
+    project root) or ``categories`` (operator sub-directory names under
+    ``operators/``).  When ``categories`` is provided, all ``.md`` files
+    under each sub-directory are collected automatically.  Both fields may
+    be combined; the resulting file list is de-duplicated.
+    """
+    ops_base = Path(settings.operators_dir).parent  # project root
+    ops_dir = Path(settings.operators_dir)
+
+    # Resolve file paths from categories + explicit file_paths
+    file_paths: list[str] = []
+    seen: set[str] = set()
+
+    if req.categories:
+        for cat in req.categories:
+            cat_dir = ops_dir / cat
+            if cat_dir.is_dir():
+                for md_file in sorted(cat_dir.rglob("*.md")):
+                    rel = str(md_file.relative_to(ops_base))
+                    if rel not in seen:
+                        file_paths.append(rel)
+                        seen.add(rel)
+            else:
+                logger.warning("Category directory not found: %s", cat_dir)
+
+    for fp in req.file_paths:
+        if fp not in seen:
+            file_paths.append(fp)
+            seen.add(fp)
+
+    if not file_paths:
+        return CreateTaskResponse(
+            success=False, error="No files selected (file_paths and categories are both empty)"
+        )
 
     # Generate timestamp directory
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -79,8 +144,7 @@ async def create_task(req: CreateTaskRequest) -> CreateTaskResponse:
     task_name = req.name or f"batch-{timestamp}"
 
     # Copy files
-    ops_base = Path(settings.operators_dir).parent  # project root
-    for fp in req.file_paths:
+    for fp in file_paths:
         src = ops_base / fp
         if not src.exists():
             logger.warning("File not found: %s", src)
@@ -92,7 +156,7 @@ async def create_task(req: CreateTaskRequest) -> CreateTaskResponse:
 
     # Extract operator names from filenames
     items = []
-    for seq, fp in enumerate(req.file_paths, start=1):
+    for seq, fp in enumerate(file_paths, start=1):
         src = ops_base / fp
         if not src.exists():
             continue
@@ -158,7 +222,16 @@ async def list_tasks() -> TaskListResponse:
 
 @router.get("/tasks-summary")
 async def get_tasks_summary() -> dict:
-    """Aggregated success/failure statistics across all tasks."""
+    """Aggregated statistics across all tasks.
+
+    Returns two levels of aggregation:
+
+    * ``totals`` — *item-level* counts (sum of completed/failed operator
+      documents across every task) and overall success rate.
+    * ``task_counts`` — *task-level* status counts (how many tasks are
+      pending / running / completed / failed / cancelled).  This drives
+      the summary cards in the UI prototype.
+    """
     try:
         tasks = await _mcp_client.list_tasks()
     except Exception:
@@ -168,6 +241,15 @@ async def get_tasks_summary() -> dict:
     total_all = 0
     completed_all = 0
     failed_all = 0
+    # Task-level status counts
+    task_counts = {
+        "total": 0,
+        "running": 0,
+        "completed": 0,
+        "failed": 0,
+        "pending": 0,
+        "cancelled": 0,
+    }
     for t in tasks:
         total = t.get("total_count", 0)
         completed = t.get("completed_count", 0)
@@ -187,6 +269,11 @@ async def get_tasks_summary() -> dict:
         completed_all += completed
         failed_all += failed
 
+        status = t.get("status", "pending")
+        task_counts["total"] += 1
+        if status in task_counts:
+            task_counts[status] += 1
+
     overall_rate = round(completed_all / total_all * 100, 1) if total_all > 0 else 0.0
     return {
         "tasks": rows,
@@ -197,6 +284,7 @@ async def get_tasks_summary() -> dict:
             "failed_count": failed_all,
             "success_rate": overall_rate,
         },
+        "task_counts": task_counts,
     }
 
 
@@ -329,6 +417,35 @@ async def resume_stuck_task(task_id: int) -> dict:
         }
     except Exception as e:
         logger.exception("Failed to resume task %s", task_id)
+        return {"success": False, "error": str(e)}
+
+
+@router.post("/tasks/{task_id}/stop")
+async def stop_running_task(task_id: int) -> dict:
+    """Stop a running task.
+
+    Cancels background execution, resets in-progress items to 'pending',
+    and marks the task as 'cancelled'.  Only tasks with status 'running'
+    can be stopped.
+    """
+    # Verify task exists
+    task = await _mcp_client.get_task(task_id)
+    if task is None:
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    try:
+        result = await stop_task(task_id)
+        return {
+            "success": True,
+            "task_id": task_id,
+            "reset_count": result["reset_count"],
+        }
+    except ValueError as e:
+        return {"success": False, "error": str(e)}
+    except Exception as e:
+        logger.exception("Failed to stop task %s", task_id)
         return {"success": False, "error": str(e)}
 
 

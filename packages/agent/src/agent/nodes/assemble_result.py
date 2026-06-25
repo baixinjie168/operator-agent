@@ -9,6 +9,7 @@ from typing import Any
 from agent.mcp_client import MCPClient
 from agent.nodes.state import PipelineState
 from agent.utils.param_validators import EXCLUDED_PARAMS
+from agent.utils.platform_utils import expand_common_in_constraint
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +109,12 @@ async def assemble_result_node(state: PipelineState) -> dict[str, Any]:
             relations, product_support_list, params,
         )
         dtype_support = _build_dtype_support(dtype_combos)
+
+        # Expand "common" in inputs/outputs (from implicit params) to per-platform
+        for constraint in inputs_dict.values():
+            expand_common_in_constraint(constraint, product_support_list)
+        for constraint in outputs_dict.values():
+            expand_common_in_constraint(constraint, product_support_list)
 
         # Step 3g: Inject parameter_representation records into constraints_in_parameters
         param_reprs_data = await _mcp_client.query_parameter_representations_by_doc_id(doc_id)
@@ -457,9 +464,9 @@ def _inject_parameter_representations(
     - Platform-agnostic tensor-dim representations (e.g.
       ``BS.range_value == x1.shape[0]``) are inserted into every platform.
 
-    Insertion point is right after any ``_type: platform_constants``
-    metadata entry so the final per-platform ordering is:
-    ``[platform_constants, parameter_representations..., <other constraints>]``.
+    Records are prepended to each platform's constraint list so the final
+    per-platform ordering is:
+    ``[parameter_representations..., <other constraints>]``.
     """
     tensor_reps: list[dict] = param_reprs_data.get("representations", []) or []
     platform_reps: dict[str, list[dict]] = (

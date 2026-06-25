@@ -13,7 +13,7 @@ import re
 from typing import Any
 
 from agent.core.config import settings
-from agent.nodes.build_param_constraint._helpers import _normalize_type
+from agent.nodes.build_param_constraint._helpers import _normalize_type, _split_csv
 from agent.nodes.build_param_constraint.state import BuildParamConstraintState
 from agent.prompts import ALLOWED_RANGE_VALUE_BUILD_PROMPT
 from agent.utils.llm_common import CONCURRENCY_LIMIT, create_llm, parse_json_response
@@ -137,6 +137,13 @@ def _validate_range_structure(
         return True, ""
 
     for i, r in enumerate(ranges):
+        # For enum type, None is a valid element (represents "empty configuration"
+        # for aclIntArray params, e.g. "配置空或者[-2,-1]")
+        if r is None:
+            if ar_type == "enum":
+                continue
+            return False, f"range[{i}] must be a list, got NoneType"
+
         if not isinstance(r, list):
             return False, f"range[{i}] must be a list, got {type(r).__name__}"
 
@@ -206,28 +213,40 @@ def _validate_range_source(
 
 
 def _parse_allowed_range_response(text: str) -> dict[str, Any]:
-    """Parse LLM response: {"type": "range"|"enum", "value": [[min,max], ...]}.
+    """Parse LLM response: {"type": "range"|"enum", "value": [[min,max], ...], "src_text": "..."}.
 
     Backward compatible: if LLM returns a plain array [[min,max], ...],
     treats it as {"type": "range", "value": [...]}.
+
+    For "enum" type, null values are preserved (they represent "empty"
+    configurations for aclIntArray params, e.g. "配置空或者[-2,-1]").
+    For "range" type, non-list items are converted to [] (invalid ranges).
     """
     # Try parsing as JSON object with type+value
     data = parse_json_response(text, dict)
     if isinstance(data, dict):
         ar_type = data.get("type", "range")
         ar_value = data.get("value", [])
+        src_text = data.get("src_text", "")
         if isinstance(ar_value, list):
-            ar_value = [item if isinstance(item, list) else [] for item in ar_value]
-            return {"type": ar_type, "value": ar_value}
+            if ar_type == "enum":
+                # Preserve None values; convert other non-list items to []
+                ar_value = [
+                    item if (isinstance(item, list) or item is None) else []
+                    for item in ar_value
+                ]
+            else:
+                ar_value = [item if isinstance(item, list) else [] for item in ar_value]
+            return {"type": ar_type, "value": ar_value, "src_text": src_text}
 
     # Try parsing as plain array (backward compatible)
     data = parse_json_response(text, list)
     if isinstance(data, list):
         ar_value = [item if isinstance(item, list) else [] for item in data]
-        return {"type": "range", "value": ar_value}
+        return {"type": "range", "value": ar_value, "src_text": ""}
 
     logger.warning("BuildParamConstraint: failed to parse allowed_range: %s", text[:200])
-    return {"type": "range", "value": []}
+    return {"type": "range", "value": [], "src_text": ""}
 
 
 async def allowed_range_build_node(state: BuildParamConstraintState) -> dict[str, Any]:
@@ -293,21 +312,47 @@ async def allowed_range_build_node(state: BuildParamConstraintState) -> dict[str
             except (json.JSONDecodeError, TypeError):
                 ar_list = []
             if ar_list:
-                # Store the raw text descriptions (not numeric ranges)
-                # Format: list of {"platform": ..., "allowed_range_value": ..., "type": ...}
-                # Convert to a flat list of range text strings for the constraint JSON
-                texts = [
-                    item.get("allowed_range_value", "")
-                    for item in ar_list
-                    if isinstance(item, dict) and item.get("allowed_range_value")
-                ]
                 # Detect type from first item (default "range")
                 ar_type = "range"
                 for item in ar_list:
                     if isinstance(item, dict) and item.get("type") == "enum":
                         ar_type = "enum"
                         break
-                result[key] = {"type": ar_type, "value": texts if texts else []}
+
+                if ar_type == "enum":
+                    # Split comma-separated enum values into individual items
+                    # and preserve platform dimension (Bug #1 + #2 fix).
+                    # Each platform gets its own key: fn::pn::platform.
+                    # Also store a generic-key fallback (first platform's values)
+                    # in case platform names don't match exactly downstream.
+                    first_split: list[str] = []
+                    for item in ar_list:
+                        if not isinstance(item, dict):
+                            continue
+                        plat = item.get("platform", "")
+                        raw = item.get("allowed_range_value", "")
+                        if not raw:
+                            continue
+                        split_values = _split_csv(raw)
+                        if not split_values:
+                            continue
+                        if not first_split:
+                            first_split = split_values
+                        if plat:
+                            result[f"{key}::{plat}"] = {"type": "enum", "value": split_values}
+                        else:
+                            result[key] = {"type": "enum", "value": split_values}
+                    # Generic-key fallback for platform name mismatches
+                    if first_split and key not in result:
+                        result[key] = {"type": "enum", "value": first_split}
+                else:
+                    # Range type: keep raw text as-is (no splitting needed)
+                    texts = [
+                        item.get("allowed_range_value", "")
+                        for item in ar_list
+                        if isinstance(item, dict) and item.get("allowed_range_value")
+                    ]
+                    result[key] = {"type": "range", "value": texts if texts else []}
                 string_ar_count += 1
                 continue
         still_remaining.append(p)
@@ -330,6 +375,16 @@ async def allowed_range_build_node(state: BuildParamConstraintState) -> dict[str
         if not llm_desc.strip() and not constraints_text.strip():
             key = f"{p['function_name']}::{p['param_name']}"
             result[key] = _EMPTY
+            continue
+
+        # aclIntArray params: skip deterministic regex — the regex matches
+        # specific array values like [-2,-1] as numeric ranges, but for
+        # aclIntArray these are enum array values, not continuous ranges.
+        # Let the LLM handle them (prompt rule #9 covers this case).
+        ptype = p.get("param_type", "")
+        is_int_array = "aclIntArray" in ptype
+        if is_int_array:
+            llm_needed.append(p)
             continue
 
         deterministic = _try_deterministic_range(llm_desc)
