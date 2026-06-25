@@ -23,7 +23,7 @@ _mcp_client = MCPClient()
 
 def _cases_dir() -> Path:
     """Resolve the on-disk cases directory (parallel to ``agent.core.config``)."""
-    return Path(__file__).resolve().parents[4] / "cases"
+    return Path(__file__).resolve().parents[6] / "cases"
 
 
 @router.post("/cases/generate", response_model=GenerateCasesResponse)
@@ -45,11 +45,12 @@ async def generate_cases(body: GenerateCasesRequest) -> GenerateCasesResponse:
                 error=f"json_constraints not found for {body.operator_name}",
             )
 
-        from agent.generators import TestCaseGenerator, parse_result_json
+        from agent.generators import TestCaseGenerator
         import json
 
-        context = parse_result_json(constraints)
-        cases = TestCaseGenerator(context, seed=body.seed).generate(count=body.count)
+        # 直接透传原始 ``json_constraints`` dict，不再做 ``parse_result_json``
+        # 或任何 ``GeneratorContext`` 中间层转换。
+        cases = TestCaseGenerator(constraints, seed=body.seed).generate(count=body.count)
         cases_json = json.dumps(
             [c.model_dump() for c in cases], ensure_ascii=False,
         )

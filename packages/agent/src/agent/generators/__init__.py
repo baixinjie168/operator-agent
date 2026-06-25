@@ -1,61 +1,61 @@
 """Test case generator — public API.
 
 This package is the single source of truth for the case generation logic.
-The only external-facing entry point is :class:`TestCaseGenerator`
-(``generate(count) -> list[TestCaseRecord]``); all helper modules below
-are implementation details.
 
-Migration plan: the formal generation code will be dropped into this
-package, replacing ``generator.generate`` (and/or the helper modules it
-delegates to).  No caller in ``routes/`` / ``nodes/`` / MCP needs to
-change — the public API stays stable.
+The previous mock implementation (case_builder, dtype_picker, shape_sampler, …)
+has been replaced by the formal generation pipeline ported from
+``operator_case_generator``:
+
+  ``json_constraints`` (raw dict)  →  ``single_operator_handle``  →  ``list[CaseConfig]``
+
+Migration overview
+------------------
+
+* The script files from ``operator_case_generator/operator_case_generator/scripts``
+  were moved under this package and re-rooted at ``agent.generators.*``.
+* ``operator_handle_main.single_operator_handle`` now accepts either a constraint
+  JSON file path or an in-memory constraint dict.
+* ``facade.TestCaseGenerator`` is the single entry point for node / route / MCP
+  callers; the public API stays stable.
+* 用例生成主链路直接消费从 MCP / DB 取出的原始 ``json_constraints`` dict，
+  不再做 ``GeneratorContext`` 中间层转换；返回值是 ``single_operator_handle``
+  的原始输出 ``list[CaseConfig]``。
 
 Public re-exports
 -----------------
-
-The names below are part of the stable API and are imported by node,
-route, and MCP code.
 """
 
 from __future__ import annotations
 
-from agent.generators.case_builder import build_single_case
-from agent.generators.dtype_picker import (
-    DEFAULT_DTYPE,
-    map_aclnn_dtype_to_pytorch,
-    pick_dtype_for_param,
+from agent.generators.common_model_definition import (
+    InterConstraintsRuleType,
+    InterParamConstraint,
+    OperatorRule,
+    ParamAttributes,
+    ValueWithSrcText,
 )
 from agent.generators.facade import (
     DEFAULT_COUNT,
     DEFAULT_SEED,
     TestCaseGenerator,
 )
-from agent.generators.generator import generate
-from agent.generators.result_parser import parse_result_json
-from agent.generators.shape_groups import (
-    build_fixed_values,
-    build_shape_equal_groups,
-)
-from agent.generators.shape_sampler import sample_shape
-from agent.generators.value_sampler import (
-    sample_range_values,
-    sample_scalar,
+from agent.generators.operator_handle_main import (
+    batch_operator_handel,
+    single_operator_handle,
 )
 
 __all__ = [
-    # Public API
+    # Public facade
     "DEFAULT_COUNT",
-    "DEFAULT_DTYPE",
     "DEFAULT_SEED",
     "TestCaseGenerator",
-    "build_fixed_values",
-    "build_shape_equal_groups",
-    "build_single_case",
-    "generate",
-    "map_aclnn_dtype_to_pytorch",
-    "parse_result_json",
-    "pick_dtype_for_param",
-    "sample_range_values",
-    "sample_scalar",
-    "sample_shape",
+    # Formal generation entry point
+    "single_operator_handle",
+    "batch_operator_handel",
+    # Common constraint models
+    "InterConstraintsRuleType",
+    "InterParamConstraint",
+    "OperatorRule",
+    "ParamAttributes",
+    "ValueWithSrcText",
 ]
