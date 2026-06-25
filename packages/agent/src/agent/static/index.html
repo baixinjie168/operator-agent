@@ -1168,6 +1168,7 @@ function showList() {
 }
 
 async function loadDetail(name) {
+  window._currentOperatorName = name;
   document.getElementById('queryListView').style.display = 'none';
   document.getElementById('queryDetailView').style.display = '';
   const metaEl = document.getElementById('detailMeta');
@@ -1198,6 +1199,7 @@ async function loadDetail(name) {
       <div class="detail-tab" onclick="showDetailTab(this,'tabSignatures')">函数签名</div>
       <div class="detail-tab" onclick="showDetailTab(this,'tabProducts')">产品支持</div>
       <div class="detail-tab" onclick="showDetailTab(this,'tabJsonConstraint')">JSON Constraint</div>
+      <div class="detail-tab" onclick="showDetailTab(this,'tabConstraintCheck')">约束检查</div>
       <div class="detail-tab" onclick="showDetailTab(this,'tabRaw')">Raw JSON</div>
     `;
 
@@ -1304,6 +1306,13 @@ async function loadDetail(name) {
       <div id="tabSignatures" class="detail-content" style="display:none">${sigsHtml}</div>
       <div id="tabProducts" class="detail-content" style="display:none">${prodsHtml}</div>
       <div id="tabJsonConstraint" class="detail-content" style="display:none">${jsonConHtml}</div>
+      <div id="tabConstraintCheck" class="detail-content" style="display:none">
+        <div style="display:flex;gap:8px;margin-bottom:12px">
+          <button class="secondary" onclick="runConstraintCheck('${name}')">重新检查</button>
+          <button class="secondary" onclick="downloadCheckReport('${name}')">下载报告</button>
+        </div>
+        <iframe id="checkReportFrame" style="width:100%;border:1px solid #ddd;border-radius:8px;min-height:600px"></iframe>
+      </div>
       <div id="tabRaw" class="detail-content" style="display:none">${rawHtml}</div>
     `;
   } catch (err) {
@@ -1369,6 +1378,70 @@ function showDetailTab(el, id) {
   document.querySelectorAll('.detail-content').forEach(c => c.style.display = 'none');
   el.classList.add('active');
   document.getElementById(id).style.display = '';
+  if (id === 'tabConstraintCheck') {
+    var name = el.parentElement.parentElement.querySelector('.op-name')?.textContent || '';
+    loadCheckReport(window._currentOperatorName || '');
+  }
+}
+
+/* Constraint check functions */
+async function loadCheckReport(name) {
+  if (!name) return;
+  var frame = document.getElementById('checkReportFrame');
+  if (!frame) return;
+  try {
+    var res = await fetch('/api/v1/operators/' + encodeURIComponent(name) + '/check-report');
+    var data = await res.json();
+    if (data.success && data.report) {
+      frame.srcdoc = data.report;
+    } else {
+      frame.srcdoc = '<div style="padding:40px;text-align:center;color:#999">暂无检查报告。任务完成后自动生成，或点击"重新检查"。</div>';
+    }
+  } catch (err) {
+    frame.srcdoc = '<div style="padding:40px;text-align:center;color:#f00">加载失败: ' + err.message + '</div>';
+  }
+}
+
+async function runConstraintCheck(name) {
+  if (!name) return;
+  var frame = document.getElementById('checkReportFrame');
+  if (frame) frame.srcdoc = '<div style="padding:40px;text-align:center;color:#666"><span class="spinner"></span> 正在运行约束检查...</div>';
+  try {
+    var res = await fetch('/api/v1/operators/' + encodeURIComponent(name) + '/check-constraints', { method: 'POST' });
+    var data = await res.json();
+    if (data.success && data.report) {
+      if (frame) frame.srcdoc = data.report;
+    } else {
+      alert('检查失败: ' + (data.error || '未知错误'));
+      if (frame) loadCheckReport(name);
+    }
+  } catch (err) {
+    alert('检查失败: ' + err.message);
+    if (frame) loadCheckReport(name);
+  }
+}
+
+async function downloadCheckReport(name) {
+  if (!name) return;
+  try {
+    var res = await fetch('/api/v1/operators/' + encodeURIComponent(name) + '/check-report');
+    var data = await res.json();
+    if (data.success && data.report) {
+      var blob = new Blob([data.report], { type: 'text/html' });
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url;
+      a.download = name + '_constraint_report.html';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } else {
+      alert('暂无报告可下载');
+    }
+  } catch (err) {
+    alert('下载失败: ' + err.message);
+  }
 }
 
 /* Download the JSON Constraint of a parsed operator as a .json file. */
@@ -2824,6 +2897,7 @@ function _btActions(t) {
   // Download — for tasks with completed items
   if (completed > 0 && status !== 'running' && status !== 'pending') {
     btns += '<button class="bt-btn-action btn-download" onclick="event.stopPropagation();downloadBatchTask(' + t.id + ')">下载结果</button> ';
+    btns += '<button class="bt-btn-action btn-download" onclick="event.stopPropagation();checkBatchTask(' + t.id + ')" style="color:var(--bt-purple);border-color:#e9d8fd">约束检查</button> ';
   }
   // Delete — for non-running tasks
   if (status !== 'running') {

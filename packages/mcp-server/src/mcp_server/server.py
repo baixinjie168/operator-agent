@@ -13,12 +13,14 @@ from mcp_server.tools.document_tools import (
     check_document_version,
     delete_operator,
     do_save_product_support,
+    get_constraint_check_report,
     get_parsed_document,
     get_section_by_type,
     list_all_operators,
     parse_document,
     query_parameters,
     query_params_by_doc_id,
+    save_constraint_check_report,
     save_document,
     save_parameters,
     save_parsed_document,
@@ -1440,6 +1442,35 @@ def reset_task_item(item_id: int) -> str:
         JSON string with item_id and updated flag.
     """
     result = _reset_task_item(item_id)
+    return json.dumps(result, ensure_ascii=False)
+
+
+@mcp.tool()
+def save_constraint_check(doc_id: int, report_html: str) -> str:
+    """Save constraint check HTML report to document_versions.
+
+    Args:
+        doc_id: Primary key of document_versions table.
+        report_html: Full HTML report string.
+
+    Returns:
+        JSON string with saved status.
+    """
+    result = save_constraint_check_report(doc_id, report_html)
+    return json.dumps(result, ensure_ascii=False)
+
+
+@mcp.tool()
+def get_constraint_check(doc_id: int) -> str:
+    """Retrieve constraint check HTML report from document_versions.
+
+    Args:
+        doc_id: Primary key of document_versions table.
+
+    Returns:
+        JSON string with report key (HTML string or null).
+    """
+    result = get_constraint_check_report(doc_id)
     return json.dumps(result, ensure_ascii=False)
 
 

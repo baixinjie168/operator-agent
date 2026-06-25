@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS document_versions (
     product_support TEXT,
     function_explanation_summary TEXT NOT NULL DEFAULT '{}',
     json_constraints TEXT NOT NULL DEFAULT '{}',
+    constraint_check_report TEXT,
     created_at      TEXT DEFAULT (datetime('now')),
     UNIQUE(operator_id, version)
 );

@@ -653,3 +653,17 @@ class MCPClient:
     async def delete_task(self, task_id: int) -> dict:
         """Delete a task and all associated operator data."""
         return await self._call_tool("delete_task", {"task_id": task_id})
+
+    async def save_constraint_check_report(self, doc_id: int, report_html: str) -> dict:
+        """Save constraint check HTML report to document_versions."""
+        return await self._call_tool("save_constraint_check", {
+            "doc_id": doc_id, "report_html": report_html,
+        })
+
+    async def get_constraint_check_report(self, doc_id: int) -> dict:
+        """Retrieve constraint check HTML report from document_versions."""
+        return await self._call_tool("get_constraint_check", {"doc_id": doc_id})
+
+    async def get_task_items(self, task_id: int) -> list[dict]:
+        """Get all task items for a task."""
+        return await self._call_tool("get_task_items", {"task_id": task_id})

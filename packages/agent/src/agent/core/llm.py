@@ -2,7 +2,7 @@
 
 from langchain_openai import ChatOpenAI
 
-from agent.core.config import settings
+from agent.core.config import LLMProvider, settings
 
 
 def create_llm(*, temperature: float = 0.1) -> ChatOpenAI:
@@ -16,6 +16,26 @@ def create_llm(*, temperature: float = 0.1) -> ChatOpenAI:
         api_key=settings.active_api_key,
         base_url=settings.active_base_url,
         model=settings.active_model,
+        max_tokens=settings.llm_max_tokens,
+        temperature=temperature,
+    )
+
+
+def create_constraint_check_llm(*, temperature: float = 0.1) -> ChatOpenAI:
+    """Create LLM for constraint checking (separate model from generation).
+
+    Uses ``constraint_check_llm_provider`` and ``constraint_check_model``
+    from settings, which default to DeepSeek for stronger reasoning.
+    This avoids self-evaluation bias (generation model judging its own output).
+    """
+    provider = settings.constraint_check_llm_provider
+    api_key = settings.get_provider_api_key(provider)
+    base_url = settings.get_provider_base_url(provider)
+    model = settings.constraint_check_model or settings.get_provider_model(provider)
+    return ChatOpenAI(
+        api_key=api_key,
+        base_url=base_url,
+        model=model,
         max_tokens=settings.llm_max_tokens,
         temperature=temperature,
     )

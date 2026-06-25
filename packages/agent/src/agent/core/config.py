@@ -60,6 +60,12 @@ class Settings(BaseSettings):
     # When True, Phase2b runs regardless of LLM confidence level.
     force_phase2b: bool = False
 
+    # Constraint check Agent: separate model for post-pipeline verification.
+    # Uses a different provider/model from the generation pipeline to avoid
+    # self-evaluation bias.  Defaults to DeepSeek for stronger reasoning.
+    constraint_check_llm_provider: LLMProvider = LLMProvider.DEEPSEEK
+    constraint_check_model: str = ""  # empty = use provider's default model
+
     # Master switch: which LLM provider to use
     llm_provider: LLMProvider = LLMProvider.ZAI
 
@@ -137,6 +143,42 @@ class Settings(BaseSettings):
                 return self.own_ai_api_key.get_secret_value()
             case LLMProvider.QWEN:
                 return self.qwen_api_key.get_secret_value()
+
+    def get_provider_api_key(self, provider: LLMProvider) -> str:
+        """API key for a specific provider (not necessarily the active one)."""
+        match provider:
+            case LLMProvider.ZAI:
+                return self.zai_api_key.get_secret_value()
+            case LLMProvider.DEEPSEEK:
+                return self.deepseek_api_key.get_secret_value()
+            case LLMProvider.OWN_AI:
+                return self.own_ai_api_key.get_secret_value()
+            case LLMProvider.QWEN:
+                return self.qwen_api_key.get_secret_value()
+
+    def get_provider_base_url(self, provider: LLMProvider) -> str:
+        """Base URL for a specific provider."""
+        match provider:
+            case LLMProvider.ZAI:
+                return self.zai_base_url
+            case LLMProvider.DEEPSEEK:
+                return self.deepseek_base_url
+            case LLMProvider.OWN_AI:
+                return self.own_ai_base_url
+            case LLMProvider.QWEN:
+                return self.qwen_base_url
+
+    def get_provider_model(self, provider: LLMProvider) -> str:
+        """Default model name for a specific provider."""
+        match provider:
+            case LLMProvider.ZAI:
+                return self.zai_model
+            case LLMProvider.DEEPSEEK:
+                return self.deepseek_model
+            case LLMProvider.OWN_AI:
+                return self.own_ai_model
+            case LLMProvider.QWEN:
+                return self.qwen_model
 
 
 settings = Settings()

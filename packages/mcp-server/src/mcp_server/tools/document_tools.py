@@ -436,6 +436,43 @@ def query_params_by_doc_id(doc_id: int) -> list[dict]:
     ]
 
 
+def save_constraint_check_report(doc_id: int, report_html: str) -> dict:
+    """Save constraint check HTML report to document_versions.
+
+    Args:
+        doc_id: Primary key of document_versions table.
+        report_html: Full HTML report string.
+
+    Returns:
+        dict with saved status and doc_id.
+    """
+    db = get_db()
+    conn = db.conn
+    conn.execute(
+        "UPDATE document_versions SET constraint_check_report = ? WHERE id = ?",
+        (report_html, doc_id),
+    )
+    conn.commit()
+    return {"saved": True, "doc_id": doc_id}
+
+
+def get_constraint_check_report(doc_id: int) -> dict:
+    """Retrieve constraint check HTML report from document_versions.
+
+    Args:
+        doc_id: Primary key of document_versions table.
+
+    Returns:
+        dict with report key (HTML string or None).
+    """
+    db = get_db()
+    row = db.conn.execute(
+        "SELECT constraint_check_report FROM document_versions WHERE id = ?",
+        (doc_id,),
+    ).fetchone()
+    return {"report": row[0] if row else None}
+
+
 def update_param_shape(doc_id: int, updates: list[dict]) -> dict:
     """Batch update only the shape field of parameters.
 

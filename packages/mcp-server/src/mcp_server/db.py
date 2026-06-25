@@ -707,6 +707,11 @@ class Database:
         if "src_content" not in existing:
             self._conn.execute("ALTER TABLE parameters ADD COLUMN src_content TEXT")
             self._conn.commit()
+        # Migration: add constraint_check_report column to document_versions
+        dv_cols = {r[1] for r in self._conn.execute("PRAGMA table_info(document_versions)").fetchall()}
+        if "constraint_check_report" not in dv_cols:
+            self._conn.execute("ALTER TABLE document_versions ADD COLUMN constraint_check_report TEXT")
+            self._conn.commit()
 
     @property
     def conn(self) -> sqlite3.Connection:
