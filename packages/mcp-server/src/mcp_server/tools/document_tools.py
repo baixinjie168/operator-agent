@@ -156,6 +156,61 @@ def get_parsed_by_doc_id(doc_id: int) -> dict | None:
     return json.loads(row[0])
 
 
+def get_doc_for_constraint_check(doc_id: int) -> dict | None:
+    """Retrieve raw content + json_constraints for constraint checking.
+
+    Args:
+        doc_id: Primary key of document_versions table.
+
+    Returns:
+        dict with content, json_constraints, operator_name, doc_id, or None.
+    """
+    db = get_db()
+    row = db.conn.execute(
+        "SELECT dv.id, dv.content, dv.json_constraints, o.name "
+        "FROM document_versions dv "
+        "JOIN operators o ON dv.operator_id = o.id "
+        "WHERE dv.id = ?",
+        (doc_id,),
+    ).fetchone()
+    if not row:
+        return None
+    return {
+        "doc_id": row[0],
+        "content": row[1] or "",
+        "json_constraints": row[2] or "{}",
+        "operator_name": row[3] or "",
+    }
+
+
+def get_doc_for_check_by_name(operator_name: str) -> dict | None:
+    """Retrieve raw content + json_constraints by operator name (latest version).
+
+    Args:
+        operator_name: Operator name.
+
+    Returns:
+        dict with doc_id, content, json_constraints, operator_name, or None.
+    """
+    db = get_db()
+    row = db.conn.execute(
+        "SELECT dv.id, dv.content, dv.json_constraints, o.name "
+        "FROM document_versions dv "
+        "JOIN operators o ON dv.operator_id = o.id "
+        "WHERE o.name = ? "
+        "ORDER BY dv.version DESC LIMIT 1",
+        (operator_name,),
+    ).fetchone()
+    if not row:
+        return None
+    return {
+        "doc_id": row[0],
+        "content": row[1] or "",
+        "json_constraints": row[2] or "{}",
+        "operator_name": row[3] or "",
+    }
+
+
 def get_section_by_type(doc_id: int, section_type: str) -> dict | None:
     """Retrieve a specific section from parsed document data by section_type.
 

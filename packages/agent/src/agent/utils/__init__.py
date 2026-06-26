@@ -1,9 +1,9 @@
 """Shared utilities for agent nodes: LLM helpers, validators, and parsers."""
 
+from agent.core.llm import create_llm
 from agent.utils.llm_common import (
     CONCURRENCY_LIMIT,
     JSON_BLOCK_RE,
-    create_llm,
     parse_json_response,
 )
 from agent.utils.param_validators import (

@@ -29,9 +29,7 @@ def _is_cancelled(task_id: int) -> bool:
     return evt is not None and evt.is_set()
 
 
-def _now_iso() -> str:
-    """Return current UTC time as ISO 8601 string."""
-    return datetime.now(timezone.utc).isoformat()
+from shared.utils import now_iso as _now_iso
 
 
 async def _process_item(
@@ -146,16 +144,17 @@ async def _run_constraint_checks(task_id: int, mcp: MCPClient) -> None:
         if _is_cancelled(task_id):
             break
         try:
-            doc = await mcp.get_parsed_by_doc_id(item["doc_id"])
+            doc = await mcp.get_doc_for_check(item["doc_id"])
             if not doc:
                 continue
             json_constraints = doc.get("json_constraints", "{}")
             content = doc.get("content", "")
+            operator_name = doc.get("operator_name") or item.get("operator_name", "")
             if not content.strip() or json_constraints == "{}":
                 continue
 
             html = await run_constraint_check(
-                content, json_constraints, item["operator_name"],
+                content, json_constraints, operator_name,
             )
             if html:
                 await mcp.save_constraint_check_report(item["doc_id"], html)

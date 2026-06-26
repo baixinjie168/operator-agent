@@ -12,7 +12,8 @@ from typing import Any
 from agent.mcp_client import MCPClient
 from agent.nodes.state import PipelineState
 from agent.prompts import FUNCTION_SIGNATURE_EXTRACT_PROMPT
-from agent.utils.llm_common import create_llm, parse_json_response
+from agent.core.llm import create_llm
+from agent.utils.llm_common import parse_json_response
 
 logger = logging.getLogger(__name__)
 

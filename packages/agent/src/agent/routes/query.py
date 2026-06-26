@@ -98,13 +98,13 @@ async def check_constraints(operator_name: str) -> CheckConstraintsResponse:
     try:
         from agent.nodes.constraint_check_agent import run_constraint_check
 
-        result = await _mcp_client.get_parsed(operator_name)
-        if result is None:
+        doc = await _mcp_client.get_doc_for_check_by_name(operator_name)
+        if doc is None:
             return CheckConstraintsResponse(success=False, error=f"Operator '{operator_name}' not found")
 
-        doc_id = result.get("doc_id")
-        json_constraints = result.get("json_constraints", "{}")
-        content = result.get("content", "")
+        doc_id = doc.get("doc_id")
+        json_constraints = doc.get("json_constraints", "{}")
+        content = doc.get("content", "")
 
         if not content.strip() or json_constraints == "{}":
             return CheckConstraintsResponse(success=False, error="No constraints or content to check")
@@ -125,11 +125,11 @@ async def check_constraints(operator_name: str) -> CheckConstraintsResponse:
 async def get_check_report(operator_name: str) -> CheckConstraintsResponse:
     """Retrieve saved constraint check HTML report."""
     try:
-        result = await _mcp_client.get_parsed(operator_name)
-        if result is None:
+        doc = await _mcp_client.get_doc_for_check_by_name(operator_name)
+        if doc is None:
             return CheckConstraintsResponse(success=False, error=f"Operator '{operator_name}' not found")
 
-        doc_id = result.get("doc_id")
+        doc_id = doc.get("doc_id")
         if not doc_id:
             return CheckConstraintsResponse(success=False, error="No document found")
 

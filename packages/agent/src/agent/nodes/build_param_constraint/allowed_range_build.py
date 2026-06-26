@@ -16,7 +16,8 @@ from agent.core.config import settings
 from agent.nodes.build_param_constraint._helpers import _normalize_type, _split_csv
 from agent.nodes.build_param_constraint.state import BuildParamConstraintState
 from agent.prompts import ALLOWED_RANGE_VALUE_BUILD_PROMPT
-from agent.utils.llm_common import CONCURRENCY_LIMIT, create_llm, parse_json_response
+from agent.core.llm import create_llm
+from agent.utils.llm_common import CONCURRENCY_LIMIT, parse_json_response
 from agent.utils.param_validators import is_bool_type, is_tensor_type
 from agent.utils.semantic_rules import (
     get_allowed_range_for_scalar,
@@ -87,44 +88,62 @@ def _narrow_bool_from_text(text: str) -> bool | None:
 # ---------------------------------------------------------------------------
 
 # Pattern: (regex, result_or_lambda)
+# For enum patterns, the lambda returns a tuple (value_list, "enum")
+# For range patterns, the lambda returns just a list (implicit "range")
 _RANGE_PATTERNS: list[tuple[str, Any]] = [
-    # "枚举值: 1, 2, 3" → [[1,1], [2,2], [3,3]] (must come before range pattern)
+    # "枚举值: 1, 2, 3" → enum [[1,1], [2,2], [3,3]]
     (
         r"枚举值\s*[:：]\s*(.+)",
-        lambda m: [
-            [int(v.strip()), int(v.strip())]
-            for v in m.group(1).split(",")
-            if v.strip().lstrip("-").isdigit()
-        ],
+        lambda m: (
+            [[int(v.strip()), int(v.strip())] for v in m.group(1).split(",") if v.strip().lstrip("-").isdigit()],
+            "enum",
+        ),
+    ),
+    # "只支持32/64" / "仅支持32、64" → enum [[32,32],[64,64]]
+    # The "只支持/仅支持" keyword signals discrete values, not a range
+    (
+        r"(?:只支持|仅支持|只能|只能是)\s*(\d+(?:\s*[/、，,]\s*\d+)+)",
+        lambda m: (
+            [[int(v.strip()), int(v.strip())] for v in re.split(r"[/、，,]", m.group(1)) if v.strip().isdigit()],
+            "enum",
+        ),
     ),
     # "32/64" → enum [[32,32], [64,64]] (slash-separated discrete values)
     (
         r"(\d+)\s*/\s*(\d+)",
-        lambda m: [
-            [int(m.group(1)), int(m.group(1))],
-            [int(m.group(2)), int(m.group(2))],
-        ],
+        lambda m: (
+            [[int(m.group(1)), int(m.group(1))], [int(m.group(2)), int(m.group(2))]],
+            "enum",
+        ),
     ),
-    # "范围0-100" / "0~100" / "[0, 100]" → [[0, 100]]
+    # "范围0-100" / "0~100" / "[0, 100]" → range [[0, 100]]
     (
         r"\[?\s*(-?\d+)\s*[,，\-~]\s*(-?\d+)\s*\]?",
-        lambda m: [[int(m.group(1)), int(m.group(2))]],
+        lambda m: ([[int(m.group(1)), int(m.group(2))]], "range"),
     ),
 ]
 
 
-def _try_deterministic_range(text: str) -> list | None:
+def _try_deterministic_range(text: str) -> tuple[list, str] | None:
     """Try deterministic extraction of range from text.
 
-    Returns parsed result if pattern matches, None otherwise.
+    Returns:
+        (value_list, ar_type) if pattern matches, None otherwise.
+        ar_type is "range" or "enum".
     """
     for pattern, extractor in _RANGE_PATTERNS:
         m = re.search(pattern, text)
         if m:
             try:
                 result = extractor(m)
-                if result:  # Only return if non-empty
-                    return result
+                # New format: (value_list, ar_type)
+                if isinstance(result, tuple) and len(result) == 2:
+                    value_list, ar_type = result
+                    if value_list:
+                        return value_list, ar_type
+                # Legacy format: just a list (implicit "range")
+                elif isinstance(result, list) and result:
+                    return result, "range"
             except (ValueError, IndexError):
                 continue
     return None
@@ -475,10 +494,11 @@ async def allowed_range_build_node(state: BuildParamConstraintState) -> dict[str
             deterministic = _try_deterministic_range(param_sentences)
 
         if deterministic is not None:
+            det_value, det_type = deterministic
             key = f"{p['function_name']}::{p['param_name']}"
             param_type = p.get("param_type", "")
-            is_valid, _ = _validate_range_structure(deterministic, param_type)
-            result[key] = {"type": "range", "value": deterministic if is_valid else []}
+            is_valid, _ = _validate_range_structure(det_value, param_type, det_type)
+            result[key] = {"type": det_type, "value": det_value if is_valid else []}
             deterministic_count += 1
         else:
             # Phase 1b: YAML semantic rules fallback for scalar params

@@ -65,6 +65,10 @@ class Settings(BaseSettings):
     # self-evaluation bias.  Defaults to DeepSeek for stronger reasoning.
     constraint_check_llm_provider: LLMProvider = LLMProvider.DEEPSEEK
     constraint_check_model: str = ""  # empty = use provider's default model
+    # Separate max_tokens for constraint check (HTML reports can be large).
+    # Generation uses llm_max_tokens (default 16384), but constraint check
+    # generates full HTML with CSS + tables + JS, which needs more tokens.
+    constraint_check_max_tokens: int = Field(default=32768, ge=256, le=131072)
 
     # Master switch: which LLM provider to use
     llm_provider: LLMProvider = LLMProvider.ZAI

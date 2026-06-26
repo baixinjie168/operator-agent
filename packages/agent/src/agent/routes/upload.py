@@ -30,6 +30,7 @@ from agent.graph import PipelineStage, build_pipeline
 from agent.nodes.init_doc import init_doc_node as _init_doc
 from agent.runtime import EventType, LLMTracer, RuntimeManager, traced_node
 from agent.schemas.upload import UploadResponse
+from agent.utils.file_utils import extract_operator_name_from_content as _extract_operator_name
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1", tags=["upload"])
@@ -564,13 +565,4 @@ def _persist_to_db(run_id: str, run, result: dict, manager: RuntimeManager) -> N
         logger.warning("Failed to complete run in DB: %s", e)
 
 
-def _extract_operator_name(content: str) -> str | None:
-    """Extract operator name from the first H1 or H2 title line."""
-    for line in content.split("\n"):
-        m = re.match(r"^#{1,2}\s+(.+?)-CANN社区版", line)
-        if m:
-            return m.group(1).strip()
-        m = re.match(r"^#{1,2}\s+(aclnn?\w+)", line)
-        if m:
-            return m.group(1).strip()
     return None

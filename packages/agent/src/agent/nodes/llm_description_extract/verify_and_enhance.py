@@ -23,7 +23,8 @@ from agent.nodes.llm_description_extract.extract_ws import (
 )
 from agent.nodes.llm_description_extract.state import DescriptionExtractState
 from agent.prompts import LLM_DESCRIPTION_VERIFY_PROMPT
-from agent.utils.llm_common import CONCURRENCY_LIMIT, create_llm
+from agent.core.llm import create_llm
+from agent.utils.llm_common import CONCURRENCY_LIMIT
 
 logger = logging.getLogger(__name__)
 

@@ -2,13 +2,9 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from shared.utils import now_iso as _now_iso
 
 from mcp_server.db import get_db
-
-
-def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 def create_task(name: str, total_count: int, upload_dir: str) -> dict:

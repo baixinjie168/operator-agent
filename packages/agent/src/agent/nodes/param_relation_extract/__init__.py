@@ -16,6 +16,9 @@ from agent.nodes.param_relation_extract.save_relations import save_relations_nod
 from agent.nodes.param_relation_extract.implicit_param_extract import (
     implicit_param_extract_node,
 )
+from agent.nodes.param_relation_extract.implicit_value_constraint import (
+    implicit_value_constraint_node,
+)
 from agent.nodes.param_relation_extract.state import RelationExtractState
 
 
@@ -23,6 +26,7 @@ def create_param_relation_subgraph() -> CompiledStateGraph:
     graph = StateGraph(RelationExtractState)
     graph.add_node("fetch_sections", fetch_sections_node)
     graph.add_node("implicit_param_extract", implicit_param_extract_node)
+    graph.add_node("implicit_value_constraint", implicit_value_constraint_node)
     graph.add_node("extract_ws", extract_ws_node)
     graph.add_node("extract_exe", extract_exe_node)
     graph.add_node("param_repr_build", parameter_representation_build_node)
@@ -31,11 +35,15 @@ def create_param_relation_subgraph() -> CompiledStateGraph:
 
     graph.add_edge(START, "fetch_sections")
     graph.add_edge("fetch_sections", "implicit_param_extract")
+    # implicit_value_constraint runs after implicit_param_extract to use
+    # the extracted variable names, then feeds into save_relations.
+    graph.add_edge("implicit_param_extract", "implicit_value_constraint")
     # Fan out: LLM-based relation extraction runs in parallel with the
     # deterministic parameter_representation builder.
     graph.add_edge("implicit_param_extract", "extract_ws")
     graph.add_edge("implicit_param_extract", "extract_exe")
     graph.add_edge("implicit_param_extract", "param_repr_build")
+    graph.add_edge("implicit_value_constraint", "merge_relations")
     graph.add_edge("extract_ws", "merge_relations")
     graph.add_edge("extract_exe", "merge_relations")
     graph.add_edge("merge_relations", "save_relations")

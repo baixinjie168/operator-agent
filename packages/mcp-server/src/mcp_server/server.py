@@ -14,6 +14,8 @@ from mcp_server.tools.document_tools import (
     delete_operator,
     do_save_product_support,
     get_constraint_check_report,
+    get_doc_for_constraint_check,
+    get_doc_for_check_by_name,
     get_parsed_document,
     get_section_by_type,
     list_all_operators,
@@ -1471,6 +1473,34 @@ def get_constraint_check(doc_id: int) -> str:
         JSON string with report key (HTML string or null).
     """
     result = get_constraint_check_report(doc_id)
+    return json.dumps(result, ensure_ascii=False)
+
+
+@mcp.tool()
+def get_doc_for_check(doc_id: int) -> str:
+    """Retrieve raw content + json_constraints for constraint checking.
+
+    Args:
+        doc_id: Primary key of document_versions table.
+
+    Returns:
+        JSON string with content, json_constraints, operator_name.
+    """
+    result = get_doc_for_constraint_check(doc_id)
+    return json.dumps(result, ensure_ascii=False)
+
+
+@mcp.tool()
+def get_doc_for_check_by_name_tool(operator_name: str) -> str:
+    """Retrieve raw content + json_constraints by operator name (latest version).
+
+    Args:
+        operator_name: Operator name.
+
+    Returns:
+        JSON string with doc_id, content, json_constraints, operator_name.
+    """
+    result = get_doc_for_check_by_name(operator_name)
     return json.dumps(result, ensure_ascii=False)
 
 

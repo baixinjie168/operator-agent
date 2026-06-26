@@ -408,6 +408,25 @@ def _log_coverage(
 # ---------------------------------------------------------------------------
 
 
+def _find_keyword_context(text: str, param_name: str, radius: int = 60) -> str:
+    """Find the context around the first mention of param_name in text.
+
+    Returns a substring of ±radius chars around the first match,
+    or empty string if not found. Used to provide real source citations
+    for YAML-generated constraints instead of the YAML filename.
+    """
+    if not text or not param_name:
+        return ""
+    import re
+    pattern = re.compile(r"(?<![a-zA-Z0-9_])" + re.escape(param_name) + r"(?![a-zA-Z0-9_])")
+    m = pattern.search(text)
+    if not m:
+        return ""
+    start = max(0, m.start() - radius)
+    end = min(len(text), m.end() + radius)
+    return text[start:end].strip()
+
+
 def _match_yaml_rules(
     param: dict,
     existing_relations: list[dict],
@@ -446,6 +465,11 @@ def _match_yaml_rules(
     if result.get("confidence") != "high":
         return []
 
+    # Extract source citation from the original text (the matched keyword's
+    # context), NOT "semantic_value_rules.yaml" — fabricated src_text causes
+    # downstream validation failures.
+    src_citation = _find_keyword_context(combined, pname) or result.get("description", "")
+
     return [
         {
             "function_name": fn,
@@ -454,12 +478,12 @@ def _match_yaml_rules(
             "description": result.get("description", ""),
             "params": [pname],
             "param_optional": {pname: False},
-            "source_citation": "semantic_value_rules.yaml",
+            "source_citation": src_citation,
             "relation_object": {
                 "expr_type": result.get("expr_type", "self_value_range"),
                 "expr": result.get("expr", ""),
                 "relation_params": [pname],
-                "src_text": "semantic_value_rules.yaml",
+                "src_text": src_citation,
             },
             "_source": "yaml_semantic",
         }

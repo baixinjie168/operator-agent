@@ -3,17 +3,24 @@
 Handles dtype, format, type, is_optional, is_support_discontinuous,
 description, usage_notes, array_length.  No LLM calls.
 
-dtype resolution uses a 2-level fallback chain:
+dtype resolution uses a 3-level fallback chain:
   1. dtype_desc JSON field -> resolve_platform_value per platform
   2. dtype_combinations table -> dtype_by_platform[platform][param_name]
+  3. param type -> _ARRAY_TYPE_DTYPE_FALLBACK mapping (e.g. aclIntArray -> "int")
 
-A 3rd "legacy data_type -> _split_csv" fallback was removed: the DB exposes
-data_type and dtype_desc as aliases of the SAME column, so level 1 already
-covers it. Worse, applying _split_csv directly to a platform-keyed JSON
+A previous 3rd "legacy data_type -> _split_csv" fallback was removed: the DB
+exposes data_type and dtype_desc as aliases of the SAME column, so level 1
+already covers it. Worse, applying _split_csv directly to a platform-keyed JSON
 string mangles it (splitting on / and 、 chars inside the JSON structure),
 producing garbage like ["Atlas A2 ...\": \"FLOAT16", ...]. For platforms
 absent from the dtype cell (e.g. null-pointer-only), the empty result is now
 preserved instead of being overwritten.
+
+The current 3rd level is different: it derives dtype from the parameter's C
+type when levels 1 and 2 both yield nothing. Array types (aclIntArray etc.)
+have an inherent primitive dtype; other types (aclTensor, aclScalar, ...) fall
+back to the type name itself so downstream generators always receive a
+non-empty dtype list.
 """
 
 from __future__ import annotations
@@ -36,6 +43,15 @@ logger = logging.getLogger(__name__)
 # Patterns indicating a parameter must be null (empty pointer) on a platform,
 # meaning it has no dtype — effectively N/A.
 _NULL_POINTER_RE = re.compile(r"(只支持传空指针|传空指针|必须为空指针|仅支持空指针|不支持)")
+
+# Level-3 dtype fallback: when dtype_desc and dtype_combinations both yield
+# nothing, derive dtype from the parameter's C type.  Array types have an
+# inherent primitive dtype; all other types fall back to the type name itself.
+_ARRAY_TYPE_DTYPE_FALLBACK: dict[str, str] = {
+    "aclIntArray": "int",
+    "aclFloatArray": "float",
+    "aclBoolArray": "bool",
+}
 
 
 def _parse_array_length(raw: str) -> dict:
@@ -113,6 +129,16 @@ async def attrs_build_node(state: BuildParamConstraintState) -> dict[str, Any]:
                     if not dtype_raw_set:
                         dtype_raw_set = dtype_by_platform.get("common", {}).get(pname, [])
                     dtypes = sorted(dtype_raw_set) if dtype_raw_set else []
+
+                    # Level 3 fallback: derive dtype from param type when
+                    # Level 1 and 2 both yield nothing.  Array types
+                    # (aclIntArray etc.) map to their inherent primitive dtype;
+                    # other types use the type name itself as a best-effort
+                    # fallback so downstream generators always receive a
+                    # non-empty dtype list.  Skipped for null-pointer-only
+                    # params (handled above) and when ptype itself is empty.
+                    if not dtypes and ptype:
+                        dtypes = [_ARRAY_TYPE_DTYPE_FALLBACK.get(ptype, ptype)]
             else:
                 dtypes = _split_csv(dtype_raw)
 

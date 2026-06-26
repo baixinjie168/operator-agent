@@ -15,7 +15,8 @@ from langchain_openai import ChatOpenAI
 from agent.nodes.context_utils import _is_ws_function, extract_param_context
 from agent.nodes.llm_description_extract.state import DescriptionExtractState
 from agent.prompts import LLM_DESCRIPTION_EXTRACT_PROMPT
-from agent.utils.llm_common import CONCURRENCY_LIMIT, create_llm, parse_json_response
+from agent.core.llm import create_llm
+from agent.utils.llm_common import CONCURRENCY_LIMIT, parse_json_response
 
 logger = logging.getLogger(__name__)
 

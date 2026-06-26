@@ -664,6 +664,17 @@ class MCPClient:
         """Retrieve constraint check HTML report from document_versions."""
         return await self._call_tool("get_constraint_check", {"doc_id": doc_id})
 
+    async def get_doc_for_check(self, doc_id: int) -> dict | None:
+        """Retrieve raw content + json_constraints for constraint checking."""
+        return await self._call_tool("get_doc_for_check", {"doc_id": doc_id})
+
+    async def get_doc_for_check_by_name(self, operator_name: str) -> dict | None:
+        """Retrieve raw content + json_constraints by operator name."""
+        return await self._call_tool("get_doc_for_check_by_name_tool", {"operator_name": operator_name})
+
     async def get_task_items(self, task_id: int) -> list[dict]:
         """Get all task items for a task."""
-        return await self._call_tool("get_task_items", {"task_id": task_id})
+        result = await self._call_tool("get_task_with_items", {"task_id": task_id})
+        if isinstance(result, dict):
+            return result.get("items", [])
+        return []

@@ -70,6 +70,12 @@ from agent.nodes.shape_extract import shape_extract_node as _shape_extract
 from agent.nodes.single_param_constraint import (
     build_single_param_constraint_node as _build_single_param_constraint,
 )
+from agent.nodes.cross_param_constraint import (
+    cross_param_constraint_node as _cross_param_constraint,
+)
+from agent.nodes.constraint_extract import (
+    constraint_extract_node as _constraint_extract,
+)
 from agent.nodes.state import PipelineState
 from agent.nodes.table_column_extract import table_column_extract_node as _table_column_extract
 
@@ -316,8 +322,9 @@ def _build_extract(graph: StateGraph, *, is_first: bool, is_last: bool) -> None:
                  + extract_ws + extract_exe + parameter_representation_build
                  + merge_relations + save_relations)]
            → BuildParamRelations → BuildSingleParamConstraint
+           → CrossParamConstraint
            → BuildParamConstraint (subgraph)
-           → AssembleResult → END
+           → ConstraintExtract → AssembleResult → END
     """
     graph.add_node("init_doc", traced_node("init_doc")(_init_doc))
     graph.add_node("product_support", traced_node("product_support")(_product_support))
@@ -337,6 +344,8 @@ def _build_extract(graph: StateGraph, *, is_first: bool, is_last: bool) -> None:
     graph.add_node("param_relation_extract", traced_subgraph("param_relation_extract")(create_param_relation_subgraph()))
     graph.add_node("build_param_relations", traced_node("build_param_relations")(_build_param_relations))
     graph.add_node("build_single_param_constraint", traced_node("build_single_param_constraint")(_build_single_param_constraint))
+    graph.add_node("cross_param_constraint", traced_node("cross_param_constraint")(_cross_param_constraint))
+    graph.add_node("constraint_extract", traced_node("constraint_extract")(_constraint_extract))
     bpc_subgraph = create_build_param_constraint_subgraph()
     graph.add_node("build_param_constraint", traced_subgraph("build_param_constraint")(bpc_subgraph))
     graph.add_node("assemble_result", traced_node("assemble_result")(_assemble_result))
@@ -363,8 +372,10 @@ def _build_extract(graph: StateGraph, *, is_first: bool, is_last: bool) -> None:
             graph.add_edge(n, "build_single_param_constraint")
 
     graph.add_edge("build_param_relations", "build_single_param_constraint")
-    graph.add_edge("build_single_param_constraint", "build_param_constraint")
-    graph.add_edge("build_param_constraint", "assemble_result")
+    graph.add_edge("build_single_param_constraint", "cross_param_constraint")
+    graph.add_edge("cross_param_constraint", "build_param_constraint")
+    graph.add_edge("build_param_constraint", "constraint_extract")
+    graph.add_edge("constraint_extract", "assemble_result")
 
     if is_last:
         graph.add_edge("assemble_result", END)

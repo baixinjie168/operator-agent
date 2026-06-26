@@ -11,7 +11,8 @@ from langchain_openai import ChatOpenAI
 from agent.mcp_client import MCPClient
 from agent.nodes.state import PipelineState
 from agent.prompts import DTYPE_EXTRACT_PROMPT
-from agent.utils.llm_common import CONCURRENCY_LIMIT, create_llm, parse_json_response
+from agent.core.llm import create_llm
+from agent.utils.llm_common import CONCURRENCY_LIMIT, parse_json_response
 from agent.utils.param_validators import VALID_DTYPES, is_cross_reference, is_dash
 
 logger = logging.getLogger(__name__)

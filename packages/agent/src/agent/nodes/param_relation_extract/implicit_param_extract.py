@@ -545,7 +545,7 @@ def _get_implicit_params_agent() -> Any:
     if _implicit_params_agent is not None:
         return _implicit_params_agent
 
-    from agent.utils.llm_common import create_llm
+    from agent.core.llm import create_llm
 
     kb = _load_implicit_params_knowledge()
     system_prompt = _AGENT_SYSTEM_PROMPT_TEMPLATE

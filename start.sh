@@ -25,10 +25,16 @@ fi
 PYTHONPATH="$(pwd)/packages/shared/src:$(pwd)/packages/mcp-server/src:$(pwd)/packages/agent/src"
 export PYTHONPATH
 
-# Clean all .pyc compiled cache (skip .venv and .git).
-# `|| true` so a non-zero find exit (common on Windows/MINGW due to
-# permission/junction errors) does not abort the script under `set -e`.
+# Kill any existing uvicorn / mcp_server processes (stale code from last run)
+echo "[CLEAN] Killing stale processes..."
+pkill -f "uvicorn agent.main" 2>/dev/null || true
+pkill -f "mcp_server" 2>/dev/null || true
+sleep 1
+
+# Clean all .pyc compiled cache and __pycache__ dirs (skip .venv and .git).
 find . \( -path './.venv' -o -path './.git' \) -prune -o -name '*.pyc' -type f -delete 2>/dev/null || true
+find . \( -path './.venv' -o -path './.git' \) -prune -o -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null || true
+echo "[CLEAN] Removed .pyc and __pycache__"
 
 # Start FastAPI server
 echo "========================================================"
