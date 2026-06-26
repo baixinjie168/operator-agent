@@ -15,7 +15,7 @@ from pydantic import ValidationError
 
 from agent.generators.atk_common_utils.case_config import CaseConfig
 from agent.generators.common_utils.logger_util import LazyLogger
-from agent.generators.data_definition.constants import DataMatchMap
+from agent.generators.data_definition.constants import DataMatchMap, GlobalConfig
 from agent.generators.data_definition.param_models_def import RunPlatform
 from agent.generators.common_model_definition import OperatorRule, ParamAttributes, ValueWithSrcText
 
@@ -90,18 +90,36 @@ class DataHandleUtil:
                                                                                       target_platform)
         if operator_constraint_data.outputs is None:
             return None
-        if target_platform not in operator_constraint_data.constraints_in_parameters:
-            logger.warning(f"Platform '{target_platform}' not in constraints_in_parameters")
-        operator_constraint_data.constraints_in_parameters = operator_constraint_data.constraints_in_parameters.get(
+        if (target_platform not in operator_constraint_data.constraints_in_parameters and
+                GlobalConfig.COMMON_PLATFORM not in operator_constraint_data.constraints_in_parameters):
+            logger.warning(
+                f"Platform '{target_platform}' and '{GlobalConfig.COMMON_PLATFORM}' not in constraints_in_parameters")
+        target_platform_constraint_data = operator_constraint_data.constraints_in_parameters.get(
             target_platform, [])
-        if target_platform not in operator_constraint_data.dtype_support_description:
-            logger.warning(f"Platform '{target_platform}' not in dtype_support_description")
-        operator_constraint_data.dtype_support_description = operator_constraint_data.dtype_support_description.get(
+        common_constraint_data = operator_constraint_data.constraints_in_parameters.get(GlobalConfig.COMMON_PLATFORM,
+                                                                                        [])
+        target_platform_constraint_data.extend(common_constraint_data)
+        operator_constraint_data.constraints_in_parameters = target_platform_constraint_data
+        if (target_platform not in operator_constraint_data.dtype_support_description and
+                GlobalConfig.COMMON_PLATFORM not in operator_constraint_data.dtype_support_description):
+            logger.warning(
+                f"Platform '{target_platform}' and '{GlobalConfig.COMMON_PLATFORM}' not in dtype_support_description")
+        target_platform_dtype_support_data = operator_constraint_data.dtype_support_description.get(
             target_platform, [])
-        if target_platform not in operator_constraint_data.format_support_description:
-            logger.warning(f"Platform '{target_platform}' not in format_support_description")
-        operator_constraint_data.format_support_description = operator_constraint_data.format_support_description.get(
+        common_dtype_support_data = operator_constraint_data.dtype_support_description.get(GlobalConfig.COMMON_PLATFORM,
+                                                                                           [])
+        target_platform_dtype_support_data.extend(common_dtype_support_data)
+        operator_constraint_data.dtype_support_description = target_platform_constraint_data
+        if (target_platform not in operator_constraint_data.format_support_description and
+                GlobalConfig.COMMON_PLATFORM not in operator_constraint_data.format_support_description):
+            logger.warning(
+                f"Platform '{target_platform}' and '{GlobalConfig.COMMON_PLATFORM}' not in format_support_description")
+        target_platform_format_support_data = operator_constraint_data.format_support_description.get(
             target_platform, [])
+        common_format_support_data = operator_constraint_data.format_support_description.get(
+            GlobalConfig.COMMON_PLATFORM, [])
+        target_platform_format_support_data.extend(common_format_support_data)
+        operator_constraint_data.format_support_description = target_platform_format_support_data
         return operator_constraint_data
 
     @staticmethod
@@ -117,10 +135,15 @@ class DataHandleUtil:
         if param_dict is None:
             return None
         for param_name, param_attribute in param_dict.items():
-            if target_platform not in param_attribute:
-                logger.error(f"Platform '{target_platform}' not in param : {param_name} attribute")
+            if target_platform not in param_attribute and GlobalConfig.COMMON_PLATFORM not in param_attribute:
+                logger.error(
+                    f"Platform '{target_platform}' not in param : {param_name} attribute and {GlobalConfig.COMMON_PLATFORM} not in param")
                 return None
-            effective_param_dict[param_name] = param_attribute.get(target_platform, None)
+            effective_param_data = param_attribute.get(target_platform, None)
+            effective_param_data = effective_param_data if effective_param_data is not None else param_attribute.get(
+                GlobalConfig.COMMON_PLATFORM, None)
+            effective_param_dict[param_name] = effective_param_data
+
         return effective_param_dict
 
     @staticmethod
@@ -142,12 +165,12 @@ class DataHandleUtil:
         if isinstance(param_attribute, ValueWithSrcText):
             if isinstance(param_attribute.value, list):
                 if len(param_attribute.value) == 0:
-                    return None
-            return param_attribute.value
+                    return None, None
+            return param_attribute.value, param_attribute.type
         else:
             logger.info(
                 f"Param : '{param_name}', attribute : '{param_attribute_name}', is not relevant : '{param_attribute}'")
-            return None
+            return None, None
 
     @staticmethod
     def get_range_data_boundary(dtype: str, range_data) -> List | None:
@@ -182,7 +205,3 @@ class DataHandleUtil:
         else:
             return None
         return value_boundary
-
-
-
-

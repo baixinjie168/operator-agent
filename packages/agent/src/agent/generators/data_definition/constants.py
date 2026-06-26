@@ -1,5 +1,7 @@
-import os
 import re
+
+import os
+import torch
 
 
 class GlobalConfig:
@@ -29,6 +31,8 @@ class GlobalConfig:
     # Z3表达式处理幂运算时，对于x ** 2类的场景，即底数为变量，指数为常量的情况，只能展开为for循环来处理，需要限制指数的最大值，避免消耗大量时间
     # 构建表达式，导致求解器卡死
     Z3_EXPONENT_MAX_VALUE = 3
+    # 不区分平台时，代码通用平台的关键字
+    COMMON_PLATFORM = "common"
 
 
 class ParamModelConfig:
@@ -115,41 +119,34 @@ class ParamModelConfig:
     SHAPE_VALUE_MIN_EXPR = "all(d >= 0 for d in {}.shape)"
     # 参数模型定义中不涉及的参数value值
     NOT_RELEVANT_PARAM_VALUE = "N/A"
+    # 暂不支持的数据类型
+    UNSUPPORT_DTYPE = ["COMPLEX64", "COMPLEX128"]
 
 
 class DataMatchMap:
     """配置各类数据映射字典"""
     # 在生成实际数据的时候使用，用于设置tensor中数值的数据类型
-    _TENSOR_DTYPE_TRANSFER_TORCH_MAP = None
-
-    @classmethod
-    def get_torch_dtype_transfer_map(cls):
-        """Lazily build the ACL→torch dtype map. Requires torch to be installed."""
-        if cls._TENSOR_DTYPE_TRANSFER_TORCH_MAP is None:
-            import torch
-            cls._TENSOR_DTYPE_TRANSFER_TORCH_MAP = {
-                "ACL_FLOAT": torch.float, "ACL_FLOAT16": torch.float16, "ACL_INT8": torch.int8,
-                "ACL_INT32": torch.int32, "ACL_UINT8": torch.uint8, "ACL_INT16": torch.int16,
-                "ACL_UINT16": torch.uint16, "ACL_UINT32": torch.uint32, "ACL_INT64": torch.int64,
-                "ACL_UINT64": torch.uint64, "ACL_DOUBLE": torch.float64, "ACL_BOOL": torch.bool,
-                "ACL_STRING": str, "ACL_COMPLEX64": torch.complex64,
-                "ACL_COMPLEX128": torch.complex128,
-                "ACL_BF16": torch.bfloat16, "ACL_INT4": torch.int, "ACL_UINT1": torch.uint8,
-                "ACL_COMPLEX32": torch.complex32, "FLOAT": torch.float32,
-                "FLOAT16": torch.float16,
-                "FLOAT32": torch.float32, "FLOAT64": torch.float64, "BFLOAT16": torch.bfloat16,
-                "float32": torch.float32, "float16": torch.float16, "float64": torch.float64,
-                "bfloat16": torch.bfloat16, "INT4": torch.int, "INT8": torch.int8,
-                "INT16": torch.int16, "INT32": torch.int32, "UINT8": torch.uint8,
-                "UINT16": torch.uint16, "UINT32": torch.uint32, "UINT64": torch.uint64,
-                "INT64": torch.int64, "COMPLEX64": torch.complex64,
-                "COMPLEX128": torch.complex128,
-                "DOUBLE": torch.float64}
-        return cls._TENSOR_DTYPE_TRANSFER_TORCH_MAP
+    TENSOR_DTYPE_TRANSFER_TORCH_MAP = {"ACL_FLOAT": torch.float, "ACL_FLOAT16": torch.float16, "ACL_INT8": torch.int8,
+                                       "ACL_INT32": torch.int32, "ACL_UINT8": torch.uint8, "ACL_INT16": torch.int16,
+                                       "ACL_UINT16": torch.uint16, "ACL_UINT32": torch.uint32, "ACL_INT64": torch.int64,
+                                       "ACL_UINT64": torch.uint64, "ACL_DOUBLE": torch.float64, "ACL_BOOL": torch.bool,
+                                       "ACL_STRING": str, "ACL_COMPLEX64": torch.complex64,
+                                       "ACL_COMPLEX128": torch.complex128,
+                                       "ACL_BF16": torch.bfloat16, "ACL_INT4": torch.int, "ACL_UINT1": torch.uint8,
+                                       "ACL_COMPLEX32": torch.complex32, "FLOAT": torch.float32,
+                                       "FLOAT16": torch.float16,
+                                       "FLOAT32": torch.float32, "FLOAT64": torch.float64, "BFLOAT16": torch.bfloat16,
+                                       "float32": torch.float32, "float16": torch.float16, "float64": torch.float64,
+                                       "bfloat16": torch.bfloat16, "INT4": torch.int, "INT8": torch.int8,
+                                       "INT16": torch.int16, "INT32": torch.int32, "UINT8": torch.uint8,
+                                       "UINT16": torch.uint16, "UINT32": torch.uint32, "UINT64": torch.uint64,
+                                       "INT64": torch.int64, "COMPLEX64": torch.complex64,
+                                       "COMPLEX128": torch.complex128,
+                                       "DOUBLE": torch.float64}
 
     # 在case_config中只生成数据生成方法字段，不生成实际数据时使用，用于适配ATK框架
     ACL_DTYPE_TRANSFER_TENSOR_MAP = {"INT4": "int", "INT8": "int8", "INT16": "int16", "INT32": "int32",
-                                     "UINT8": "uint8",
+                                     "UINT8": "uint8", "INT": "int",
                                      "UINT16": "uint16", "UINT32": "uint32", "UINT64": "uint64", "INT64": "int64",
                                      "BFLOAT16": "bf16", "FLOAT16": "fp16", "FLOAT32": "fp32", "FLOAT64": "fp64",
                                      "float32": "fp32", "float16": "fp16", "float64": "fp64", "COMPLEX64": "complex64",
@@ -157,7 +154,8 @@ class DataMatchMap:
                                      "ACL_FLOAT16": "fp16", "float": "fp32",
                                      "ACL_FLOAT32": "fp32", "ACL_FLOAT64": "fp64", "ACL_FLOAT": "fp32",
                                      "ACL_BF16": "bf16", "BOOL": "bool", "STRING": "string", "CHAR": "string",
-                                     "string": "string", "bool": "bool", "double": "double", "int64_t": "int"}
+                                     "string": "string", "bool": "bool", "double": "double", "int64_t": "int",
+                                     "int64": "int"}
 
     # 如果type字段在ACL_TYPE_TRANSFER_ATK_MAP中，则转换为MAP中的值，否则默认为attr
     ACL_TYPE_TRANSFER_ATK_MAP = {"aclTensor": "tensor", "aclScalar": "scalar", "aclIntArray": "attrs",
@@ -185,7 +183,8 @@ class DataMatchMap:
         "int": (-128, 127, True), "int8": (-128, 127, True), "uint8": (0, 255, True),
         "int16": (-32768, 32767, True), "int32": (-2 ** 31, 2 ** 31 - 1, True),
         "uint32": (0, 2 ** 32 - 1, True), "uint64": (0, 2 ** 64 - 1, True),
-        "uint16": (0, 65535, True), "int64": (-2 ** 63, 2 ** 63 - 1, True), "bfp16": (-3.389e38, 3.389e38, False), "bf16": (-3.389e38, 3.389e38, False),
+        "uint16": (0, 65535, True), "int64": (-2 ** 63, 2 ** 63 - 1, True), "bfp16": (-3.389e38, 3.389e38, False),
+        "bf16": (-3.389e38, 3.389e38, False),
         "fp16": (-65504, 65504, False), "float": (-3.4e38, 3.4e38, False),
         "fp32": (-3.4e38, 3.4e38, False), "fp64": (-1.797e308, 1.797e308, False),
         "double": (-1.797e308, 1.797e308, False),

@@ -28,6 +28,7 @@
     builder.solve()
 """
 import ast
+import re
 from typing import List, Dict
 
 import z3
@@ -52,10 +53,8 @@ class ExpressionPreprocessor:
             else:
                 expr = expr.replace(keyword, str(replacement))
         for keyword, replacement in DataMatchMap.ACL_DTYPE_TRANSFER_TENSOR_MAP.items():
-            if isinstance(replacement, str):
-                expr = expr.replace(keyword, f"{replacement}")
-            else:
-                expr = expr.replace(keyword, str(replacement))
+            replacement_str = f"{replacement}" if isinstance(replacement, str) else str(replacement)
+            expr = re.sub(rf"\b{re.escape(keyword)}\b", replacement_str, expr)
         return expr
 
     @staticmethod
@@ -164,7 +163,7 @@ class Z3ConstraintBuilder:
                 self.solver.assert_and_track(z3_constraint, expr_name)
                 logger.info(f"[OK] {expr_str}")
             else:
-                logger.error(f"[FAIL] {expr_str}: Returned None")
+                logger.debug(f"[SKIP] {expr_str}: converter returned None, ignored")
         except Exception as e:
             logger.error(f"[FAIL] {expr_str}: {e}")
 
