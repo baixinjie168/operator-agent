@@ -164,12 +164,13 @@ DTYPE_MAP = {name: const for name, const in zip(DataMatchMap.DTYPE_SPECS.keys(),
 
 
 class BaseVar:
-    def __init__(self, name):
+    def __init__(self, name, solver=None):
         self.name = name
         self._element_sort = None  # 由子类设置
         self.range_value = None
-        self.solver = None
+        self.solver = solver
         self._dtype_arg = None
+        self.is_present = z3.Bool(f"{name}.is_present")
 
     def get_z3_expr(self):
         raise NotImplementedError
@@ -525,7 +526,7 @@ class BaseVar:
         else:
             v_min, v_max = actual_val, actual_val
 
-        if v_min >= in_min and v_max <= in_max:
+        if all(isinstance(v, (int, float)) for v in (v_min, v_max, in_min, in_max)) and v_min >= in_min and v_max <= in_max:
             # 情况 A: 实际解在建议范围内 -> 返回建议范围
             input_spec = DataHandleUtil.abnormal_float_transfer(input_spec)
             return input_spec
@@ -555,11 +556,11 @@ class BaseVar:
         # 2. 检查是否与输入范围一致
         in_min, in_max = BaseVar._parse_input_spec(input_spec)
         if in_min is not None and in_max is not None:
-            # 如果实际值范围完全覆盖输入范围（或相等），返回输入范围
-            # 使用近似比较处理浮点数
-            if abs(actual_min - in_min) < 1e-9 and abs(actual_max - in_max) < 1e-9:
-                input_spec = DataHandleUtil.abnormal_float_transfer(input_spec)
-                return input_spec
+            # 仅当所有值均为数值类型时才进行算术比较，避免 int - str 报错
+            if all(isinstance(v, (int, float)) for v in (actual_min, actual_max, in_min, in_max)):
+                if abs(actual_min - in_min) < 1e-9 and abs(actual_max - in_max) < 1e-9:
+                    input_spec = DataHandleUtil.abnormal_float_transfer(input_spec)
+                    return input_spec
 
         # 3. 否则返回实际值范围 (元组)
         resolve_range = (actual_min, actual_max)
@@ -591,7 +592,7 @@ class BaseVar:
 
 class TensorVar(BaseVar):
     def __init__(self, name, solver, dtype=None, allowed_dtypes=None, allowed_formats=None, range_value=None):
-        super().__init__(name)
+        super().__init__(name, solver)
         self.name = name
         self.type = "tensor"
         self.solver = solver
@@ -698,7 +699,7 @@ class TensorVar(BaseVar):
 
 class ListVar(BaseVar):
     def __init__(self, name, solver, dtype=None, range_value=None, length=None):
-        super().__init__(name)
+        super().__init__(name, solver)
         self.name = name
         self.type = "list"
         self.solver = solver
@@ -758,7 +759,7 @@ class ListVar(BaseVar):
 
 class ScalarVar(BaseVar):
     def __init__(self, name, solver, dtype, range_value=None):
-        super().__init__(name)
+        super().__init__(name, solver)
         if dtype not in TYPE_CONFIG:
             logger.error(f"Unsupported dtype '{dtype}' for var '{name}', fallback to 'int'")
             dtype = 'int'

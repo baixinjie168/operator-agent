@@ -223,7 +223,7 @@ async def run_execute(body: ExecuteRunRequest, request: Request) -> ExecuteRunRe
 async def _run_execute_pipeline(
     run_id: str, operator_name: str, cases_path: str, cases_count: int,
     case_ids: list[int], manager: RuntimeManager, server_info: dict | None = None,
-    task_type: str = "precision", execution_count: int = 1,
+    task_type: str = "accuracy", execution_count: int = 1,
 ) -> None:
     """Run the 3-step execution sub-graph with RuntimeManager observability."""
     ctx = manager.enter_context(run_id)

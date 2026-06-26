@@ -43,6 +43,7 @@ class ASTtoZ3Converter(ast.NodeVisitor):
     _CALL_DISPATCH_TABLE = {
         'len': '_handle_len', 'all': '_handle_all', 'any': '_handle_any',
         'max': '_handle_max_min', 'min': '_handle_max_min',
+        'sum': '_handle_sum',
     }
     def __init__(self, builder):
         self.builder = builder
@@ -117,9 +118,29 @@ class ASTtoZ3Converter(ast.NodeVisitor):
     def visit_IfExp(self, node):
         return z3.If(self.visit(node.test), self.visit(node.body), self.visit(node.orelse))
 
+    def _is_pure_guard(self, node):
+        """检查 AST 节点是否完全由 is None / is not None 检查组成（守卫条件）"""
+        if isinstance(node, ast.Compare):
+            if len(node.ops) == 1 and isinstance(node.ops[0], (ast.Is, ast.IsNot)):
+                if len(node.comparators) == 1 and isinstance(node.comparators[0], ast.Constant) and node.comparators[0].value is None:
+                    return True
+        if isinstance(node, ast.BoolOp) and isinstance(node.op, ast.And):
+            return all(self._is_pure_guard(v) for v in node.values)
+        return False
+
     def visit_BoolOp(self, node):
-        vals = [self.visit(v) for v in node.values]
-        return z3.And(*vals) if isinstance(node.op, ast.And) else z3.Or(*vals)
+        if isinstance(node.op, ast.And):
+            guards = [v for v in node.values if self._is_pure_guard(v)]
+            rests = [v for v in node.values if not self._is_pure_guard(v)]
+            if guards and rests:
+                guard_exprs = [self.visit(g) for g in guards]
+                rest_exprs = [self.visit(r) for r in rests]
+                return z3.Implies(z3.And(*guard_exprs), z3.And(*rest_exprs))
+            vals = [self.visit(v) for v in node.values]
+            return z3.And(*vals)
+        elif isinstance(node.op, ast.Or):
+            vals = [self.visit(v) for v in node.values]
+            return z3.Or(*vals)
 
     def visit_UnaryOp(self, node):
         op = self.visit(node.operand)
@@ -152,13 +173,21 @@ class ASTtoZ3Converter(ast.NodeVisitor):
 
             # --- 处理 is / is not ---
             if isinstance(op, (ast.Is, ast.IsNot)):
-                # 语义：Z3 变量总是存在的（非 None），Python 变量取决于值
                 if right is None:
-                    # 如果是 Z3 表达式，它永远不是 None
+                    # 优先使用变量的 is_present 标志（使 None 检查成为 Z3 约束）
+                    if isinstance(node.left, ast.Name):
+                        var_name = node.left.id
+                        if var_name in self.builder.var_map:
+                            var_obj = self.builder.var_map[var_name]
+                            if hasattr(var_obj, 'is_present'):
+                                result = z3.Not(var_obj.is_present) if isinstance(op, ast.Is) else var_obj.is_present
+                                res.append(result)
+                                cur_left = right
+                                continue
+                    # 回退：Z3 表达式永远不是 None，Python 常量直接比较
                     if z3.is_expr(cur_left):
                         result = z3.BoolVal(False) if isinstance(op, ast.Is) else z3.BoolVal(True)
                     else:
-                        # 如果是 Python 常量，直接比较
                         result = (cur_left is None) if isinstance(op, ast.Is) else (cur_left is not None)
                     res.append(result)
                 else:
@@ -220,13 +249,21 @@ class ASTtoZ3Converter(ast.NodeVisitor):
                 elif isinstance(op, ast.In):
                     if isinstance(right, list):
                         res.append(z3.Or([cur_left == v for v in right]))
+                    elif z3.is_seq(right):
+                        length = z3.Length(right)
+                        idx = z3.Int(f"__in_{self.builder.get_next_slice_id()}")
+                        res.append(z3.Exists([idx], z3.And(idx >= 0, idx < length, right[idx] == cur_left)))
                     else:
-                        raise TypeError("'in' right operand must be a list")
+                        raise TypeError("'in' right operand must be a list or sequence")
                 elif isinstance(op, ast.NotIn):
                     if isinstance(right, list):
                         res.append(z3.And([cur_left != v for v in right]))
+                    elif z3.is_seq(right):
+                        length = z3.Length(right)
+                        idx = z3.Int(f"__notin_{self.builder.get_next_slice_id()}")
+                        res.append(z3.ForAll([idx], z3.Implies(z3.And(idx >= 0, idx < length), right[idx] != cur_left)))
                     else:
-                        raise TypeError("'not in' right operand must be a list")
+                        raise TypeError("'not in' right operand must be a list or sequence")
                 else:
                     raise NotImplementedError(f"Unsupported op: {type(op).__name__}")
             cur_left = right
@@ -363,10 +400,58 @@ class ASTtoZ3Converter(ast.NodeVisitor):
         else:
             return self._handle_max_min_scalars(args_z3, is_max)
 
+    def _handle_range_quantifier(self, comprehension, condition_ast, quantifier_op):
+        range_call = comprehension.iter
+        if len(range_call.args) not in (1, 2, 3):
+            raise ValueError("range() expects 1-3 arguments")
+
+        args = [self.visit(a) for a in range_call.args]
+        if any(a is None for a in args):
+            raise ValueError("range() argument failed")
+
+        if len(args) == 1:
+            start, stop, step = z3.IntVal(0), args[0], z3.IntVal(1)
+        elif len(args) == 2:
+            start, stop, step = args[0], args[1], z3.IntVal(1)
+        else:
+            start, stop, step = args[0], args[1], args[2]
+
+        if isinstance(step, int):
+            step = z3.IntVal(step)
+        if isinstance(start, int):
+            start = z3.IntVal(start)
+
+        loop_var_name = comprehension.target.id
+        slice_id = self.builder.get_next_slice_id()
+        k = z3.Int(f"__k_q_{slice_id}")
+
+        class TempVisitor(ASTtoZ3Converter):
+            def __init__(self, builder, vn, ph):
+                super().__init__(builder)
+                self.vn, self.ph = vn, ph
+            def visit_Name(self, node):
+                if node.id == self.vn: return self.ph
+                return super().visit_Name(node)
+
+        cond_expr = TempVisitor(self.builder, loop_var_name, k).visit(condition_ast)
+        bounds = z3.And(k >= start, k < stop)
+        if not (isinstance(step, z3.IntNumRef) and step.as_long() == 1):
+            bounds = z3.And(bounds, (k - start) % step == 0)
+
+        if quantifier_op == z3.ForAll:
+            return z3.ForAll([k], z3.Implies(bounds, cond_expr))
+        else:
+            return z3.Exists([k], z3.And(bounds, cond_expr))
+
     # --- 量词与 Max/Min 内部实现 ---
     def _handle_quantifier(self, gen_node, quantifier_op):
         try:
             comprehension = gen_node.generators[0]
+
+            # --- range() special case ---
+            if isinstance(comprehension.iter, ast.Call) and isinstance(comprehension.iter.func, ast.Name) and comprehension.iter.func.id == 'range':
+                return self._handle_range_quantifier(comprehension, gen_node.elt, quantifier_op)
+
             iter_target = self.visit(comprehension.iter)
             if iter_target is None: raise ValueError("Quantifier iter target is None")
 
@@ -507,3 +592,102 @@ class ASTtoZ3Converter(ast.NodeVisitor):
             self.builder.solver.add(rank == 1)
             return target.shape[0]
         raise NotImplementedError(f"Cannot determine length for type {type(target).__name__}")
+
+    def _handle_sum(self, node, func_name):
+        if len(node.args) == 0:
+            raise ValueError("sum() requires at least 1 argument")
+
+        if len(node.args) == 1 and isinstance(node.args[0], ast.GeneratorExp):
+            return self._handle_sum_generator(node.args[0])
+
+        if len(node.args) == 1 and isinstance(node.args[0], ast.Name):
+            var = self.builder.get_or_create_var(node.args[0].id)
+            if isinstance(var, TensorVar):
+                return self._sum_tensor_elements(var)
+            if isinstance(var, ListVar):
+                return self._sum_z3_sequence(var.z3_var, var.get_element_sort())
+
+        args = [self.visit(arg) for arg in node.args]
+        if any(a is None for a in args):
+            raise ValueError("sum() argument failed")
+
+        if len(args) == 1:
+            arg = args[0]
+            if isinstance(arg, TensorVar):
+                return self._sum_tensor_elements(arg)
+            if z3.is_seq(arg):
+                return self._sum_z3_sequence(arg, z3.IntSort())
+            if isinstance(arg, (list, tuple)):
+                nums = [v for v in arg if isinstance(v, (int, float))]
+                return sum(nums) if nums else 0
+            if z3.is_expr(arg) or isinstance(arg, (int, float, bool)):
+                return arg
+            raise TypeError(f"sum() on unsupported type: {type(arg).__name__}")
+
+        return self._sum_scalars(args)
+
+    def _sum_z3_sequence(self, seq, element_sort=None):
+        if element_sort is None:
+            element_sort = z3.IntSort()
+
+        seq_sort = seq.sort()
+        slice_id = self.builder.get_next_slice_id()
+        func_name = f"__sum_seq_{slice_id}"
+
+        SumSeq = z3.RecFunction(func_name, seq_sort, element_sort)
+        seq_var = z3.Const(f"{func_name}_arg", seq_sort)
+
+        if element_sort == z3.IntSort():
+            zero = z3.IntVal(0)
+        elif element_sort == z3.RealSort():
+            zero = z3.RealVal(0)
+        else:
+            zero = z3.IntVal(0)
+
+        z3.RecAddDefinition(SumSeq, [seq_var],
+            z3.If(z3.Length(seq_var) == 0,
+                   zero,
+                   seq_var[0] + SumSeq(z3.SubSeq(seq_var, 1, z3.Length(seq_var) - 1))))
+
+        return SumSeq(seq)
+
+    def _sum_tensor_elements(self, tensor_var):
+        arr = tensor_var.range_value
+        element_sort = tensor_var.get_element_sort()
+
+        slice_id = self.builder.get_next_slice_id()
+        func_name = f"__sum_tensor_{tensor_var.name}_{slice_id}"
+
+        array_sort = z3.ArraySort(z3.IntSort(), element_sort)
+
+        SumArr = z3.RecFunction(func_name, array_sort, z3.IntSort(), z3.IntSort(), element_sort)
+        arr_var = z3.Const(f"{func_name}_arr", array_sort)
+        start_var = z3.Int(f"{func_name}_start")
+        end_var = z3.Int(f"{func_name}_end")
+
+        if element_sort == z3.IntSort():
+            zero = z3.IntVal(0)
+        elif element_sort == z3.RealSort():
+            zero = z3.RealVal(0)
+        else:
+            zero = z3.IntVal(0)
+
+        z3.RecAddDefinition(SumArr, [arr_var, start_var, end_var],
+            z3.If(start_var >= end_var,
+                   zero,
+                   z3.Select(arr_var, start_var) + SumArr(arr_var, start_var + 1, end_var)))
+
+        rank = z3.Length(tensor_var.shape)
+        self.builder.solver.add(rank == 1)
+        n_elements = tensor_var.shape[0]
+        return SumArr(arr, z3.IntVal(0), n_elements)
+
+    def _sum_scalars(self, values):
+        result = values[0]
+        for v in values[1:]:
+            result, v = self._promote_numeric_types(result, v)
+            result = result + v
+        return result
+
+    def _handle_sum_generator(self, gen_node):
+        raise NotImplementedError("sum() with generator expression is not yet supported")

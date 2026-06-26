@@ -45,10 +45,14 @@ async def case_generate_node(state: PipelineState) -> dict[str, Any]:
 
     count = int(state.get("cases_count") or state.get("count") or _DEFAULT_COUNT)
     seed = int(state.get("cases_seed") or state.get("seed") or _DEFAULT_SEED)
+    # Optional narrow filter: when set, only generate for this product and skip
+    # the others. Used by ``scripts/batch_verify`` so ``--count`` reflects the
+    # target product's execution count instead of ``count * num_products``.
+    target_product = state.get("target_product") or None
 
     logger.info(
-        "case_generate: running TestCaseGenerator for %s (count=%d, seed=%d)",
-        operator_name, count, seed,
+        "case_generate: running TestCaseGenerator for %s (count=%d, seed=%d, target_product=%s)",
+        operator_name, count, seed, target_product or "ALL",
     )
 
     try:
@@ -57,10 +61,18 @@ async def case_generate_node(state: PipelineState) -> dict[str, Any]:
         # 的 ``generate_by_platform`` 直接给出。
         gen = TestCaseGenerator(constraints, seed=seed)
         logger.info(
-            "case_generate: operator=%s, requested count=%d, platforms=%d",
+            "case_generate: operator=%s, requested count=%d, platforms=%d, target=%s",
             operator_name, count, len(gen.supported_platforms) or 1,
+            target_product or "ALL",
         )
-        cases_by_product = gen.generate_by_platform(count=count)
+        if target_product:
+            # Narrow generation to a single product so the result count is
+            # exactly ``count`` instead of ``count * num_products``.
+            cases_by_product = {
+                target_product: gen.generate_for_platform(target_product, count),
+            }
+        else:
+            cases_by_product = gen.generate_by_platform(count=count)
 
         # Save per-product files. 注入 ``supported_product`` 字段到每条用例 dict，
         # 这样 ``db.save_test_cases`` / ``/api/v1/test-cases?supported_product=...`` 能按

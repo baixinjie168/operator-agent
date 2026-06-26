@@ -138,11 +138,14 @@ class CaseGenerate:
             param_type = param_attributes.param_type
             param_dtype = self.generate_param_dtype(param_name, param_attributes.dtype)
             param_length = param_attributes.length
-            optional_param_probability = random.random()
-            if not param_attributes.is_operator_param:
-                continue
-            if param_attributes.is_optional and optional_param_probability > GlobalConfig.OPTIONAL_PARAM_PROBABILITY:
-                continue
+            # 这里不过滤非算子参数，避免约束表达式中包含非算子参数求解失败
+            # if not param_attributes.is_operator_param:
+            #     continue
+            # 用于确定可选参数是否设置取值，但是部分可选参数会与必选参数在同一个约束表达式中出现，为了避免表达式求解失败，
+            # 这里不对可选参数做概率性选择，全部加入参数集合
+            # optional_param_probability = random.random()
+            # if param_attributes.is_optional and optional_param_probability > GlobalConfig.OPTIONAL_PARAM_PROBABILITY:
+            #     continue
             if param_type in ParamModelConfig.TENSOR_ATK_TYPE:
                 param_shape = self.generate_param_shape(param_name, param_attributes.shape_property.dim_count,
                                                         param_attributes.shape_property.dim_value_profile)

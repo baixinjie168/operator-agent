@@ -1,135 +1,104 @@
-# -*- coding: UTF-8 -*-
-# Copyright (c) Huawei Technologies Co., Ltd. 2025. All rights reserved.
 """
-版权信息：华为技术有限公司，版本所有(C) 2025-2025
-修改记录：2026/6/24
-功能：算子约束与参数间约束共用数据模型定义
-
-本模块从 operator_case_generator 迁移而来，定义了下游算子用例生成所需的所有
-Pydantic 数据模型，包括：
-
-- ValueWithSrcText      参数属性封装
-- ParamAttributes       单个参数在某个平台下的属性集
-- InterParamConstraint  参数间约束表达式
-- OperatorRule          算子完整约束数据顶层结构
-- InterConstraintsRuleType 参数间约束类型枚举
+算子规则 JSON 的 Pydantic 数据模型定义（新版）
+用于严格校验 JSON 数据结构和类型
 """
-from __future__ import annotations
-
 from enum import Enum
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List
 
 from pydantic import BaseModel, Field
 
 
-# ─────────────────────────────────────────────────────────────────────
-# 参数属性与约束共用模型
-# ─────────────────────────────────────────────────────────────────────
+class InterConstraintsRuleType(str, Enum):
+    """参数见约护士类型枚举"""
+    SHAPE_BROADCAST = "shape_broadcast"
+    SHAPE_CHOICE = "shape_choice"
+    SHAPE_EQUALITY = "shape_equality"
+    SHAPE_DEPENDENCY = "shape_dependency"
+    SHAPE_VALUE_DEPENDENCY = "shape_value_dependency"
+    TYPE_DEPENDENCY = "type_dependency"
+    TYPE_EQUALITY = "type_equality"
+    VALUE_DEPENDENCY = "value_dependency"
+    FORMAT_EQUALITY = "format_equality"
+    PRESENCE_DEPENDENCY = "presence_dependency"
 
+# ==================== 通用值模型 ====================
 
 class ValueWithSrcText(BaseModel):
-    """带 src_text 溯源信息的参数属性取值。
+    """带 src_text 来源信息的通用值字段"""
+    value: bool | str | List[str] | List[List[int]] | List[Any] | int | float = Field(..., description="字段值")
+    src_text: str = Field(default="", description="来源文本")
+    type: str | None = Field(default=None, description="range_value的type说明，可取值：enum(表示枚举), range(表示范围)")
 
-    大多数参数属性形如 ``{"value": [...], "src_text": "..."}``，使用
-    ValueWithSrcText 可以让 Pydantic 自动将其解析为对象。
-    """
-
-    value: Optional[Union[str, int, float, bool, list, dict]] = None
-    type: Optional[str] = None
-    src_text: Optional[str] = None
+    model_config = {"extra": "forbid"}
 
 
 class ParamAttributes(BaseModel):
-    """单个参数在某一平台上的完整属性集合。"""
+    """参数信息模型（按平台区分，通用结构）"""
+    description: str = Field(default="", description="参数描述")
+    type: ValueWithSrcText | str = Field(..., description="参数类型")
+    format: ValueWithSrcText | str = Field(..., description="参数格式")
+    is_optional: ValueWithSrcText | str = Field(..., description="是否可选")
+    is_support_discontinuous: ValueWithSrcText | str = Field(..., description="是否支持非连续")
+    is_operator_param: ValueWithSrcText | str = Field(..., description="是否为算子参数")
+    array_length: ValueWithSrcText | str = Field(default="N/A", description="数组长度（可能为字符串或对象）")
+    dtype: ValueWithSrcText | str = Field(..., description="支持的数据类型")
+    dimensions: ValueWithSrcText | str = Field(..., description="维度信息")
+    allowed_range_value: ValueWithSrcText | str = Field(default_factory=lambda : ValueWithSrcText(value=[], src_text=""), description="允许的取值范围")
 
-    description: Optional[Union[str, ValueWithSrcText]] = None
-    type: Optional[Union[str, ValueWithSrcText]] = None
-    format: Optional[Union[str, ValueWithSrcText]] = None
-    is_optional: Optional[Union[bool, ValueWithSrcText]] = None
-    is_support_discontinuous: Optional[Union[str, ValueWithSrcText]] = None
-    is_operator_param: Optional[Union[bool, ValueWithSrcText]] = None
-    dimensions: Optional[Union[list, ValueWithSrcText]] = None
-    array_length: Optional[Union[str, ValueWithSrcText]] = None
-    dtype: Optional[Union[list, ValueWithSrcText]] = None
-    allowed_range_value: Optional[Union[list, ValueWithSrcText]] = None
-
-    model_config = {"extra": "allow"}
-
-
-# ─────────────────────────────────────────────────────────────────────
-# 参数间约束
-# ─────────────────────────────────────────────────────────────────────
+    model_config = {"extra": "forbid"}
 
 
-class InterConstraintsRuleType(Enum):
-    """参数间约束类型枚举。"""
-
-    SHAPE_EQUALITY = "shape_equality"
-    SHAPE_CHOICE = "shape_choice"
-    SHAPE_BROADCAST = "shape_broadcast"
-    SHAPE_DEPENDENCY = "shape_dependency"
-    TYPE_EQUALITY = "type_equality"
-    TYPE_DEPENDENCY = "type_dependency"
-    VALUE_DEPENDENCY = "value_dependency"
-    PRESENCE_DEPENDENCY = "presence_dependency"
-    FORMAT_EQUALITY = "format_equality"
-
+# ==================== 参数间约束 ====================
 
 class InterParamConstraint(BaseModel):
-    """参数间约束表达式。
+    """参数约束条目"""
+    expr_type: str = Field(..., description="约束表达式类型")
+    expr: str = Field(..., description="约束表达式")
+    relation_params: List[str] = Field(..., description="涉及的参数列表")
+    src_text: str = Field(default="", description="来源文本")
 
-    通过 ``relation_params`` 描述表达式涉及的参数，通过 ``expr_type`` 描述
-    约束类型，``expr`` 字段保存具体约束表达式字符串。
-    """
-
-    relation_params: List[str] = Field(default_factory=list)
-    expr_type: str = ""
-    expr: str = ""
-    description: str = ""
-
-    model_config = {"extra": "allow"}
+    model_config = {"extra": "forbid"}
 
 
-# ─────────────────────────────────────────────────────────────────────
-# 算子完整约束数据
-# ─────────────────────────────────────────────────────────────────────
+# ==================== 返回值信息 ====================
 
+class ReturnInfoItem(BaseModel):
+    """返回值信息"""
+    return_value: str = Field(..., description="返回值标识")
+    error_code: int = Field(..., description="错误码")
+    description: List[str] = Field(default_factory=list, description="错误描述列表")
+
+    model_config = {"extra": "forbid"}
+
+
+# ==================== 顶层模型 ====================
 
 class OperatorRule(BaseModel):
-    """算子完整约束数据顶层结构。
-
-    该对象对应 ``assemble_result`` 写出的 ``result.json`` 形态：
-
-    - ``operator_name``                算子名称
-    - ``inputs`` / ``outputs``         参数在每个平台上的属性集
-    - ``constraints_in_parameters``    参数间约束（per-platform）
-    - ``dtype_support_description``    每平台 dtype 组合
-    - ``format_support_description``   每平台 format 组合
-    - ``deterministic_computing``      平台确定性计算规则
-    - 其余字段透传保留，便于生成阶段使用
-    """
-
-    operator_name: str = ""
-    function_explanation: Any = None
-    product_support: List[str] = Field(default_factory=list)
-    function_signature: str = ""
-    deterministic_computing: Dict[str, Any] = Field(default_factory=dict)
-    inputs: Dict[str, Dict[str, ParamAttributes]] = Field(default_factory=dict)
-    outputs: Dict[str, Dict[str, ParamAttributes]] = Field(default_factory=dict)
-    constraints_in_parameters: Union[Dict[str, List[InterParamConstraint]], List[InterParamConstraint]] = Field(
-        default_factory=dict
+    """算子规则顶层模型（通用）"""
+    operator_name: str = Field(..., description="算子名称")
+    function_explanation: str = Field(..., description="功能说明")
+    product_support: List[str] = Field(..., description="支持的产品列表")
+    function_signature: str = Field(..., description="函数签名")
+    deterministic_computing: Dict[str, ValueWithSrcText] | str | ValueWithSrcText = Field(
+        default_factory=dict, description="确定性计算信息（按平台）"
     )
-    return_info: List[Any] = Field(default_factory=list)
-    dtype_support_description: Union[Dict[str, Any], List[Any]] = Field(default_factory=dict)
-    format_support_description: Union[Dict[str, Any], List[Any]] = Field(default_factory=dict)
+    inputs: Dict[str, Dict[str, ParamAttributes]] | Dict[str, ParamAttributes]= Field(
+        default_factory=dict, description="输入参数信息（参数名 -> 平台 -> 参数详情）"
+    )
+    outputs: Dict[str, Dict[str, ParamAttributes]] | Dict[str, ParamAttributes] = Field(
+        default_factory=dict, description="输出参数信息（参数名 -> 平台 -> 参数详情）"
+    )
+    constraints_in_parameters: Dict[str, List[InterParamConstraint]] | List[InterParamConstraint] = Field(
+        default_factory=dict, description="参数内约束（按平台）"
+    )
+    return_info: List[ReturnInfoItem] = Field(
+        default_factory=list, description="返回值信息"
+    )
+    dtype_support_description: Dict[str, List[Dict[str, str]]] | List[Dict[str, str]] = Field(
+        default_factory=dict, description="数据类型支持描述(按平台区分)"
+    )
+    format_support_description: Dict[str, List[Dict[str, str]]] | List[Dict[str, str]] = Field(
+        default_factory=dict, description="数据格式支持描述(按平台区分)"
+    )
 
-    model_config = {"extra": "allow"}
-
-
-__all__ = [
-    "ValueWithSrcText",
-    "ParamAttributes",
-    "InterConstraintsRuleType",
-    "InterParamConstraint",
-    "OperatorRule",
-]
+    model_config = {"extra": "forbid"}

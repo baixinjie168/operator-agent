@@ -8,10 +8,7 @@ import random
 from typing import List
 
 import numpy
-try:
-    import torch
-except ImportError:
-    torch = None
+import torch
 from scipy.stats import norm
 
 from agent.generators.common_utils.common_dispatcher import CommonDispatcher
@@ -51,7 +48,7 @@ class ParamRangeValueModel(CommonDispatcher):
         :param acl_data_type: acl中的数据类型字段，如BFLOAT16,FLOAT32
         :return: torch.float16
         """
-        data_dtype = DataMatchMap.get_torch_dtype_transfer_map().get(acl_data_type)
+        data_dtype = DataMatchMap.TENSOR_DTYPE_TRANSFER_TORCH_MAP.get(acl_data_type)
         if data_dtype is None:
             self.logger.error(
                 "Param range model, static model, can't analysis dtype, operator_name : %s, param name : %s",
@@ -176,7 +173,7 @@ class ParamRangeValueModel(CommonDispatcher):
         self.logger.debug(
             "Start generate param range by loguniform, operator name: %s, param name: %s, size: %s, data type: %s",
             self.operator_name, self.param_name, size, acl_data_type)
-        data_dtype = DataMatchMap.get_torch_dtype_transfer_map().get(acl_data_type, torch.float16)
+        data_dtype = DataMatchMap.TENSOR_DTYPE_TRANSFER_TORCH_MAP.get(acl_data_type, torch.float16)
         low = numpy.log(max(model_def.min, 1e-9))
         high = numpy.log(max(model_def.max, low + 1e-9))
         init_tensor = torch.randn(size=size, dtype=data_dtype)

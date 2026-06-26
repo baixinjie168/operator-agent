@@ -1,15 +1,9 @@
 # Copyright (c) Huawei Technologies Co., Ltd. 2023. All rights reserved.
 import logging
 from enum import Enum
+import torch
 import numpy as np
 from packaging import version
-
-try:
-    import torch
-    HAS_TORCH = True
-except ImportError:
-    torch = None
-    HAS_TORCH = False
 
 EXCEPT_TYPES = {
     "int": "int32",
@@ -54,43 +48,42 @@ class NpDtype(Enum):
                 raise e
 
 
-if HAS_TORCH:
-    class TorchDtype(Enum):
-        FP64 = torch.float64
-        FP32 = torch.float32
-        FP16 = torch.float16
-        BF16 = torch.bfloat16
-        HF32 = torch.float32
-        TF32 = torch.float32
-        INT64 = torch.int64
-        INT32 = torch.int32
-        INT16 = torch.int16
-        INT8 = torch.int8
-        UINT8 = torch.uint8
-        BOOL = torch.bool
-        COMPLEX64 = torch.complex64
-        COMPLEX128 = torch.complex128
-        FP8E4M3 = torch.float8_e4m3fn
-        FP8E5M2 = torch.float8_e5m2
+class TorchDtype(Enum):
+    FP64 = torch.float64
+    FP32 = torch.float32
+    FP16 = torch.float16
+    BF16 = torch.bfloat16
+    HF32 = torch.float32
+    TF32 = torch.float32
+    INT64 = torch.int64
+    INT32 = torch.int32
+    INT16 = torch.int16
+    INT8 = torch.int8
+    UINT8 = torch.uint8
+    BOOL = torch.bool
+    COMPLEX64 = torch.complex64
+    COMPLEX128 = torch.complex128
+    FP8E4M3 = torch.float8_e4m3fn
+    FP8E5M2 = torch.float8_e5m2
 
-        if version.parse(torch.__version__) >= version.parse("2.3"):
-            UINT64 = torch.uint64
-            UINT32 = torch.uint32
-            UINT16 = torch.uint16
+    if version.parse(torch.__version__) >= version.parse("2.3"):
+        UINT64 = torch.uint64
+        UINT32 = torch.uint32
+        UINT16 = torch.uint16
 
-        @classmethod
-        def get(cls, key):
-            try:
-                return cls[key.upper()].value
-            except KeyError as e:
-                if key in EXCEPT_TYPES:
-                    except_data = EXCEPT_TYPES[key]
-                    logging.error(
-                        f"Datatype: '{key}' is not excepted, replace with '{except_data}'"
-                    )
-                    return cls[except_data.upper()].value
-                else:
-                    raise e
+    @classmethod
+    def get(cls, key):
+        try:
+            return cls[key.upper()].value
+        except KeyError as e:
+            if key in EXCEPT_TYPES:
+                except_data = EXCEPT_TYPES[key]
+                logging.error(
+                    f"Datatype: '{key}' is not excepted, replace with '{except_data}'"
+                )
+                return cls[except_data.upper()].value
+            else:
+                raise e
 
 
 class StandardDtype(Enum):
