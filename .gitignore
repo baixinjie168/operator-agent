@@ -17,6 +17,10 @@ data
 batch_results
 operators
 logs
+temp
+batch_cases
+executtion_results
+
 
 # Data files
 /uploads/

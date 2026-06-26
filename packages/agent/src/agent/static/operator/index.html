@@ -2629,7 +2629,7 @@ body {
 
 <script>
 // ==================== CONFIG ====================
-const API_BASE = window.API_BASE || "http://127.0.0.1:8000";
+const API_BASE = window.API_BASE || `${location.protocol}//${location.hostname}:8000`;
 
 // ==================== DATA ====================
 const commercialDataByVersion = {
@@ -5084,11 +5084,36 @@ function _execViewCaseDetail(idx) {
     inputsTable += '</tbody></table>';
   }
 
-  // Execution log section - will be populated by actual execution logic
+  // Execution log section.
+  //
+  // PASS: simply say "执行成功".
+  // FAIL: surface the per-case failure message.  The backend writes
+  //       ``rec.failure_reason`` from the ATK xlsx into
+  //       ``exec_results.error_message`` (see execute.py::save_exec_results),
+  //       so reading ``report_records[idx].failure_reason`` here is the
+  //       exact same value the ``exec_results`` table holds.  Fall back to
+  //       the top-level ``error_message`` if the per-record reason is empty.
+  var reportRecords = (execResult.task_report_data && execResult.task_report_data.report_records) || [];
+  var rec = reportRecords[idx] || null;
+  var logBody;
+  if (isPass) {
+    logBody = '<span style="color:#3d8b4f;font-weight:600">'
+      + '<i class="fa-solid fa-circle-check" style="margin-right:4px"></i>执行成功'
+      + '</span>';
+  } else {
+    var perCaseReason = (rec && rec.failure_reason) ? String(rec.failure_reason).trim() : "";
+    var topLevelReason = execResult.error_message ? String(execResult.error_message).trim() : "";
+    var errMsg = perCaseReason || topLevelReason || "无错误信息";
+    logBody = '<div style="color:#ef4444;white-space:pre-wrap;word-break:break-word;line-height:1.6">'
+      + '<i class="fa-solid fa-triangle-exclamation" style="margin-right:4px"></i>'
+      + escHtml(errMsg)
+      + '</div>';
+  }
+
   var execLog = '<div style="margin-top:10px;padding:10px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:6px">'
     + '<div style="font-size:10px;font-weight:600;color:var(--text-muted);margin-bottom:6px"><i class="fa-solid fa-terminal" style="margin-right:4px"></i>执行日志</div>'
-    + '<div id="execLogContent" style="font-size:9px;color:var(--text-secondary);font-family:\'JetBrains Mono\',monospace;line-height:1.6;min-height:40px">'
-    + '<span style="color:var(--text-muted)">等待执行...</span>'
+    + '<div id="execLogContent" style="font-size:10px;color:var(--text-secondary);font-family:\'JetBrains Mono\',monospace;line-height:1.6;min-height:40px">'
+    + logBody
     + '</div></div>';
 
   document.getElementById("modalTitle").textContent = "用例详情 — TC" + String(idx + 1).padStart(2, "0");

@@ -91,9 +91,15 @@ def _truthy_pass(value: Any) -> bool:
 # ── Local cache directory ───────────────────────────────────────────────────
 
 def make_local_cache_dir(project_root: Path, operator_name: str, run_id: str) -> Path:
-    """Create a per-run directory for downloaded ATK artifacts."""
+    """Create a per-run directory for downloaded ATK artifacts.
+
+    Layout: ``<project_root>/executtion_results/<operator_name>/<run_id>/``
+    so each operator keeps its own folder and multiple runs of the same
+    operator do not overwrite each other.
+    """
+    safe_operator = re.sub(r"[^A-Za-z0-9_.-]", "_", operator_name).strip("_") or "operator"
     safe_run = re.sub(r"[^A-Za-z0-9_.-]", "_", run_id)[:48] or "run"
-    cache = project_root / "logs" / "atk_reports" / f"{operator_name}_{safe_run}"
+    cache = project_root / "executtion_results" / safe_operator / safe_run
     cache.mkdir(parents=True, exist_ok=True)
     return cache
 
@@ -222,8 +228,21 @@ def parse_xlsx_report(report_dir: Path) -> TaskReportData:
                     except (json.JSONDecodeError, TypeError, ValueError):
                         case_json_obj = {"raw": str(case_json_raw)}
 
+            # Prefer the test case's DB id (carried inside case_json.id),
+            # since that's the authoritative id used elsewhere in the
+            # pipeline (exec_results.case_id, test_cases.id, etc.).  Fall
+            # back to the xlsx's id-style column when case_json has no id
+            # — some ATK reports omit it.
+            xlsx_id = (str(_cell("id")).strip() if _cell("id") is not None else "") or ""
+            case_json_id = ""
+            if isinstance(case_json_obj, dict):
+                raw_cj_id = case_json_obj.get("id")
+                if raw_cj_id is not None and str(raw_cj_id).strip():
+                    case_json_id = str(raw_cj_id).strip()
+            record_id = case_json_id or xlsx_id or None
+
             record = ReportRecord(
-                id=(str(_cell("id")).strip() if _cell("id") is not None else None) or None,
+                id=record_id,
                 run_result=(str(_cell("run_result")).strip() if _cell("run_result") is not None else None),
                 failure_reason=(str(_cell("failure_reason")).strip() if _cell("failure_reason") is not None else None),
                 case_json=case_json_obj,
@@ -261,26 +280,33 @@ async def collect_remote_artifacts(
 ) -> tuple[TaskReportData, str, Path | None]:
     """Download report + log artifacts and parse the xlsx.
 
+    The remote layout still groups xlsx files under ``report/`` (that's
+    ATK's canonical structure and we can't change it), but locally we
+    flatten everything into ``cache_dir`` so the operator's per-run
+    folder holds ``atk.log``, ``result.json`` and the xlsx reports
+    side-by-side.
+
     Returns ``(report_data, log_content, latest_xlsx_local_path)``.
     Never raises; errors are captured into the returned object.
     """
     remote_report_dir = f"{remote_output_dir}/report"
     remote_log_path = f"{remote_output_dir}/log/atk.log"
 
-    local_report_dir = cache_dir / "report"
     local_log_path = cache_dir / "atk.log"
-    local_report_dir.mkdir(parents=True, exist_ok=True)
+    cache_dir.mkdir(parents=True, exist_ok=True)
 
-    # Best-effort: list entries and pull each one (so we keep file names
-    # for the frontend to surface / download).
+    # Best-effort: list entries and pull each one straight into cache_dir,
+    # preserving ATK's original file names.
     remote_entries = await sftp_list_dir(conn, remote_report_dir)
     for entry in remote_entries:
-        await sftp_download_file(conn, f"{remote_report_dir}/{entry}", local_report_dir / entry)
+        await sftp_download_file(conn, f"{remote_report_dir}/{entry}", cache_dir / entry)
 
     await sftp_download_file(conn, remote_log_path, local_log_path)
 
-    # Parse xlsx
-    report_data = parse_xlsx_report(local_report_dir)
+    # Parse xlsx — ``parse_xlsx_report`` globs ``*.xlsx`` in whatever
+    # directory we hand it, so passing cache_dir directly is equivalent
+    # to passing the old ``cache_dir/report`` subdir.
+    report_data = parse_xlsx_report(cache_dir)
     latest_xlsx = (
         Path(report_data.report_path) if report_data.report_path else None
     )
