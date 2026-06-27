@@ -283,7 +283,7 @@ async def exec_run_atk_node(state: PipelineState) -> dict[str, Any]:
 
     # ── Persist the structured ExecutionResult alongside the raw artifacts ──
     # Sibling to atk.log + report/*.xlsx so the local cache dir
-    # (``executtion_results/<operator_name>/<run_id>/``) carries everything
+    # (``execution_results/<operator_name>/<run_id>/``) carries everything
     # an operator needs to inspect / replay without re-running ATK.
     # Best-effort: never abort the main flow on a write failure.
     try:

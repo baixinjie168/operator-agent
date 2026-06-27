@@ -244,6 +244,185 @@ def _has_named_inputs(cases: list[dict]) -> bool:
     return False
 
 
+# ---------------------------------------------------------------------------
+# NZ (FRACTAL_NZ) 格式检测与辅助
+# ---------------------------------------------------------------------------
+
+def _flatten_shape(shape):
+    """将可能嵌套的 shape 列表展平为一维 list。"""
+    if shape is None:
+        return []
+    result = []
+    if isinstance(shape, (list, tuple)):
+        for s in shape:
+            if isinstance(s, (list, tuple)):
+                result.extend(_flatten_shape(s))
+            else:
+                result.append(s)
+    else:
+        result.append(shape)
+    return result
+
+
+def _inverse_perm(perm):
+    """计算排列的逆排列。"""
+    inv = [0] * len(perm)
+    for i, p in enumerate(perm):
+        inv[p] = i
+    return inv
+
+
+def _nz_forward_perm(batch_dims):
+    """NZ 正向排列索引（稠密 reshape → NZ 内存布局）。
+
+    对于最后 4 维 [k1, k0, n1, n0]，正向排列 [2, 0, 1, 3] 将其变为
+    [n1, k1, k0, n0]（NZ 存储顺序），batch 维度保持不变。
+    """
+    return list(range(batch_dims)) + [batch_dims + i for i in [2, 0, 1, 3]]
+
+
+def _nz_inverse_perm(batch_dims):
+    """NZ 逆排列索引（NZ → 稠密 reshape 前的排列）。"""
+    return _inverse_perm(_nz_forward_perm(batch_dims))
+
+
+def _find_k_source(nz_param, json_inputs, sig_params):
+    """
+    确定哪个输入张量提供 Reduce 维度 k。
+    返回 (k_source_name, k_source_axis) 或 (None, None)。
+
+    - AddmmWeightNz: out = beta*self + alpha*(mat1 @ mat2)，k_source = mat1，轴 -1
+    - MatmulWeightNz / BatchMatMulWeightNz: out = self @ mat2，k_source = self
+      (batch 3D → axis -1；非 batch 2D → axis -2)
+    - 默认：第一个不是 NZ 张量的其他 tensor 输入
+    """
+    nz_name = nz_param.get("name", "")
+    nz_dims = nz_param.get("nz_dims", 4)
+    sig_names = {p["name"] for p in sig_params}
+
+    # AddmmWeightNz: mat1 @ mat2，k 来自 mat1 的最后一维
+    if "mat1" in sig_names and nz_name == "mat2":
+        return "mat1", -1
+
+    if "self" in sig_names:
+        if nz_dims >= 5:
+            return "self", -1
+        return "self", -2
+
+    for inp in json_inputs:
+        if not isinstance(inp, dict):
+            continue
+        iname = inp.get("name", "")
+        if not iname or iname == nz_name:
+            continue
+        if (inp.get("format") or "").upper() == "NZ":
+            continue
+        if inp.get("type") in ("tensor", "tensors"):
+            return iname, -1
+    return None, None
+
+
+def _detect_nz_params(cases, sig_params):
+    """
+    检测 NZ 格式张量参数，返回描述 NZ 参数的字典列表。
+
+    检测方式:
+      1. JSON 输入定义中包含 "format": "NZ"
+      2. 算子名称包含 WeightNz（不区分大小写）且该张量是权重参数
+         （名称为 mat2 / weight / B，或维度最多的张量）
+
+    每个元素:
+      {"name": str, "nz_dims": int, "batch_dims": int,
+       "k_source": str|None, "k_source_axis": int|None}
+    """
+    json_inputs = _collect_all_inputs(cases)
+
+    op_name = ""
+    for case in cases:
+        n = case.get("aclnn_name") or case.get("name", "")
+        if n:
+            op_name = n
+            break
+
+    nz_params = []
+
+    # 方式 1: 显式 format == "NZ"
+    for inp in json_inputs:
+        if not isinstance(inp, dict):
+            continue
+        if (inp.get("format") or "").upper() != "NZ":
+            continue
+        flat_shape = _flatten_shape(inp.get("shape"))
+        if len(flat_shape) < 4:
+            continue
+        nz_dims = len(flat_shape)
+        batch_dims = max(nz_dims - 4, 0)
+        nz_p = {
+            "name": inp.get("name", ""),
+            "nz_dims": nz_dims,
+            "batch_dims": batch_dims,
+        }
+        k_src, k_axis = _find_k_source(nz_p, json_inputs, sig_params)
+        nz_p["k_source"] = k_src
+        nz_p["k_source_axis"] = k_axis
+        nz_params.append(nz_p)
+
+    # 方式 2: 算子名含 WeightNz 且未显式标记
+    if not nz_params and op_name and "weightnz" in op_name.lower():
+        weight_names = {"mat2", "weight", "B"}
+        candidate = None
+        for inp in json_inputs:
+            if isinstance(inp, dict) and inp.get("name") in weight_names:
+                candidate = inp
+                break
+        if candidate is None:
+            best_dims = -1
+            for inp in json_inputs:
+                if not isinstance(inp, dict):
+                    continue
+                if inp.get("type") not in ("tensor", "tensors"):
+                    continue
+                flat_shape = _flatten_shape(inp.get("shape"))
+                if len(flat_shape) > best_dims:
+                    best_dims = len(flat_shape)
+                    candidate = inp
+        if candidate is not None:
+            flat_shape = _flatten_shape(candidate.get("shape"))
+            nz_dims = len(flat_shape)
+            batch_dims = max(nz_dims - 4, 0)
+            nz_p = {
+                "name": candidate.get("name", ""),
+                "nz_dims": nz_dims,
+                "batch_dims": batch_dims,
+            }
+            k_src, k_axis = _find_k_source(nz_p, json_inputs, sig_params)
+            nz_p["k_source"] = k_src
+            nz_p["k_source_axis"] = k_axis
+            nz_params.append(nz_p)
+
+    return nz_params
+
+
+def _detect_comm_params(sig_params):
+    """
+    检测通信域参数（const char* group/groupEp/groupTp），返回参数名列表。
+
+    ACLNN 分布式算子的通信域参数需要传入 HCCL 通信域名称字符串（commName），
+    但 ATK 在 JSON 中可能传入 PyTorch ProcessGroup 对象或任意值。
+    生成器自动生成代码：从分布式上下文获取 commName，不依赖 JSON 传入值。
+
+    检测条件: 参数名以 "group" 开头（不区分大小写）且 raw_type 包含 "char*"
+    覆盖: group（单通信域）、groupEp（专家并行）、groupTp（张量并行）
+    """
+    comm_params = []
+    for p in sig_params:
+        name = p.get("name", "")
+        raw_type = p.get("raw_type", "")
+        if name.lower().startswith("group") and "char" in raw_type:
+            comm_params.append(name)
+    return comm_params
+
+
 def generate_api_class_for_op(cases: list[dict], signature: str, op_name: str) -> str:
     """
     为同一个算子的所有用例生成一个通用的 ATK API py 文件。
@@ -295,21 +474,42 @@ def generate_api_class_for_op(cases: list[dict], signature: str, op_name: str) -
 
     aclnn_class_name = _to_class_name(aclnn_api_type)
 
+    # NZ 格式张量检测
+    nz_params = _detect_nz_params(cases, sig_params)
+    has_nz = bool(nz_params)
+
+    # 通信域参数检测（const char* group）
+    comm_params = _detect_comm_params(sig_params)
+    has_comm = bool(comm_params)
+
+    # 始终置空参数检测（如 alltoAllAxesOptional，文档说"传入空时默认按[-2,-1]处理"）
+    _ALWAYS_NULL_NAMES = {"alltoAllAxesOptional"}
+    always_null_params = [p["name"] for p in sig_params if p["name"] in _ALWAYS_NULL_NAMES]
+    has_always_null = bool(always_null_params)
+
     lines = []
     lines.append("# Copyright (c) Huawei Technologies Co., Ltd. 2023. All rights reserved.")
     lines.append("# Auto-generated by generator.py")
     lines.append("")
     lines.append("import copy")
     lines.append("import ctypes")
+    if has_nz:
+        lines.append("import os")
     lines.append("")
     lines.append("import torch")
+    if has_nz:
+        lines.append("import torch.nn.functional as F")
     lines.append('from atk.common.log import Logger')
     lines.append("from atk.configs.dataset_config import InputDataset")
     lines.append("from atk.configs.results_config import TaskResult")
     lines.append("from atk.tasks.api_execute import register")
     lines.append("from atk.tasks.api_execute.aclnn_base_api import AclnnBaseApi")
     lines.append("from atk.tasks.api_execute.base_api import BaseApi")
-    lines.append("from atk.tasks.backends.lib_interface.acl_wrapper import AclTensorStruct, AclTensorlistStruct")
+    if has_nz:
+        lines.append("from atk.tasks.backends.lib_interface.acl_wrapper import AclTensorStruct, AclTensorlistStruct, AclFormat, nnopbase")
+        lines.append('os.environ["PYTORCH_NO_NPU_MEMORY_CACHING"] = "1"')
+    else:
+        lines.append("from atk.tasks.backends.lib_interface.acl_wrapper import AclTensorStruct, AclTensorlistStruct")
     lines.append("")
     lines.append('logging = Logger().get_logger()')
     lines.append("")
@@ -333,6 +533,8 @@ def generate_api_class_for_op(cases: list[dict], signature: str, op_name: str) -
     lines.append("        'uint32_t': ctypes.c_uint32, 'uint64_t': ctypes.c_uint64,")
     lines.append("        'bool': ctypes.c_bool,")
     lines.append("    }")
+    if has_always_null:
+        lines.append(f"    _ALWAYS_NULL_PARAMS = {repr(set(always_null_params))}")
     lines.append("")
     lines.append("    def _get_null_for_param(self, name, raw_type):")
     lines.append("        \"\"\"为缺失的可选参数返回对应 ctypes 类型的 NULL，通过签名校验。\"\"\"")
@@ -362,11 +564,158 @@ def generate_api_class_for_op(cases: list[dict], signature: str, op_name: str) -
     lines.append("        ctype = type_to_ctype.get(raw_type, ctypes.c_void_p)")
     lines.append("        return ctype(0)")
     lines.append("")
+
+    # _get_kwarg: 从 input_data 中按名称多模式查找参数（NZ 和非 NZ 路径共用）
+    lines.append("    def _get_kwarg(self, input_data, name):")
+    lines.append('        """从 input_data 中按名称多模式查找参数。"""')
+    lines.append("        # Mode 1: kwargs 精确匹配")
+    lines.append("        kwarg = input_data.kwargs.get(name)")
+    lines.append("        # Mode 2: kwargs 不区分大小写匹配")
+    lines.append("        if kwarg is None and input_data.kwargs:")
+    lines.append("            _name_lower = name.lower()")
+    lines.append("            for _k, _v in input_data.kwargs.items():")
+    lines.append("                if isinstance(_k, str) and _k.lower() == _name_lower and _v is not None:")
+    lines.append("                    kwarg = _v")
+    lines.append("                    break")
+    lines.append("        # Mode 3: args 字典搜索")
+    lines.append("        if kwarg is None and input_data.args:")
+    lines.append("            _name_lower = name.lower()")
+    lines.append("            for _arg in input_data.args:")
+    lines.append("                if isinstance(_arg, dict):")
+    lines.append("                    _val = _arg.get(name)")
+    lines.append("                    if _val is not None:")
+    lines.append("                        kwarg = _val")
+    lines.append("                        break")
+    lines.append("                    for _ak, _av in _arg.items():")
+    lines.append("                        if isinstance(_ak, str) and _ak.lower() == _name_lower and _av is not None:")
+    lines.append("                            kwarg = _av")
+    lines.append("                            break")
+    lines.append("                if kwarg is not None:")
+    lines.append("                    break")
+    lines.append("        return kwarg")
+    lines.append("")
+
+    # get_format: 为 NZ 张量返回 ACL_FORMAT_FRACTAL_NZ
+    if has_nz:
+        lines.append("    def get_format(self, input_data: InputDataset, index=None, name=None):")
+        for nz_p in nz_params:
+            lines.append(f'        if name == "{nz_p["name"]}":')
+            lines.append("            return AclFormat.ACL_FORMAT_FRACTAL_NZ")
+        lines.append("        return AclFormat.ACL_FORMAT_ND")
+        lines.append("")
+
+    # get_storage_shape: 返回 NZ 存储形状（由 init_by_input_data 中的 _nz_storage_shape 设置）
+    if has_nz:
+        nz_names_repr = repr([nz_p["name"] for nz_p in nz_params])
+        lines.append("    def get_storage_shape(self, input_data: InputDataset, index=None, name=None):")
+        lines.append(f"        _nz_names = {nz_names_repr}")
+        lines.append("        if name is not None and name in _nz_names and input_data.kwargs and name in input_data.kwargs:")
+        lines.append("            t = input_data.kwargs[name]")
+        lines.append("            if t.dim() >= 4:")
+        lines.append("                # 返回转换后的 NZ storage shape（由 _nz_storage_shape 设置）")
+        lines.append('                return getattr(self, "_nz_storage_shape", torch.Size(list(t.shape)))')
+        lines.append("        elif name is not None and input_data.kwargs and name in input_data.kwargs:")
+        lines.append("            return input_data.kwargs[name].shape")
+        lines.append("        return None")
+        lines.append("")
+
     lines.append("    def init_by_input_data(self, input_data: InputDataset):")
+    if has_nz:
+        lines.append("        import torch_npu")
     lines.append("        input_args = []")
     lines.append("        output_packages = []")
     lines.append("        _output_idx = 0  # 当前处理到第几个 output 参数")
     lines.append("")
+
+    if has_comm:
+        comm_names_repr = repr(comm_params)
+        lines.append("        # 通信域参数处理：从分布式上下文获取 HCCL 通信域名称，不依赖 JSON 传入值")
+        lines.append("        if hasattr(self, 'dist_task_info'):")
+        lines.append("            import torch.distributed as dist")
+        lines.append("            _rank_id = self.dist_task_info.rank")
+        lines.append(f"            for _comm_param in {comm_names_repr}:")
+        lines.append("                _pg = self._get_kwarg(input_data, _comm_param)")
+        lines.append("                # JSON 传入的值可能不是 ProcessGroup（任意字符串/None），用 world group 兜底")
+        lines.append("                if _pg is None or not hasattr(_pg, '_get_backend'):")
+        lines.append("                    _pg = dist.group.WORLD")
+        lines.append("                if _pg is not None:")
+        lines.append("                    input_data.kwargs[_comm_param] = _pg._get_backend(torch.device(\"npu\")).get_hccl_comm_name(_rank_id)")
+        lines.append("")
+
+    if has_nz:
+        lines.append("        # NZ 张量预处理：ND → 稠密 → NZ 内存布局")
+        lines.append("        _nz_converted = {}")
+        lines.append("        _self_converted = {}")
+        for nz_p in nz_params:
+            _nz_name = nz_p["name"]
+            _k_src = nz_p["k_source"]
+            _k_axis = nz_p["k_source_axis"]
+            _bd = nz_p["batch_dims"]
+            _inv_idx = _nz_inverse_perm(_bd)
+            _fwd_idx = _nz_forward_perm(_bd)
+            lines.append(f'        _nz_in = self._get_kwarg(input_data, "{_nz_name}")')
+            if _k_src:
+                lines.append(f'        _k_src = self._get_kwarg(input_data, "{_k_src}")')
+            else:
+                lines.append("        _k_src = None")
+            lines.append('        _self_in = self._get_kwarg(input_data, "self")')
+            lines.append('        _self_transposed = self._get_kwarg(input_data, "self_transposed") or False')
+            lines.append('        _mat2_transposed = self._get_kwarg(input_data, "mat2_transposed") or False')
+            lines.append("        if _self_in is not None and _self_transposed:")
+            lines.append('            _self_converted["self"] = _self_in.transpose(1, 2)')
+            lines.append("        if _nz_in is not None and _nz_in.dim() >= 4:")
+            lines.append("            _bdims = list(_nz_in.shape[:-4])")
+            lines.append("            if _mat2_transposed:")
+            lines.append("                # 转置 NZ: (b, k1, n1, n0, k0) where n0=16, k0=16")
+            lines.append("                _k1 = _nz_in.shape[-4]")
+            lines.append("                _n1 = _nz_in.shape[-3]")
+            lines.append("                _n0 = _nz_in.shape[-2]")
+            lines.append("                _k0 = _nz_in.shape[-1]")
+            lines.append("                _k = _k1 * _k0")
+            lines.append("                _n = _n1 * _n0")
+            lines.append(f"                _inv_idx_t = {_inv_idx}")
+            lines.append("                _dense_padded = _nz_in.permute(_inv_idx_t).reshape(*_bdims, _k1 * _k0, _n1 * _n0)")
+            lines.append("                _outer = _k1 * _k0")
+            lines.append("                _inner = _n1 * _n0")
+            lines.append("            else:")
+            lines.append("                # 非转置 NZ: (b, n1, k1, k0, n0) where k0=16, n0=16")
+            lines.append("                _n1 = _nz_in.shape[-4]")
+            lines.append("                _k1 = _nz_in.shape[-3]")
+            lines.append("                _k0 = _nz_in.shape[-2]")
+            lines.append("                _n0 = _nz_in.shape[-1]")
+            lines.append("                _k = _k1 * _k0")
+            lines.append("                _n = _n1 * _n0")
+            lines.append(f"                _inv_idx_nt = {_inv_idx}")
+            lines.append("                _dense_padded = _nz_in.permute(_inv_idx_nt).reshape(*_bdims, _k1 * _k0, _n1 * _n0)")
+            lines.append("                _outer = _k1 * _k0")
+            lines.append("                _inner = _n1 * _n0")
+            lines.append('            _out_t = self._get_kwarg(input_data, "out")')
+            lines.append("            if _out_t is not None:")
+            lines.append("                _n = _out_t.shape[-1]")
+            lines.append("            _dense = _dense_padded[..., :_k, :_n]")
+            lines.append("            _outer = ((_k + 15) // 16) * 16")
+            lines.append("            _inner = ((_n + 15) // 16) * 16")
+            lines.append("            _pad_t = F.pad(_dense, (0, _inner - _n, 0, _outer - _k))")
+            lines.append("            _reshaped = _pad_t.reshape(*_bdims, _outer // 16, 16, _inner // 16, 16)")
+            lines.append(f"            _fwd_idx = {_fwd_idx}")
+            lines.append("            _nz_t = _reshaped.permute(_fwd_idx).reshape(*_bdims, _outer, _inner).contiguous().npu()")
+            lines.append(f'            _nz_converted["{_nz_name}"] = _nz_t')
+            lines.append("            _k1_p = _outer // 16")
+            lines.append("            _n1_p = _inner // 16")
+            lines.append("            if _mat2_transposed:")
+            lines.append("                self._nz_storage_shape = torch.Size([_bdims[0] if _bdims else 1, _k1_p, _n1_p, 16, 16])")
+            lines.append("            else:")
+            lines.append("                self._nz_storage_shape = torch.Size([_bdims[0] if _bdims else 1, _n1_p, _k1_p, 16, 16])")
+        lines.append("")
+        lines.append("        # 转置时修正 output shape（CPU golden shape 不对 + NPU 用 NZ padding 后 n 校验 out）")
+        lines.append("        if _self_transposed or _mat2_transposed:")
+        lines.append('            _out_json = self._get_kwarg(input_data, "out")')
+        lines.append("            if _out_json is not None:")
+        lines.append("                _out_list = list(_out_json.shape)")
+        lines.append("                _out_n_padded = ((_out_list[-1] + 15) // 16) * 16")
+        lines.append("                self._correct_out_shape = torch.Size([_out_list[0], _out_list[-2], _out_n_padded])")
+        lines.append("")
+
     lines.append("        # JSON inputs 参数顺序可能与签名不一致，统一通过 key 名称提取")
     lines.append("        # 取值顺序: kwargs key → args dict key → NULL")
     lines.append("        # 按签名中的完整参数顺序构建参数列表，保证 output tensor 在正确位置")
@@ -379,6 +728,10 @@ def generate_api_class_for_op(cases: list[dict], signature: str, op_name: str) -
     lines.append("            if _kind == 'output':")
     lines.append("                if _output_idx < len(self.task_result.output_info_list):")
     lines.append("                    output_data = self.task_result.output_info_list[_output_idx]")
+    if has_nz:
+        lines.append("                    # 转置时覆盖 output shape 为 JSON 中的正确值")
+        lines.append('                    if _name == "out" and hasattr(self, "_correct_out_shape"):')
+        lines.append("                        output_data.shape = list(self._correct_out_shape)")
     lines.append("                    # 如果签名要求 aclTensorList* / aclScalarList* 类型的输出，需要从 output_info_list 中")
     lines.append("                    # 收集对应数量的 OutputData，打包成 list 传给 convert_output_data，")
     lines.append("                    # 这样才会走 create_x_list 分支创建正确的 List 类型（ATK update_output_info_list 会扁平化嵌套 list）")
@@ -414,42 +767,41 @@ def generate_api_class_for_op(cases: list[dict], signature: str, op_name: str) -
     lines.append("                    input_args.append(self._get_null_for_param(_name, _raw_type))")
     lines.append("                _output_idx += 1")
     lines.append("            else:")
-    lines.append("                # Mode 1: exact key match in kwargs")
-    lines.append("                kwarg = input_data.kwargs.get(_name)")
-    lines.append("                # Mode 2: case-insensitive key match in kwargs")
-    lines.append("                if kwarg is None and input_data.kwargs:")
-    lines.append("                    _name_lower = _name.lower()")
-    lines.append("                    for _k, _v in input_data.kwargs.items():")
-    lines.append("                        if isinstance(_k, str) and _k.lower() == _name_lower and _v is not None:")
-    lines.append("                            kwarg = _v")
-    lines.append("                            break")
-    lines.append("                # Mode 3: search by key in input_data.args (dict entries)")
-    lines.append("                if kwarg is None and input_data.args:")
-    lines.append("                    for _arg in input_data.args:")
-    lines.append("                        if isinstance(_arg, dict):")
-    lines.append("                            _val = _arg.get(_name)")
-    lines.append("                            if _val is not None:")
-    lines.append("                                kwarg = _val")
-    lines.append("                                break")
-    lines.append("                            # case-insensitive fallback")
-    lines.append("                            _name_lower = _name.lower()")
-    lines.append("                            for _ak, _av in _arg.items():")
-    lines.append("                                if isinstance(_ak, str) and _ak.lower() == _name_lower and _av is not None:")
-    lines.append("                                    kwarg = _av")
-    lines.append("                                    break")
-    lines.append("                        if kwarg is not None:")
-    lines.append("                            break")
-    lines.append("                if kwarg is not None:")
-    lines.append("                    data = self.backend.convert_input_data(kwarg, name=_name)")
-    lines.append("                    # 对整数标量 attr，ATK convert_input_data 可能返回 c_long")
-    lines.append("                    # 需要根据签名 raw_type 转回正确的 ctypes 类型")
-    lines.append("                    # 只对整数类型做校正，float/double 已由 ATK 正确处理")
-    lines.append("                    _INT_TYPES = {'int8_t', 'int32_t', 'int64_t', 'uint8_t', 'uint32_t', 'uint64_t', 'bool'}")
-    lines.append("                    if _raw_type in _INT_TYPES and isinstance(data, list) and len(data) == 1:")
-    lines.append("                        data = [self._ATTR_TYPE_MAP[_raw_type](int(getattr(data[0], 'value', data[0])))]")
-    lines.append("                    input_args.extend(data)")
-    lines.append("                else:")
-    lines.append("                    input_args.append(self._get_null_for_param(_name, _raw_type))")
+    lines.append("                _val = self._get_kwarg(input_data, _name)")
+    if has_always_null:
+        lines.append("                if _name in self._ALWAYS_NULL_PARAMS:")
+        lines.append("                    input_args.append(self._get_null_for_param(_name, _raw_type))")
+    if has_nz:
+        if has_always_null:
+            lines.append("                elif _name in _nz_converted:")
+        else:
+            lines.append("                if _name in _nz_converted:")
+        lines.append("                    _nz_shape = self.get_storage_shape(input_data, name=_name)")
+        lines.append("                    _acl = nnopbase.create_acl_tensor(_nz_converted[_name], AclFormat.ACL_FORMAT_FRACTAL_NZ, _nz_shape)")
+        lines.append("                    input_args.append(_acl)")
+        lines.append("                elif _name in _self_converted:")
+        lines.append("                    data = self.backend.convert_input_data(_self_converted[_name], name=_name)")
+        lines.append("                    input_args.extend(data)")
+        lines.append("                elif _val is not None:")
+        lines.append("                    data = self.backend.convert_input_data(_val, name=_name)")
+        lines.append("                    _INT_TYPES = {'int8_t', 'int32_t', 'int64_t', 'uint8_t', 'uint32_t', 'uint64_t', 'bool'}")
+        lines.append("                    if _raw_type in _INT_TYPES and isinstance(data, list) and len(data) == 1:")
+        lines.append("                        data = [self._ATTR_TYPE_MAP[_raw_type](int(getattr(data[0], 'value', data[0])))]")
+        lines.append("                    input_args.extend(data)")
+        lines.append("                else:")
+        lines.append("                    input_args.append(self._get_null_for_param(_name, _raw_type))")
+    else:
+        if has_always_null:
+            lines.append("                elif _val is not None:")
+        else:
+            lines.append("                if _val is not None:")
+        lines.append("                    data = self.backend.convert_input_data(_val, name=_name)")
+        lines.append("                    _INT_TYPES = {'int8_t', 'int32_t', 'int64_t', 'uint8_t', 'uint32_t', 'uint64_t', 'bool'}")
+        lines.append("                    if _raw_type in _INT_TYPES and isinstance(data, list) and len(data) == 1:")
+        lines.append("                        data = [self._ATTR_TYPE_MAP[_raw_type](int(getattr(data[0], 'value', data[0])))]")
+        lines.append("                    input_args.extend(data)")
+        lines.append("                else:")
+        lines.append("                    input_args.append(self._get_null_for_param(_name, _raw_type))")
     lines.append("")
     lines.append("        return input_args, output_packages")
     lines.append("")
