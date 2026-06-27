@@ -6,7 +6,7 @@
 """
 from dataclasses import dataclass
 from enum import Enum
-from typing import Union, List, Dict, Optional
+from typing import Union, List, Dict, Optional, Any
 
 from pydantic import BaseModel
 
@@ -45,6 +45,10 @@ class ParamAttrName(Enum):
     VALUE = "value"
     IS_OPTIONAL = "is_optional"
     PARAM_FORMAT = "format"
+
+class ParamRangeValueType(Enum):
+    RANGE = "range"
+    ENUM = "enum"
 
 
 class RunPlatform(Enum):
@@ -162,7 +166,7 @@ class ParameterPropertyData(BaseModel):
     shape_property: ParameterShapeProperty = None
     dtype: str = ParamModelConfig.DEFAULT_PARAM_DTYPE
     format: str | None = None
-    range_value_profile: str | int | float | bool | None
+    range_value_profile: Any
     memory_continuity: bool = False
     length: int | None = None
     is_optional: bool = True

@@ -5,6 +5,7 @@
 修改记录：2026/1/5 19:44
 功能：参数约束关系实现
 """
+import re
 from collections import defaultdict
 from typing import List, Dict
 
@@ -122,8 +123,10 @@ class ParamConstraintUtils(CommonDispatcher):
             if relation_type in ParamModelConfig.STRICT_CONSTRAINT_TYPE:
                 customize_constraints.append(constraint_relation)
             else:
-                if not self.is_param_all_input(constraint_relation.relation_params):
-                    continue
+                # 这里用于筛选输出参数，如果约束表达式中包含输出参数，此表达式不进行处理，但有些情况下，表达式中除了关于输出参数的表达式，
+                # 还可能有只包含输入参数的子表达式，如果不处理可能会导致部分表达式不生效
+                # if not self.is_param_all_input(constraint_relation.relation_params):
+                #     continue
                 logger.debug(f"Relation type : {relation_type}, use z3 solver")
                 z3_constraints.append(constraint_relation)
         self.solve_z3_constraints(z3_constraints)
@@ -151,9 +154,11 @@ class ParamConstraintUtils(CommonDispatcher):
         """
         param_attribute = self.operator_rule_data.inputs.get(param_name)
         if param_attribute is None:
+            param_attribute = self.operator_rule_data.outputs.get(param_name)
+        if param_attribute is None:
             logger.error(f"Param : {param_name}, dtype domain is None")
             return []
-        dtype_domain = DataHandleUtil.get_relevant_attribute_value(param_name, param_attribute.dtype, "dtype")
+        dtype_domain, _ = DataHandleUtil.get_relevant_attribute_value(param_name, param_attribute.dtype, "dtype")
         if dtype_domain is None:
             logger.error(f"Param : {param_name}, dtype domain is not relevant")
             return []
@@ -167,9 +172,11 @@ class ParamConstraintUtils(CommonDispatcher):
         """
         param_attribute = self.operator_rule_data.inputs.get(param_name)
         if param_attribute is None:
+            param_attribute = self.operator_rule_data.outputs.get(param_name)
+        if param_attribute is None:
             logger.warning(f"Param : {param_name}, format domain is None")
             return []
-        format_domain = DataHandleUtil.get_relevant_attribute_value(param_name, param_attribute.format, "format")
+        format_domain, _ = DataHandleUtil.get_relevant_attribute_value(param_name, param_attribute.format, "format")
         if format_domain is None:
             logger.warning(f"Param : '{param_name}', format domain is not relevant")
             return []
@@ -188,7 +195,7 @@ class ParamConstraintUtils(CommonDispatcher):
             return expr
         for key, value in DataMatchMap.ACL_DTYPE_TRANSFER_TENSOR_MAP.items():
             if isinstance(expr, str):
-                expr = expr.replace(key, value)
+                expr = re.sub(rf"\b{re.escape(key)}\b", value, expr)
         return expr
 
     def check_expr_conflicts(self, expr_list: List[str], param_attr="") -> bool:
@@ -261,10 +268,11 @@ class ParamConstraintUtils(CommonDispatcher):
         static_range_value_expr_list = []
         relation_params = list(self.case_input_map.keys())
         for param_name in relation_params:
-            param_range_value_constraint = DataHandleUtil.get_relevant_attribute_value(param_name,
-                                                                                       self.operator_rule_data.inputs.get(
-                                                                                           param_name).allowed_range_value,
-                                                                                       "allowed_range_value")
+            param_attr = self.operator_rule_data.inputs.get(param_name)
+            if param_attr is None:
+                param_attr = self.operator_rule_data.outputs.get(param_name)
+            param_range_value_constraint, _ = DataHandleUtil.get_relevant_attribute_value(
+                param_name, param_attr.allowed_range_value if param_attr else None, "allowed_range_value")
             if param_range_value_constraint is None:
                 continue
             for value_rule in param_range_value_constraint:
@@ -275,6 +283,9 @@ class ParamConstraintUtils(CommonDispatcher):
                 elif isinstance(value_rule, (int, float, bool)):
                     param_range_value_expr_list.append(f"{param_name}.range_value == {value_rule}")
                 elif isinstance(value_rule, str):
+                    if value_rule.strip() in ("None", ""):
+                        logger.warning(f"Skip invalid range value expression: '{value_rule}'")
+                        continue
                     value_rule = ParamConstraintUtils.adapter_dtype_in_expr(value_rule)
                     if ExpressionPreprocessor.validate_expression(value_rule):
                         param_range_value_expr_list.append(value_rule)

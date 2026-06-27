@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import io
 import json
 import logging
@@ -16,7 +17,10 @@ from fastapi import APIRouter, Query
 from fastapi.responses import Response
 
 from agent.core.config import settings
+from agent.db import create_run as db_create_run
+from agent.db import delete_runs_by_task_name_prefix as db_delete_runs_by_prefix
 from agent.mcp_client import MCPClient
+from agent.runtime import RuntimeManager
 from agent.schemas.task import (
     CreateTaskRequest,
     CreateTaskResponse,
@@ -207,8 +211,56 @@ async def create_task(req: CreateTaskRequest) -> CreateTaskResponse:
         # Create task items
         await _mcp_client.create_task_items(task_id, items)
 
+        # Mirror into pipeline_runs so the frontend task list shows this batch.
+        # Strategy: one pipeline_runs row per item, using the UUID produced by
+        # RuntimeManager.create_run() — identical shape to a single-operator
+        # upload. This makes the rows indistinguishable from regular
+        # constraint_extract tasks in the UI, and the in-memory RuntimeRun
+        # lets _process_item emit events that get persisted to pipeline_events
+        # so clicking a row replays the full event stream.
+        #
+        # task_name carries the batch id so DELETE /api/v1/tasks/{task_id}
+        # can locate and clean up these rows (they have no parent_task_id
+        # link, since we no longer create a parent row).
+        #
+        # Best-effort: a DB failure here must NOT fail the request — the
+        # task itself is already created and queued for execution.
+        try:
+            manager = RuntimeManager()
+            batch_run_ids: list[dict] = []
+            task_name_prefix = f"[batch {task_id}] "
+            for item in items:
+                op = item["operator_name"]
+                run = manager.create_run(op)
+                db_create_run(
+                    run.run_id,
+                    op,
+                    hashlib.sha256(op.encode()).hexdigest(),
+                    task_type="constraint_extract",
+                    task_name=f"{task_name_prefix}{op}",
+                )
+                batch_run_ids.append({
+                    "seq": item["seq"],
+                    "run_id": run.run_id,
+                    "operator_name": op,
+                })
+        except Exception:
+            logger.exception(
+                "Failed to mirror batch %s into pipeline_runs (task will still run)",
+                task_id,
+            )
+            manager = None
+            batch_run_ids = []
+
         # Start background execution
-        asyncio.create_task(run_task(task_id, max_workers=_get_max_workers()))
+        asyncio.create_task(
+            run_task(
+                task_id,
+                max_workers=_get_max_workers(),
+                manager=manager,
+                batch_run_ids=batch_run_ids,
+            )
+        )
 
         return CreateTaskResponse(
             success=True,
@@ -468,12 +520,25 @@ async def delete_task(task_id: int) -> dict:
 
     try:
         result = await _mcp_client.delete_task(task_id)
-        return {"success": True, **result}
     except ValueError as e:
         return {"success": False, "error": str(e)}
     except Exception as e:
         logger.exception("Failed to delete task %s", task_id)
         return {"success": False, "error": str(e)}
+
+    # Mirror cleanup: drop per-item pipeline_runs rows for this batch.
+    # The mirror writes ``task_name = "[batch {task_id}] {operator_name}"``,
+    # so we match by prefix. Best-effort: the MCP-side delete already
+    # succeeded, so a mirror failure here only leaves orphan rows the user
+    # can clean up via DELETE /api/v1/runs/{run_id}.
+    try:
+        await asyncio.to_thread(db_delete_runs_by_prefix, f"[batch {task_id}] ")
+    except Exception:
+        logger.exception(
+            "Failed to clean pipeline_runs mirror for task %s", task_id
+        )
+
+    return {"success": True, **result}
 
 
 @router.post("/tasks/{task_id}/retry-failed", response_model=RetryTaskResponse)

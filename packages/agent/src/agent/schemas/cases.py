@@ -64,8 +64,8 @@ class ExecuteRunRequest(BaseModel):
         description="Server ID for remote execution. REQUIRED — must reference a row in the ``servers`` table with ip / username / password populated. Requests without a valid ``server_id`` are rejected synchronously.",
     )
     task_type: str = Field(
-        default="precision",
-        description="ATK task type forwarded to ``atk task --task``. Common values: precision / performance / function.",
+        default="accuracy",
+        description="ATK task type forwarded to ``atk task --task``. Common values: accuracy / performance / function.",
     )
     execution_count: int = Field(
         default=1,

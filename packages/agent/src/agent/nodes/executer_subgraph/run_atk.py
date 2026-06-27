@@ -11,9 +11,10 @@ The flow:
    - ``/home/operator_atk/cases/{operator_name}_cases.json``
    - ``/home/operator_atk/atk_executor/{operator_name}_executor.py``
 
-3. Run the ``atk task`` command via ``source <env_init> && ...`` so the
-   CANN environment is loaded before atk starts.  The command's exit
-   code decides ``status`` (``success`` / ``failed`` / ``timeout``).
+3. Run the ``atk node --backend cpu task`` command via
+   ``source <env_init> && ...`` so the CANN environment is loaded before
+   atk starts.  The command's exit code decides ``status``
+   (``success`` / ``failed`` / ``timeout``).
 
 4. Find the latest ``<operator_name>_*`` output directory under
    ``/home/operator_atk/atk_output``, download the ``report/`` xlsx and
@@ -65,8 +66,9 @@ _REMOTE_OUTPUT_ROOT = f"{_REMOTE_HOME}/atk_output"
 # per-server via ``state["server_info"]["env_init_script"]``.
 _DEFAULT_ENV_INIT = "/usr/local/Ascend/ascend-toolkit/set_env.sh"
 
-# Cap on the remote ``atk task`` invocation.  ATK runs can be slow when
-# ``-e`` is large; 30 minutes is the existing default upper bound.
+# Cap on the remote ``atk node --backend cpu task`` invocation.  ATK
+# runs can be slow on large case sets; 30 minutes is the existing default
+# upper bound.
 _DEFAULT_ATK_TIMEOUT = 1800.0
 
 
@@ -89,10 +91,9 @@ def _resolve_env_init(server_info: dict[str, Any] | None) -> str:
 def _build_atk_command(
     operator_name: str,
     task_type: str,
-    execution_count: int,
     env_init: str,
 ) -> str:
-    """Compose the ``atk task`` command line.
+    """Compose the ``atk node --backend cpu task`` command line.
 
     Output goes to ``/home/operator_atk/atk_output`` so we can scan for
     the per-operator result directory after the command completes.
@@ -101,10 +102,11 @@ def _build_atk_command(
     executor_remote = _remote_executor_path(operator_name)
     return (
         f"cd {_REMOTE_HOME} && "
-        f"source {env_init} && "
-        f"atk task -c {cases_remote} "
-        f"--task {task_type} -e {execution_count} "
-        f"-p {executor_remote}"
+        f"atk node --backend cpu task "
+        f"-c {cases_remote} "
+        f"-p {executor_remote} "
+        f"--task {task_type} "
+        f"--bind_cpu_type BIND_IN_PHYSICAL"
     )
 
 
@@ -153,7 +155,7 @@ async def exec_run_atk_node(state: PipelineState) -> dict[str, Any]:
     if not (server_info.get("ip") and server_info.get("username") and server_info.get("password")):
         return {"error": "server_info is incomplete (need ip/username/password)"}
 
-    task_type = state.get("task_type") or "precision"
+    task_type = state.get("task_type") or "accuracy"
     execution_count = int(state.get("execution_count") or 1)
     env_init = _resolve_env_init(server_info)
 
@@ -190,7 +192,7 @@ async def exec_run_atk_node(state: PipelineState) -> dict[str, Any]:
             return {"exec_result": result.model_dump(), "error": str(e)}
 
         # ── 3. Run atk command ─────────────────────────────────────────────
-        cmd = _build_atk_command(operator_name, task_type, execution_count, env_init)
+        cmd = _build_atk_command(operator_name, task_type, env_init)
         logger.info("exec_run_atk: running %s", cmd)
 
         cmd_result: CommandResult | None = None
@@ -278,6 +280,21 @@ async def exec_run_atk_node(state: PipelineState) -> dict[str, Any]:
             pass
 
     result.duration = time.monotonic() - overall_start
+
+    # ── Persist the structured ExecutionResult alongside the raw artifacts ──
+    # Sibling to atk.log + report/*.xlsx so the local cache dir
+    # (``executtion_results/<operator_name>/<run_id>/``) carries everything
+    # an operator needs to inspect / replay without re-running ATK.
+    # Best-effort: never abort the main flow on a write failure.
+    try:
+        result_json_path = cache_dir / "result.json"
+        result_json_path.write_text(
+            result.model_dump_json(indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        logger.info("exec_run_atk: wrote result.json to %s", result_json_path)
+    except Exception as e:  # pragma: no cover — defensive
+        logger.warning("exec_run_atk: failed to write result.json for %s: %s", operator_name, e)
 
     # ── Emit a flat exec_result dict that matches the existing contract ───
     # The route's ``save_exec_results`` consumes ``total``/``passed``/
