@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>单函数算子适配方案</title>
+<style>
+:root{--bg:#0d1117;--card:#161b22;--border:#30363d;--text:#e6edf3;--dim:#9198a1;--accent:#58a6ff;--green:#3fb950;--warn:#d29922;--danger:#f85149;--purple:#bc8cff;--cyan:#39d0d8}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Noto Sans SC",sans-serif;line-height:1.7}
+.wrap{max-width:1120px;margin:0 auto;padding:40px}
+section{margin-bottom:48px}
+h1{font-size:28px;font-weight:700;margin-bottom:8px}
+h2{font-size:23px;font-weight:700;margin-bottom:14px;padding-bottom:10px;border-bottom:2px solid var(--border);margin-top:12px}
+h3{font-size:18px;font-weight:600;margin:28px 0 10px;color:var(--accent)}
+p{margin-bottom:10px}
+ul,ol{margin:8px 0 14px 26px}li{margin-bottom:6px}
+.lead{color:var(--dim);font-size:15px;margin-bottom:18px}
+.meta{color:var(--dim);font-size:13px;margin-bottom:28px}
+table{width:100%;border-collapse:collapse;margin:14px 0;font-size:14px}
+th{background:var(--card);color:var(--accent);text-align:left;padding:10px 14px;border-bottom:2px solid var(--border);white-space:nowrap}
+td{padding:9px 14px;border-bottom:1px solid var(--border);vertical-align:top}
+pre{background:#010409;border:1px solid var(--border);border-radius:8px;padding:16px;overflow-x:auto;margin:12px 0;font-size:13px;line-height:1.55}
+code{background:var(--card);padding:2px 6px;border-radius:4px;font-size:13px;color:var(--cyan);font-family:"SFMono-Regular",Consolas,monospace}
+pre code{background:none;padding:0;color:var(--text)}
+.badge{display:inline-block;padding:2px 10px;border-radius:12px;font-size:12px;font-weight:600}
+.b-ok{background:rgba(63,185,80,.15);color:var(--green);border:1px solid rgba(63,185,80,.3)}
+.b-bad{background:rgba(248,81,73,.15);color:var(--danger);border:1px solid rgba(248,81,73,.3)}
+.b-warn{background:rgba(210,153,34,.15);color:var(--warn);border:1px solid rgba(210,153,34,.3)}
+.b-doc{background:rgba(188,140,255,.15);color:var(--purple);border:1px solid rgba(188,140,255,.3)}
+.card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:18px 22px;margin:16px 0}
+.card-red{border-left:4px solid var(--danger)}
+.card-amber{border-left:4px solid var(--warn)}
+.card-green{border-left:4px solid var(--green)}
+.card-blue{border-left:4px solid var(--accent)}
+.step{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:20px 24px;margin:18px 0}
+.step h3{margin-top:0}
+.tag{color:var(--warn);font-weight:600}
+.nav{position:sticky;top:0;background:var(--bg);border-bottom:1px solid var(--border);padding:12px 0;margin-bottom:32px;z-index:10}
+.nav a{color:var(--dim);text-decoration:none;font-size:13px;margin-right:18px}
+.desc{color:var(--dim);font-size:14px;margin:4px 0 10px}
+hr{border:none;border-top:1px solid var(--border);margin:32px 0}
+.note{font-size:13px;color:var(--dim);background:rgba(88,166,255,.05);border-left:3px solid var(--accent);padding:10px 16px;border-radius:0 6px 6px 0;margin:12px 0}
+.flow{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:14px 0;font-size:13px}
+.flow span{background:var(--card);border:1px solid var(--border);border-radius:6px;padding:5px 12px}
+.flow .arrow{border:none;background:none;color:var(--dim);padding:0 2px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>单函数算子适配方案</h1>
+<div class="meta">日期：2026-06-27 · 涉及文档：aclnnCalculateMatmulWeightSize.md / aclnnCalculateMatmulWeightSizeV2.md · 分支：main · 行号截至 2026-06-27 · 范围：仅 EXTRACT 阶段</div>
+<p class="lead">针对仅含单个函数（无 GetWorkspaceSize 两段式接口）的算子文档，分析当前流水线的行为并给出适配方案，使其不再固执地寻找 GetWorkspaceSize 函数，而是直接解析单函数逻辑。<span class="tag">本方案已对照最新业务逻辑（含 param_alias 别名系统、build_param_constraint 子图）逐一核实并完善。</span></p>
+<div class="card card-blue" style="margin-top:18px">
+<strong>修订记录（v2 · 2026-06-27）：</strong>根据代码核实反馈修订三处——①Step 1 helper 增加空 signatures 防御（get_primary_function_names 返回 None 哨兵 + is_single_function_mode 空输入返回 False，避免空集致参数全丢/误判单函数）；②Step 4 消费方清单补全（纠正"无差异化读取"误判，补 extract_ws_node:48 / extract_exe_node:83 差异化读取 + merge_relations:32 无差别拼接不变量）；③补单元测试要求与 EXEC 阶段阻断点全清单（generator.py:787 / data_handle_utils.py:72）。另将"等价"措辞精确化为"对 CANN 现有命名等价"。
+</div>
+<nav class="nav">
+<a href="#bg">背景</a><a href="#root">根因</a><a href="#impact">节点影响</a><a href="#bugs">关键缺陷</a><a href="#plan">适配计划</a><a href="#detail">改造细节</a><a href="#scope">改动范围</a>
+</nav>
+
+<section id="bg">
+<h2>一、背景：什么是单函数算子</h2>
+<p>常规 CANN 算子文档遵循<strong>两段式接口</strong>模式，包含两个函数：</p>
+<ul>
+<li><code>aclnnXxxGetWorkspaceSize(...)</code> —— 第一段，入参校验 + workspace 计算</li>
+<li><code>aclnnXxx(workspaceAddr, workspaceSize, executor, stream)</code> —— 第二段，执行计算</li>
+</ul>
+<p>而 aclnnCalculateMatmulWeightSize / aclnnCalculateMatmulWeightSizeV2 这类文档<strong>只有一个函数</strong>：</p>
+<pre><code>aclnnStatus aclnnCalculateMatmulWeightSize(
+    const aclIntArray *tensorShape,
+    uint64_t          *weightTensorSize)</code></pre>
+<p>它没有 GetWorkspaceSize 函数，也没有 workspaceSize/executor 框架参数。当前 EXTRACT 流水线在 <code>assemble_result</code> 处硬编码 <code>endswith("WorkspaceSize")</code> / <code>endswith("GetWorkspaceSize")</code> 来识别"主函数"（其余节点经核实不按函数名过滤），导致这类单函数文档的参数在最终装配阶段被全部丢弃。</p>
+</section>
+
+<section id="root">
+<h2>二、根因：Section Splitter 的分类逻辑</h2>
+<p>单函数文档的结构如下（以 aclnnCalculateMatmulWeightSize.md 为例）：</p>
+<pre><code># aclnnCalculateMatmulWeightSize          ← H1 标题
+## 产品支持情况                            ← H2
+## 功能说明                                ← H2
+## 函数原型                                ← H2
+## aclnnCalculateMatmulWeightSize          ← H2（标题 == 算子名）
+  - **参数说明：**                          ← H3（bold list item）
+  - **返回值：**                            ← H3
+## 约束说明                                ← H2
+## 调用示例                                ← H2</code></pre>
+<p><code>section_splitter.py</code> 中 <code>_classify_h2</code> 的关键判断：</p>
+<pre><code>def _classify_h2(heading, operator_name):
+    if heading_stripped.endswith("GetWorkspaceSize"):
+        return SectionType.GET_WORKSPACE_SIZE
+    if heading_stripped == operator_name:
+        return SectionType.EXECUTE_API      # 单函数文档命中这里</code></pre>
+<p>由于 H2 标题等于 operator_name，该 section 被分类为 <code>EXECUTE_API</code>，而<strong>不是</strong> <code>GET_WORKSPACE_SIZE</code>。随后 <code>_classify_h3</code> 根据父级类型切换子 section 类型：</p>
+<pre><code>if section_type == SectionType.PARAMS_GET_WORKSPACE:
+    return (SectionType.PARAMS_EXECUTE
+            if parent_type == SectionType.EXECUTE_API   # 父级是 EXECUTE_API 则变成 EXECUTE
+            else SectionType.PARAMS_GET_WORKSPACE)</code></pre>
+<div class="card card-blue">
+<strong>结论：</strong>单函数文档最终产生的 section 是：
+<table>
+<tr><th>实际产生的 section</th><th>两段式文档对应的</th><th>是否可用</th></tr>
+<tr><td><code>params_execute</code>（含参数表）</td><td><code>params_get_workspace</code></td><td><span class="badge b-ok">有内容</span></td></tr>
+<tr><td><code>return_codes_execute</code></td><td><code>return_codes_get_workspace</code></td><td><span class="badge b-ok">有内容</span></td></tr>
+<tr><td><strong>无</strong> params_get_workspace</td><td>—</td><td><span class="badge b-bad">不存在</span></td></tr>
+<tr><td><strong>无</strong> return_codes_get_workspace</td><td>—</td><td><span class="badge b-bad">不存在</span></td></tr>
+</table>
+<p style="margin-top:10px">即：参数表内容在 <code>params_execute</code> 中，但流水线多处<strong>只取</strong> params_get_workspace。</p>
+</div>
+</section>
+
+<section id="impact">
+<h2>三、逐节点影响评估</h2>
+<p>沿 EXTRACT 阶段流水线逐节点追踪单函数文档的行为。<span class="tag">注：</span>节点状态均已对照当前 main 分支代码逐一核实（行号截至 2026-06-27）。</p>
+<table>
+<tr><th>节点 / 模块</th><th>位置</th><th>状态</th><th>说明（已核实）</th></tr>
+<tr><td><code>section_splitter</code> <span class="badge b-doc">MCP侧</span></td><td>mcp-server/.../section_splitter.py:150-180</td><td><span class="badge b-ok">正常</span></td><td>非 agent 节点，由 init_doc→parse_doc 间接调用；_classify_h2 把 <code>==operator_name</code> 归 EXECUTE_API，_classify_h3 父级 EXECUTE_API→params_execute，正确产生 params_execute / return_codes_execute</td></tr>
+<tr><td><code>function_signature_extract</code></td><td>function_signature_extract.py:129-139</td><td><span class="badge b-ok">正常</span></td><td>用 sig.function_name 直存，无 endswith 过滤，提取唯一函数签名</td></tr>
+<tr><td><code>table_column_extract</code></td><td>table_column_extract.py:35-36</td><td><span class="badge b-ok">正常</span></td><td>同时 fetch params_get_workspace + params_execute，后者有内容；params 带 function_name=算子名</td></tr>
+<tr><td><code>return_code_extract</code></td><td>return_code_extract.py:50-55</td><td><span class="badge b-ok">正常</span></td><td>ws_content 空则跳过；exe_content 有内容时用 operator_name 作为 function_name</td></tr>
+<tr><td><code>llm_description_extract</code>（子图）</td><td>llm_description_extract/extract_ws.py:145-150</td><td><span class="badge b-ok">正常</span></td><td>ws_params 为空时 extract_ws 优雅返回空；所有参数归 exe_params，extract_exe 取 params_execute</td></tr>
+<tr><td>per-param 细节提取器</td><td>shape/dtype/dformat/optional/array_length/determinism/dtype_combo/function_explanation_extract</td><td><span class="badge b-ok">正常</span></td><td>全量 grep 确认均无 endswith/is_ws_function 过滤；基于 DB params（function_name=算子名）工作</td></tr>
+<tr><td><code>implicit_param_extract</code></td><td>param_relation_extract/implicit_param_extract.py:805-807</td><td><span class="badge b-ok">正常</span></td><td>用合并后的 sections_text（ws+exe），内容完整</td></tr>
+<tr><td><code>param_repr_build</code></td><td>param_relation_extract/parameter_representation_build.py</td><td><span class="badge b-ok">正常</span></td><td>无函数名过滤</td></tr>
+<tr><td><code>build_param_constraint</code> 子图</td><td>build_param_constraint/__init__.py（fetch_param_data→[dimensions_build‖attrs_build]→constraint_assemble）</td><td><span class="badge b-ok">正常</span></td><td>fetch_param_data:373 / attrs_build:109 / constraint_assemble:43,95 / dimensions_agent:386,414 均把 function_name 当 key，无 endswith 过滤；处理所有参数</td></tr>
+<tr><td><code>allowed_range_extract</code> <span class="badge b-doc">helper</span></td><td>allowed_range_extract.py:68-87</td><td><span class="badge b-ok">正常</span></td><td>非 graph 节点（被 constraint_extract Pass4 复用）；ws_params 空时跳过 ws 组，exe_params 组取 params_execute 正常处理</td></tr>
+<tr><td><code>build_param_relations</code></td><td>build_param_relations.py:557,629</td><td><span class="badge b-ok">正常</span></td><td>查询并处理全部 relations，无函数名过滤</td></tr>
+<tr><td><code>constraint_extract</code> Pass 1-2 / 4 / 4b / 6</td><td>constraint_extract.py</td><td><span class="badge b-ok">正常</span></td><td>基于 param 文本/约束文本，不依赖 section 来源</td></tr>
+<tr><td><strong>assemble_result._build_inputs_outputs</strong></td><td>assemble_result.py:462</td><td><span class="badge b-bad">崩溃</span></td><td>endswith("WorkspaceSize") 过滤掉所有参数 → inputs/outputs 为空；且触发下游别名校验雪崩（见缺陷1）</td></tr>
+<tr><td><strong>assemble_result workspace_sig</strong></td><td>assemble_result.py:111</td><td><span class="badge b-bad">缺陷</span></td><td>找不到 GetWorkspaceSize 签名 → function_signature 为空</td></tr>
+<tr><td><strong>assemble_result 别名展开</strong></td><td>assemble_result.py:163</td><td><span class="badge b-warn">联动</span></td><td>_expand_aliases_in_constraints 按 operator_name 索引，单函数本身可用；但依赖 inputs/outputs 非空，缺陷1致其前置数据缺失</td></tr>
+<tr><td>param_relation_fetch_sections + constraint_extract Pass 3-5</td><td>fetch_sections.py:32-40；constraint_extract.py:1769-1782,1418</td><td><span class="badge b-warn">质量降级</span></td><td>ws_content 仅含约束；Pass 5 在 :1418 分轮处理 ws/exe——exe 轮（参数表）仍发现 relation，覆盖不缺失，但 ws 轮（约束块）缺参数类型/shape 上下文，属上下文质量降级</td></tr>
+<tr><td>constraint_check_agent prompt</td><td>constraint_check_agent.py:86</td><td><span class="badge b-doc">文档</span></td><td>:86 硬编码引用 GetWorkspaceSize section；:89-128 别名校验逻辑按 operator_name 工作，单函数可用，无需改</td></tr>
+<tr><td>SKILL.md</td><td>knowledge/.../SKILL.md:30,276</td><td><span class="badge b-doc">文档</span></td><td>第 30/276 行假设两段式接口</td></tr>
+</table>
+<div class="note">
+<strong>范围声明：</strong>本表仅覆盖 <strong>EXTRACT 阶段</strong>。CASE/EXEC 生成阶段的 GetWorkspaceSize 硬编码阻断点共 3 处（constants.py:18 / generator.py:787 / data_handle_utils.py:72），详见七·阶段范围声明，均不在本方案范围内。
+</div>
+</section>
+
+<section id="bugs">
+<h2>四、关键缺陷（导致输出为空）</h2>
+
+<div class="card card-red">
+<h3 style="margin-top:0">缺陷 1 — assemble_result._build_inputs_outputs 丢弃全部参数 <span class="tag">[P0+ 严重]</span></h3>
+<p class="desc">文件：packages/agent/src/agent/nodes/assemble_result.py 第 442-498 行（过滤行在 462）</p>
+<pre><code>for p in params:
+    fn = p.get("function_name", "")
+    if not fn.endswith("WorkspaceSize"):
+        continue                        # 单函数文档：所有参数被跳过！
+    name = p.get("param_name", "")
+    if name in EXCLUDED_PARAMS:
+        continue
+    ...
+    if p.get("direction") == "output":
+        outputs[name] = constraint
+    else:
+        inputs[name] = constraint</code></pre>
+<p>单函数文档的 function_name（如 <code>aclnnCalculateMatmulWeightSize</code>）不以 <code>WorkspaceSize</code> 结尾，因此 <strong>inputs 和 outputs 全部为空</strong>，最终 JSON 结果丢失所有参数。</p>
+<div class="note" style="border-left-color:var(--danger);background:rgba(248,81,73,.05)">
+<strong>雪崩联动（比预期更严重）：</strong>assemble_result 在 :163 调用 <code>_expand_aliases_in_constraints</code>，而 constraint_check_agent 的别名校验（:89-128）会判定"referenced param 不在 inputs/outputs → 查 alias → 无则 FAIL"。inputs/outputs 为空时，<strong>所有</strong>参数引用都会被标 FAIL，产生雪崩式误报。故本缺陷优先级应高于"输出为空"，定为 P0+。
+</div>
+<p class="desc">注：函数第 478-496 行的 implicit_params / platform_constants / relations AR 填充逻辑不受影响，本修复仅改过滤行。</p>
+</div>
+
+<div class="card card-amber">
+<h3 style="margin-top:0">缺陷 2 — workspace_sig 为空</h3>
+<p class="desc">文件：packages/agent/src/agent/nodes/assemble_result.py 第 109-113 行</p>
+<pre><code>workspace_sig = ""
+for sig in signatures:
+    if sig.get("function_name", "").endswith("GetWorkspaceSize"):
+        workspace_sig = sig.get("full_signature", "")
+        break                           # 单函数文档：无匹配，workspace_sig 保持空</code></pre>
+<p>结果 JSON 的 function_signature 字段为空。</p>
+</div>
+
+<div class="card card-amber">
+<h3 style="margin-top:0">缺陷 3 — ws_content 退化为仅含约束（上下文质量降级）</h3>
+<p class="desc">文件：param_relation_extract/fetch_sections.py 第 32-40 行 &amp; constraint_extract.py 第 1769-1782 行（Pass 5 分轮在 1418）</p>
+<pre><code>ws_section  = get_section(doc_id, "params_get_workspace")   # 空
+exe_section  = get_section(doc_id, "params_execute")          # 有内容
+ws_content  = ws_section content  # ""
+exe_content = exe_section content # 参数表
+if constraints_section:
+    ws_content += constraints      # ws = 仅约束
+sections_text = ws_content + exe_content  # 合并后 OK</code></pre>
+<p>合并后的 sections_text 内容完整（Pass 3/4 正常）。Pass 5 在 <code>:1418</code> 以 <code>for content,label in [(ws_content,"ws"),(exe_content,"exe")]</code> <strong>分轮</strong>处理：<strong>exe 轮（参数表）仍能发现 relation，覆盖不缺失</strong>；但 ws 轮（约束块）缺少参数类型/shape 描述上下文，约束文本中提到参数时 LLM 缺乏类型依据，属<strong>上下文质量降级</strong>而非覆盖缺失。修复后 ws_content 提升参数表，ws 轮同时看到参数表+约束，质量回升。</p>
+</div>
+</section>
+
+<section id="plan">
+<h2>五、适配计划</h2>
+<p class="lead">核心思想：引入<strong>"主函数 (primary function)"</strong>抽象，封装 GetWorkspaceSize 与单函数的差异。主函数 = 其参数属于真实算子参数的函数：两段式算子为 *GetWorkspaceSize 函数；单函数算子为该唯一函数本身。</p>
+
+<div class="step">
+<h3>Step 1 · 在 param_validators.py 添加共享 helper</h3>
+<p class="desc">文件：packages/agent/src/agent/utils/param_validators.py</p>
+<p>集中"单函数模式"判定逻辑，避免 endswith("WorkspaceSize") 散落各处：</p>
+<pre><code>def is_single_function_mode(signatures: list[dict]) -> bool:
+    """True 当文档不含任何 GetWorkspaceSize 函数（单函数算子）。
+
+    signatures 为空（查询失败/文档解析失败）时返回 False —— 此时无法判定
+    模式，调用方应回退到两段式旧行为，避免误判为单函数导致收集非法参数。
+    """
+    if not signatures:
+        return False
+    return not any(is_ws_function(s.get("function_name", "")) for s in signatures)
+
+
+def get_primary_function_names(signatures: list[dict]) -> set[str] | None:
+    """返回应视为"主函数"的函数名集合（其参数为真实算子参数）。
+
+    - 两段式算子：返回 GetWorkspaceSize 函数名集合
+    - 单函数算子：返回所有函数名（通常只有一个）
+    - signatures 为空：返回 None（哨兵值），调用方应回退到
+      endswith("WorkspaceSize") 旧行为，避免空集导致参数全丢。
+    """
+    if not signatures:
+        return None
+    ws_fns = {s["function_name"] for s in signatures
+              if is_ws_function(s.get("function_name", ""))}
+    if ws_fns:
+        return ws_fns
+    return {s["function_name"] for s in signatures if s.get("function_name")}</code></pre>
+</div>
+
+<div class="step">
+<h3>Step 2 · 修复 assemble_result._build_inputs_outputs <span class="tag">[P0+ 严重]</span></h3>
+<p class="desc">文件：packages/agent/src/agent/nodes/assemble_result.py（函数 442-498，过滤行 462；调用处 134-137）</p>
+<p>用 get_primary_function_names(signatures) 成员判断替换 endswith 过滤。signatures 已在第 73 行查询，直接传入 _build_inputs_outputs：</p>
+<pre><code># 修改 _build_inputs_outputs 签名，增加 signatures 参数
+def _build_inputs_outputs(
+    params, implicit_params=None, platform_constants=None,
+    relations=None, signatures=None,           # 新增
+) -> tuple[dict, dict]:
+    primary_fns = get_primary_function_names(signatures or [])
+    for p in params:
+        fn = p.get("function_name", "")
+        # primary_fns 为 None（signatures 缺失）时回退到 endswith 旧行为，
+        # 避免空集导致参数全丢（比现状更糟的回归）
+        if primary_fns is not None:
+            if fn not in primary_fns:          # 替换 endswith("WorkspaceSize")
+                continue
+        elif not fn.endswith("WorkspaceSize"):
+            continue
+        ...</code></pre>
+<pre><code># 调用处（第 134 行）也需传入 signatures
+inputs_dict, outputs_dict = _build_inputs_outputs(
+    params, implicit_params=mappings,
+    platform_constants=platform_constants,
+    relations=relations,
+    signatures=signatures,                     # 新增
+)</code></pre>
+<div class="note">
+<strong>编辑局部化要求：</strong>本函数第 478-496 行的 implicit_params / platform_constants / relations 的 allowed_range 填充逻辑为后续新增，<strong>不得改动</strong>；本次仅替换第 462 行过滤条件与函数签名。修复后 inputs/outputs 非空，:163 的 <code>_expand_aliases_in_constraints</code> 前置数据恢复，别名校验雪崩同步消除。
+</div>
+</div>
+
+<div class="step">
+<h3>Step 3 · 修复 workspace_sig 回退 <span class="tag">[重要]</span></h3>
+<p class="desc">文件：packages/agent/src/agent/nodes/assemble_result.py 第 109-113 行</p>
+<pre><code>workspace_sig = ""
+for sig in signatures:
+    if sig.get("function_name", "").endswith("GetWorkspaceSize"):
+        workspace_sig = sig.get("full_signature", "")
+        break
+# 单函数回退：无 GetWorkspaceSize 时取第一个签名
+if not workspace_sig and signatures:
+    workspace_sig = signatures[0].get("full_signature", "")</code></pre>
+</div>
+
+<div class="step">
+<h3>Step 4 · ws_content 回退（fetch_sections + constraint_extract）</h3>
+<p class="desc">文件：param_relation_extract/fetch_sections.py 第 36-40 行；constraint_extract.py 第 1769-1782 行</p>
+<p>当 params_get_workspace 为空但 params_execute 有内容时，将 exe 内容提升为 ws（主）内容，使 Pass 5 的分轮处理（:1418）ws 轮能看到参数表：</p>
+<pre><code>ws_content = ws_section.get("content", "") if ws_section else ""
+exe_content = exe_section.get("content", "") if exe_section else ""
+
+# 单函数回退：无 ws 内容时，用 exe 内容作为主内容
+if not ws_content.strip() and exe_content.strip():
+    ws_content = exe_content
+    exe_content = ""
+
+if constraints_section and constraints_section.get("content"):
+    ws_content += "\n\n---\n## 约束说明\n" + constraints_section["content"]
+sections_text = f"{ws_content}\n\n{exe_content}"</code></pre>
+<p>两处逻辑相同，建议抽取为一个共享 helper（如 <code>_resolve_ws_exe_content(doc_id)</code>，放 <code>utils/param_validators.py</code> 旁或新建 <code>utils/section_utils.py</code>，返回 <code>(ws_content, exe_content)</code> 元组）避免重复。</p>
+<div class="note">
+<strong>顺序约束：</strong>constraints 必须在"提升之后"追加——fetch_sections 在 :39-40 追加、constraint_extract 在 :1781 追加，两处时机一致。helper 化时需把"提升→追加约束"顺序写死，避免错位把约束追加到已被清空的 exe_content。<br>
+<strong>消费方安全（已核实，含差异化读取）：</strong>fetch_sections 写入 state 的 <code>ws_section_content/exe_section_content</code> 共有 <strong>4 个</strong>消费方：<br>
+&nbsp;&nbsp;1. <code>implicit_param_extract.py:805-807</code> —— 合并为 <code>f"{ws}\n\n{exe}"</code>，提升后合并结果不变，安全；<br>
+&nbsp;&nbsp;2. <code>implicit_value_constraint.py:84-86</code>（可能已废弃）—— 同样合并，安全；<br>
+&nbsp;&nbsp;3. <code>extract_relations.py:48</code> <code>extract_ws_node</code> —— <strong>差异化读取</strong>，只取 <code>ws_section_content</code>；<br>
+&nbsp;&nbsp;4. <code>extract_relations.py:83</code> <code>extract_exe_node</code> —— <strong>差异化读取</strong>，只取 <code>exe_section_content</code>。<br>
+初版"无消费方做差异化读取"的判断<strong>不成立</strong>——#3/#4 即为差异化读取。<strong>实际仍安全</strong>的原因：#3/#4 的产物 <code>ws_relations</code>/<code>exe_relations</code> 在 <code>merge_relations.py:32</code> 仅做 <code>ws_relations + exe_relations</code> 简单拼接，不对 ws/exe 做差异化处理。提升后（exe→ws、exe 清空）：#3 处理"参数表+约束"、#4 处理空内容跳过，merge 拼接结果不变，覆盖不缺失。<strong>安全性依赖不变量：</strong>merge_relations 对 ws/exe 关系无差别拼接；若后续重构 merge_relations 对 ws/exe 差异化处理（如打不同 relation_type），提升会静默丢内容，届时需同步评估。<br>
+<strong>不变量：</strong>两段式算子 ws_content 非空，<code>if not ws_content.strip()</code> 为 False，回退不触发，行为不变。
+</div>
+</div>
+
+<div class="step">
+<h3>Step 5 · 更新 constraint_check_agent prompt 与 SKILL.md <span class="tag">[P2]</span></h3>
+<p class="desc">文件：nodes/constraint_check_agent.py 第 86 行；knowledge/operator-constraint-checker/SKILL.md 第 30/276 行</p>
+<p>放宽对 "GetWorkspaceSize section" 的硬编码引用，覆盖单函数算子的主参数 section：</p>
+<pre><code># constraint_check_agent.py prompt（第 86 行）
+- The parameter table in the GetWorkspaceSize section
++ The parameter table in the GetWorkspaceSize section (or the operator main
++ parameter section for single-function operators like
++ aclnnCalculateMatmulWeightSize)</code></pre>
+<pre><code># SKILL.md 第 30 行
+- 函数签名：从代码块中提取 aclnnXxxGetWorkspaceSize 的完整参数列表
++ 函数签名：从代码块中提取主函数的完整参数列表
++ （两段式算子为 aclnnXxxGetWorkspaceSize，单函数算子为算子同名函数）
+
+# SKILL.md 第 276 行
+- 检查时主要关注 GetWorkspaceSize 接口的参数约束
++ 检查时主要关注主接口的参数约束（两段式算子为 GetWorkspaceSize，
++ 单函数算子为唯一函数）</code></pre>
+<div class="note">
+<strong>别名系统（:89-128）无需改动：</strong>constraint_check_agent prompt 的 "Parameter Alias Resolution" 一节按 <code>operator_name</code> 索引 <code>param-alias.md</code>，与单/两段式无关，单函数可直接复用。仅需确认 <code>param-alias.md</code> 中无需为单函数算子新增条目（单函数参数名即真实名，无 shorthand）。本步骤不改别名逻辑。
+</div>
+</div>
+</section>
+
+<section id="detail">
+<h2>六、改造细节与数据流</h2>
+<h3>单函数文档的 section 流转（改造后）</h3>
+<div class="flow">
+<span>section_splitter</span><span class="arrow">→</span>
+<span>params_execute</span><span class="arrow">+</span>
+<span>return_codes_execute</span><span class="arrow">→</span>
+<span style="color:var(--green)">fetch_sections 回退 exe→ws</span><span class="arrow">→</span>
+<span>ws_content = 参数表</span><span class="arrow">→</span>
+<span style="color:var(--green)">assemble_result 用 primary_fns</span><span class="arrow">→</span>
+<span>inputs/outputs 正常</span>
+</div>
+<h3>主函数判定决策表</h3>
+<table>
+<tr><th>场景</th><th>signatures</th><th>is_single_function_mode</th><th>primary_fns</th></tr>
+<tr><td>两段式（常规）</td><td><code>[aclnnAddGetWorkspaceSize, aclnnAdd]</code></td><td><code>False</code></td><td><code>{aclnnAddGetWorkspaceSize}</code></td></tr>
+<tr><td>单函数</td><td><code>[aclnnCalculateMatmulWeightSize]</code></td><td><code>True</code></td><td><code>{aclnnCalculateMatmulWeightSize}</code></td></tr>
+<tr><td>单函数 V2</td><td><code>[aclnnCalculateMatmulWeightSizeV2]</code></td><td><code>True</code></td><td><code>{aclnnCalculateMatmulWeightSizeV2}</code></td></tr>
+</table>
+<h3>关键不变量</h3>
+<div class="card card-green">
+<ul style="margin-bottom:0">
+<li><code>EXCLUDED_PARAMS</code>（workspace/workspaceSize/executor/stream）对单函数文档天然不命中 —— 单函数签名不含这些框架参数，无需特殊处理。</li>
+<li><code>is_ws_function</code> 保持不变（仍检测 GetWorkspaceSize 子串），新增的 helper 在其基础上构建。</li>
+<li>两段式算子的行为完全不变 —— get_primary_function_names 在存在 ws 函数时返回 ws 函数集合，对 CANN 现有两段式命名（aclnnXxxGetWorkspaceSize）与原 endswith("WorkspaceSize") 等价。注：helper 内部用 is_ws_function（"GetWorkspaceSize" in name）判定，比 endswith("WorkspaceSize") 略窄；CANN 命名下两者一致，不存在仅以 "WorkspaceSize" 结尾而无 "Get" 的函数，故无实际分歧。</li>
+<li>attrs_build / constraint_assemble / build_param_relations / table_column_extract / return_code_extract / llm_description_extract <strong>无需改动</strong> —— 它们本就不按函数名过滤或已正确处理 exe 路径。</li>
+<li>以下新增/变更模块经核实<strong>同样无需改动</strong>（均不按 WorkspaceSize 过滤）：<code>dimensions_agent</code>、<code>fetch_param_data</code>、<code>complexity_classify</code>（build_param_constraint 子图）；<code>shape/dtype/dformat/optional/array_length/determinism/dtype_combo/function_explanation_extract</code>（per-param 细节提取）；<code>param_repr_build</code>；<code>allowed_range_extract</code>（helper，:85-87 正确处理 exe 组）。</li>
+<li><code>param_alias</code> 别名系统（assemble_result:163 / constraint_check_agent:89-128）按 operator_name 索引，与单/两段式无关，<strong>无需改动</strong>；单函数参数名即真实名，<code>param-alias.md</code> 无需新增条目。其唯一前置依赖是 inputs/outputs 非空——由 Step 2 修复保证。</li>
+</ul>
+</div>
+</section>
+
+<section id="scope">
+<h2>七、改动范围汇总</h2>
+<table>
+<tr><th>#</th><th>文件</th><th>改动</th><th>优先级</th><th>依赖</th></tr>
+<tr><td>1</td><td><code>utils/param_validators.py</code></td><td>新增 is_single_function_mode + get_primary_function_names（含空 signatures 防御：返回 None 哨兵 / 空输入返回 False）</td><td><span class="badge b-bad">P0</span></td><td>—</td></tr>
+<tr><td>2</td><td><code>nodes/assemble_result.py</code>（:462,134）</td><td>_build_inputs_outputs 用 primary_fns 替换 endswith；primary_fns 为 None 时回退 endswith 旧行为；调用处传入 signatures。仅改过滤行，保留 :478-496 新增逻辑</td><td><span class="badge b-bad">P0+</span></td><td>Step 1</td></tr>
+<tr><td>3</td><td><code>nodes/assemble_result.py</code>（:109-113）</td><td>workspace_sig 增加 fallback</td><td><span class="badge b-bad">P0</span></td><td>—</td></tr>
+<tr><td>4</td><td><code>nodes/param_relation_extract/fetch_sections.py</code>（:36-40）</td><td>ws_content 为空时回退 exe</td><td><span class="badge b-warn">P1</span></td><td>—</td></tr>
+<tr><td>5</td><td><code>nodes/constraint_extract.py</code>（:1769-1782）</td><td>Pass 3 的 ws/exe fetch 同样回退（建议抽 helper 复用 Step 4，顺序：提升→追加约束）</td><td><span class="badge b-warn">P1</span></td><td>Step 4</td></tr>
+<tr><td>5b</td><td><code>utils/section_utils.py</code>（新建）或 <code>param_validators.py</code></td><td>抽取 _resolve_ws_exe_content(doc_id) 供 Step 4/5 复用，返回 (ws_content, exe_content)</td><td><span class="badge b-warn">P1</span></td><td>Step 4,5</td></tr>
+<tr><td>6</td><td><code>nodes/constraint_check_agent.py</code>（:86）</td><td>prompt 放宽 GetWorkspaceSize 引用（别名逻辑 :89-128 不动）</td><td><span class="badge b-doc">P2</span></td><td>—</td></tr>
+<tr><td>7</td><td><code>knowledge/.../SKILL.md</code>（:30,276）</td><td>补充单函数说明</td><td><span class="badge b-doc">P2</span></td><td>—</td></tr>
+<tr><td>8</td><td><code>tests/agent/test_assemble_result.py</code>（新增）</td><td>补 _build_inputs_outputs 单测：两段式/单函数/空 signatures 三场景；补 get_primary_function_names / is_single_function_mode 空输入防御单测</td><td><span class="badge b-warn">P1</span></td><td>Step 1,2</td></tr>
+</table>
+<div class="note">
+<strong>验证方式：</strong>改造后对 aclnnCalculateMatmulWeightSize 与 aclnnCalculateMatmulWeightSizeV2 跑 EXTRACT 阶段，检查：<br>
+1. inputs 含 tensorShape、outputs 含 weightTensorSize（V2 还含 dataType 入参）<br>
+2. function_signature 非空<br>
+3. constraints_in_parameters 含 Pass 3-5 提取的约束（非空）<br>
+4. constraint_check_agent 不再产生别名校验雪崩（无 "not found" 误报）<br>
+5. 回归一个两段式算子（如 aclnnAdd）确认无行为变化<br>
+<strong>补充单元测试（当前 tests/ 对 _build_inputs_outputs / WorkspaceSize 过滤零覆盖，无回归网）：</strong><br>
+6. 为 _build_inputs_outputs 补单测，覆盖三种 signatures 输入：(a) 两段式 [aclnnAddGetWorkspaceSize, aclnnAdd]→只收 ws 参数；(b) 单函数 [aclnnCalculateMatmulWeightSize]→收全部；(c) 空 signatures []→回退 endswith 旧行为，不回归<br>
+7. 为 get_primary_function_names / is_single_function_mode 补单测，锁住空输入防御（空→None / 空→False）
+</div>
+<div class="card card-amber">
+<strong>阶段范围声明：</strong>本方案仅覆盖 <strong>EXTRACT 阶段</strong>。CASE/EXEC 生成阶段存在以下 GetWorkspaceSize 硬编码阻断点（单函数算子若进入生成阶段会匹配失败），均<strong>不在本方案范围</strong>，需另行评估：<br>
+&nbsp;&nbsp;1. <code>generators/data_definition/constants.py:18</code> <code>PROCESS_FUNCTION_MARKER="GetWorkspaceSize"</code> —— agent src/ 内仅定义未引用（疑似死代码）；<br>
+&nbsp;&nbsp;2. <code>nodes/executer_subgraph/resources/generator.py:787</code> <code>re.search(r"aclnnStatus\s+(aclnn\w+)GetWorkspaceSize", sig)</code> —— <strong>真实阻断点</strong>，单函数签名无法匹配；<br>
+&nbsp;&nbsp;3. <code>generators/common_utils/data_handle_utils.py:72</code> prompt 写死"只处理{OpName}GetWorkspaceSize方法中，role为input的参数"。<br>
+单函数适配若需贯穿全阶段，上述三点均需改造。
+</div>
+<hr>
+<p class="meta">本方案不改变两段式算子的任何行为，仅在"无 GetWorkspaceSize 函数"时启用单函数回退路径。所有行号截至 2026-06-27 main 分支。</p>
+</section>
+
+</div>
+</body>
+</html>
