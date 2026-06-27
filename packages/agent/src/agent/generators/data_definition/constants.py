@@ -180,7 +180,8 @@ class DataMatchMap:
                        "attrs": "list"}
     # 根据参数数据类型设置可取值范围，防止未提供取值范围约束时，求解结果中的取值范围超出可表示上限
     DTYPE_SPECS = {
-        "int": (-128, 127, True), "int8": (-128, 127, True), "uint8": (0, 255, True),
+        "int": (-128, 127, True), "int8": (-128, 127, True), "uint8": (0, 255, True),"int4": (-7, 8, True),
+        "uint4": (0, 15, True),
         "int16": (-32768, 32767, True), "int32": (-2 ** 31, 2 ** 31 - 1, True),
         "uint32": (0, 2 ** 32 - 1, True), "uint64": (0, 2 ** 64 - 1, True),
         "uint16": (0, 65535, True), "int64": (-2 ** 63, 2 ** 63 - 1, True), "bfp16": (-3.389e38, 3.389e38, False),

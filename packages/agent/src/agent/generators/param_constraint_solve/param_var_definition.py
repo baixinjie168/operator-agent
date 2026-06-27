@@ -89,6 +89,10 @@ TYPE_CONFIG = {
         'sort_fn': z3.IntSort,
         'parse_fn': _parse_int_value
     },
+    'int4': {
+        'sort_fn': z3.IntSort,
+        'parse_fn': _parse_int_value
+    },
     'int8': {
         'sort_fn': z3.IntSort,
         'parse_fn': _parse_int_value
@@ -610,6 +614,14 @@ class TensorVar(BaseVar):
         self.format = z3.Const(f"{name}.format", z3.StringSort())
         self.range_value = z3.Array(f"{name}.range_value", z3.IntSort(), self._element_sort)
         self.solver.add(z3.Length(self.shape) >= 0)
+
+        # 每个维度值必须 >= 0
+        idx = z3.Int('idx')
+        self.solver.add(
+            z3.ForAll([idx],
+                    z3.Implies(z3.And(idx >= 0, idx < z3.Length(self.shape)),
+                                self.shape[idx] > 0 and self.shape[idx] < 65535))
+        )
 
         # 3. 添加约束
         self._add_dtype_constraints(dtype, allowed_dtypes)
