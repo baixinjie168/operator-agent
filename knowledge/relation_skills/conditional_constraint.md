@@ -45,3 +45,23 @@
 - "implies" 不是 Python 关键字，用 `(consequent) if (antecedent) else True` 表达
 - 条件中的枚举值用字符串列表: `activation.range_value in ['geglu', 'silu']`
 - 存在性判断用 `is not None` / `is None`
+
+## 可选参数 None 守卫（重要）
+
+当约束引用了可选参数（名称含 Optional）的 .shape/.dtype/.format 属性时，
+**必须**用 `(expr) if (paramName is not None) else True` 包装，
+防止参数为 None 时属性访问异常。
+
+### 示例
+
+输入: "biasDequant2Optional 的 shape[0] 等于 N", params=["biasDequant2Optional"]
+输出:
+  expr_type: "shape_value_dependency"
+  expr: "(biasDequant2Optional.shape[0] == N.range_value) if biasDequant2Optional is not None else True"
+
+输入: "scaleOptional 的数据类型与 x 一致", params=["scaleOptional", "x"]
+输出:
+  expr_type: "type_equality"
+  expr: "(scaleOptional.dtype == x.dtype) if scaleOptional is not None else True"
+
+注意: 如果约束本身就是存在性判断（presence_dependency），无需额外包装。

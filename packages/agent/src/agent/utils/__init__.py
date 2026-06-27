@@ -9,9 +9,11 @@ from agent.utils.llm_common import (
 from agent.utils.param_validators import (
     RELATIVE_REF_RE,
     VALID_DTYPES,
+    get_primary_function_names,
     is_bool_type,
     is_cross_reference,
     is_dash,
+    is_single_function_mode,
     is_tensor_type,
     is_ws_function,
 )
@@ -22,9 +24,11 @@ __all__ = [
     "RELATIVE_REF_RE",
     "VALID_DTYPES",
     "create_llm",
+    "get_primary_function_names",
     "is_bool_type",
     "is_cross_reference",
     "is_dash",
+    "is_single_function_mode",
     "is_tensor_type",
     "is_ws_function",
     "parse_json_response",

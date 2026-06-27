@@ -115,68 +115,6 @@ async def _reset_items_to_pending(
         await mcp.update_task_item_status(item["id"], "pending")
 
 
-async def _run_constraint_checks(task_id: int, mcp: MCPClient) -> None:
-    """Run constraint check for all successfully parsed operators in a task.
-
-    Called automatically after task completion. Fully isolated:
-    - Each operator is checked in its own try/except
-    - Failure for one operator does not affect others
-    - Overall failure does not affect task status
-    """
-    from agent.nodes.constraint_check_agent import run_constraint_check
-
-    items = await mcp.get_task_items(task_id)
-    completed_items = [
-        it for it in items
-        if it.get("status") == "completed" and it.get("doc_id")
-    ]
-
-    if not completed_items:
-        return
-
-    logger.info(
-        "Task %s: starting constraint check for %d operators",
-        task_id, len(completed_items),
-    )
-
-    checked = 0
-    for item in completed_items:
-        if _is_cancelled(task_id):
-            break
-        try:
-            doc = await mcp.get_doc_for_check(item["doc_id"])
-            if not doc:
-                continue
-            json_constraints = doc.get("json_constraints", "{}")
-            content = doc.get("content", "")
-            operator_name = doc.get("operator_name") or item.get("operator_name", "")
-            if not content.strip() or json_constraints == "{}":
-                continue
-
-            html = await run_constraint_check(
-                content, json_constraints, operator_name,
-            )
-            if html:
-                await mcp.save_constraint_check_report(item["doc_id"], html)
-                checked += 1
-                logger.info(
-                    "Task %s: checked %s (%d/%d)",
-                    task_id, item["operator_name"],
-                    checked, len(completed_items),
-                )
-        except Exception:
-            logger.warning(
-                "Task %s: constraint check failed for %s, skipping",
-                task_id, item.get("operator_name", "?"),
-                exc_info=True,
-            )
-
-    logger.info(
-        "Task %s: constraint check done: %d/%d operators",
-        task_id, checked, len(completed_items),
-    )
-
-
 async def run_task(task_id: int, max_workers: int | None = None) -> None:
     """Execute all pending items in a task with controlled parallelism.
 
@@ -284,17 +222,6 @@ async def run_task(task_id: int, max_workers: int | None = None) -> None:
                     task["completed_count"],
                     task["failed_count"],
                 )
-
-            # --- New: automatic constraint check after task completion ---
-            if not _is_cancelled(task_id):
-                try:
-                    await _run_constraint_checks(task_id, mcp)
-                except Exception:
-                    logger.warning(
-                        "Task %s: constraint check phase failed, skipping",
-                        task_id, exc_info=True,
-                    )
-            # --- End constraint check ---
     finally:
         # Always clean up the registries, even if cancelled via CancelledError
         _cancel_flags.pop(task_id, None)

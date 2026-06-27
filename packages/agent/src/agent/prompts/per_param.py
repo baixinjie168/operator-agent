@@ -66,8 +66,12 @@ SHAPE_EXTRACT_PROMPT = """\
 
 规则：
 1. 查找描述中关于维度/shape的信息，如"1D~8D"、"(N,C,H,W)"、"2D"等
-2. 只有无条件、直接给出的shape值才提取
-3. 如果shape依赖其他参数取值（出现"当..."、"如果..."等条件），则忽略
+2. 无条件、直接给出的shape值直接提取
+3. 如果shape依赖其他参数取值（条件shape，出现"当..."、"如果..."、"有专家/无专家"、
+   "per-channel/per-tensor"等条件），不要忽略，而是将所有候选shape及触发条件
+   一并提取到 shape 字段。格式用分号分隔不同条件：
+   "[E,K1,N1]如果expertTokens不为空;[K1,N1]如果为空"
+   "per-channel时为[E,N1];per-tensor时为[N1]"
 4. 提取的shape值应简洁，保留原文关键信息
 5. 如果完全没有shape相关信息，shape设为空字符串
 

@@ -23,6 +23,9 @@ from agent.nodes.build_param_constraint.attrs_build import (
     _ARRAY_TYPE_DTYPE_FALLBACK,
     attrs_build_node,
 )
+from agent.nodes.build_param_constraint.fetch_param_data import (
+    _resolve_cross_references,
+)
 from agent.nodes.build_param_constraint.dimensions_agent import (
     _is_rank_format,
     _parse_dimensions_response,
@@ -495,11 +498,11 @@ class TestAttrsBuildDtypeLevel3:
 
     @pytest.mark.asyncio
     async def test_acl_tensor_empty_dtype_falls_back_to_type_name(self):
-        """aclTensor with no dtype → ['aclTensor'] (default: type name itself)."""
+        """aclTensor with no dtype → [] (tensor type name is not a valid dtype)."""
         params = [{"param_name": "x", "function_name": "FusionOp"}]
         state = _make_state(params, {"FusionOp::x": "aclTensor"})
         result = await attrs_build_node(state)
-        assert _get_dtype_value(result["attrs_map"], "FusionOp", "x") == ["aclTensor"]
+        assert _get_dtype_value(result["attrs_map"], "FusionOp", "x") == []
 
     @pytest.mark.asyncio
     async def test_acl_scalar_empty_dtype_falls_back_to_type_name(self):
@@ -578,3 +581,103 @@ class TestAttrsBuildDtypeLevel3:
         assert _get_dtype_value(result["attrs_map"], "FusionOp", "pads", "Atlas A2") == ["INT64"]
         # Atlas A3: Level 1 empty, Level 2 empty → Level 3 fills 'int'
         assert _get_dtype_value(result["attrs_map"], "FusionOp", "pads", "Atlas A3") == ["int"]
+
+    @pytest.mark.asyncio
+    async def test_bu_zhi_chi_not_treated_as_null_pointer(self):
+        """usage_notes containing '不支持' (but not null-pointer) → Level 3 fills dtype.
+
+        Regression test: the broad '不支持' pattern was removed from
+        _NULL_POINTER_RE because it matched non-null-pointer contexts like
+        '暂不支持设为True'.  Such params should still get their dtype via
+        the Level-3 type-name fallback.
+        """
+        params = [{
+            "param_name": "transposeX1",
+            "function_name": "FusionOp",
+            "usage_notes": '{"*": "暂不支持设为True。"}',
+        }]
+        state = _make_state(params, {"FusionOp::transposeX1": "bool"})
+        result = await attrs_build_node(state)
+        assert _get_dtype_value(result["attrs_map"], "FusionOp", "transposeX1") == ["bool"]
+
+    @pytest.mark.asyncio
+    async def test_explicit_null_pointer_still_keeps_empty_dtype(self):
+        """Explicit null-pointer phrases ('只支持传空指针') → dtype stays []."""
+        params = [{
+            "param_name": "bias1Optional",
+            "function_name": "FusionOp",
+            "usage_notes": '{"*": "Atlas 推理系列加速卡产品：只支持传空指针。"}',
+        }]
+        state = _make_state(params, {"FusionOp::bias1Optional": "aclTensor"})
+        result = await attrs_build_node(state)
+        assert _get_dtype_value(result["attrs_map"], "FusionOp", "bias1Optional") == []
+
+
+class TestConstraintBasedDtypeResolution:
+    """Verify _resolve_cross_references uses type_equality constraints.
+
+    Regression test for dead code: consistency_pairs was built from
+    param_relations but never used.  Now constraint-based pairs supplement
+    text-based detection to resolve params whose dtype_desc is empty.
+    """
+
+    def test_dtype_equality_constraint_resolves_empty_dtype(self):
+        """gradOutput.dtype == self.dtype → copy self's dtype to gradOutput."""
+        params = [
+            {
+                "param_name": "self",
+                "function_name": "Op",
+                "dtype_desc": '{"*": "BFLOAT16、FLOAT16、FLOAT32、DOUBLE、COMPLEX64、COMPLEX128"}',
+            },
+            {
+                "param_name": "gradOutput",
+                "function_name": "Op",
+                # dtype_desc is empty — no cross-reference text either
+            },
+        ]
+        relations = [
+            {
+                "function_name": "Op",
+                "relation_object": '{"expr_type": "type_equality", "expr": "gradOutput.dtype == self.dtype", "relation_params": ["gradOutput", "self"], "src_text": ""}',
+            },
+        ]
+        result = _resolve_cross_references(params, relations)
+        index = {p["param_name"]: p for p in result}
+        # gradOutput should now have self's dtype
+        assert index["gradOutput"]["dtype_desc"] == index["self"]["dtype_desc"]
+
+    def test_no_constraints_no_change(self):
+        """Without any relations, params are returned as-is (shallow copy)."""
+        params = [
+            {"param_name": "x", "function_name": "Op", "dtype_desc": '{"*": "FLOAT16"}'},
+            {"param_name": "y", "function_name": "Op"},
+        ]
+        result = _resolve_cross_references(params, [])
+        assert len(result) == 2
+        index = {p["param_name"]: p for p in result}
+        assert index["x"]["dtype_desc"] == '{"*": "FLOAT16"}'
+        assert index["y"].get("dtype_desc", "") == ""
+
+    def test_chain_resolution_a_to_b_to_c(self):
+        """Chained constraints A.dtype == B.dtype == C.dtype → all resolved."""
+        params = [
+            {"param_name": "a", "function_name": "Op", "dtype_desc": '{"*": "FLOAT16"}'},
+            {"param_name": "b", "function_name": "Op"},
+            {"param_name": "c", "function_name": "Op"},
+        ]
+        relations = [
+            {
+                "function_name": "Op",
+                "relation_object": '{"expr": "b.dtype == a.dtype", "relation_params": ["b", "a"]}',
+            },
+            {
+                "function_name": "Op",
+                "relation_object": '{"expr": "c.dtype == b.dtype", "relation_params": ["c", "b"]}',
+            },
+        ]
+        result = _resolve_cross_references(params, relations)
+        index = {p["param_name"]: p for p in result}
+        # All three should have the same dtype
+        assert index["a"]["dtype_desc"] == '{"*": "FLOAT16"}'
+        assert index["b"]["dtype_desc"] == '{"*": "FLOAT16"}'
+        assert index["c"]["dtype_desc"] == '{"*": "FLOAT16"}'

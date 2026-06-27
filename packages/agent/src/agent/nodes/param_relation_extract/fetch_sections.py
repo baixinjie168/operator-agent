@@ -6,6 +6,7 @@ from typing import Any
 from agent.mcp_client import MCPClient
 from agent.nodes.param_relation_extract.state import RelationExtractState
 from agent.utils.param_validators import EXCLUDED_PARAMS as _EXCLUDED_PARAMS
+from agent.utils.section_utils import resolve_ws_exe_content
 
 logger = logging.getLogger(__name__)
 
@@ -29,15 +30,12 @@ async def fetch_sections_node(state: RelationExtractState) -> dict[str, Any]:
         }
 
     try:
-        ws_section = await _mcp_client.get_section(doc_id, "params_get_workspace")
-        exe_section = await _mcp_client.get_section(doc_id, "params_execute")
-        constraints_section = await _mcp_client.get_section(doc_id, "constraints")
-
-        ws_content = ws_section.get("content", "") if ws_section else ""
-        exe_content = exe_section.get("content", "") if exe_section else ""
-
-        if constraints_section and constraints_section.get("content"):
-            ws_content += "\n\n---\n## 约束说明\n" + constraints_section["content"]
+        # resolve_ws_exe_content centralises the single-function exe->ws
+        # promotion (params_get_workspace empty -> use params_execute) and
+        # the constraints append, shared with constraint_extract Pass 3.
+        ws_content, exe_content, _ = await resolve_ws_exe_content(
+            _mcp_client, doc_id,
+        )
 
         # Query parameter names for agent loop coverage checks
         params = await _mcp_client.query_params_by_doc_id(doc_id)

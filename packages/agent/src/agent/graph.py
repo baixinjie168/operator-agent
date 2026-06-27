@@ -45,13 +45,15 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
 # -- Extract stage nodes (using main branch new architecture) --
-from agent.nodes.allowed_range_extract import allowed_range_extract_node as _allowed_range_extract
 from agent.nodes.array_length_extract import array_length_extract_node as _array_length_extract
 from agent.nodes.assemble_result import assemble_result_node as _assemble_result
 from agent.nodes.build_param_constraint import (
     create_build_param_constraint_subgraph,
 )
 from agent.nodes.build_param_relations import build_param_relations_node as _build_param_relations
+from agent.nodes.constraint_extract import (
+    constraint_extract_node as _constraint_extract,
+)
 from agent.nodes.determinism_extract import determinism_extract_node as _determinism_extract
 from agent.nodes.dformat_extract import dformat_extract_node as _dformat_extract
 from agent.nodes.dtype_combo_extract import dtype_combo_extract_node as _dtype_combo_extract
@@ -67,15 +69,6 @@ from agent.nodes.param_relation_extract import create_param_relation_subgraph
 from agent.nodes.product_support import product_support_node as _product_support
 from agent.nodes.return_code_extract import return_code_extract_node as _return_code_extract
 from agent.nodes.shape_extract import shape_extract_node as _shape_extract
-from agent.nodes.single_param_constraint import (
-    build_single_param_constraint_node as _build_single_param_constraint,
-)
-from agent.nodes.cross_param_constraint import (
-    cross_param_constraint_node as _cross_param_constraint,
-)
-from agent.nodes.constraint_extract import (
-    constraint_extract_node as _constraint_extract,
-)
 from agent.nodes.state import PipelineState
 from agent.nodes.table_column_extract import table_column_extract_node as _table_column_extract
 
@@ -299,8 +292,8 @@ _STAGE_FIRST_NODE = {
 _DETAIL_EXTRACTORS = [
     "shape_extract", "dtype_extract", "dformat_extract",
     "optional_extract", "array_length_extract",
-    "allowed_range_extract", "return_code_extract", "determinism_extract",
-    "dtype_combo_extract", "param_relation_extract",
+    "return_code_extract", "determinism_extract", "dtype_combo_extract",
+    "param_relation_extract",
 ]
 
 
@@ -316,15 +309,14 @@ def _build_extract(graph: StateGraph, *, is_first: bool, is_last: bool) -> None:
                ∥ FunctionExplanationExtract] → TableColumnExtract
            → LlmDescriptionExtract (subgraph)
            → [ShapeExtract ∥ DtypeExtract ∥ DFormatExtract ∥ OptionalExtract
-              ∥ ArrayLengthExtract ∥ AllowedRangeExtract
+              ∥ ArrayLengthExtract
               ∥ ReturnCodeExtract ∥ DeterminismExtract ∥ DtypeComboExtract
               ∥ ParamRelationExtract (subgraph: implicit_param_extract
-                 + extract_ws + extract_exe + parameter_representation_build
-                 + merge_relations + save_relations)]
-           → BuildParamRelations → BuildSingleParamConstraint
-           → CrossParamConstraint
-           → BuildParamConstraint (subgraph)
-           → ConstraintExtract → AssembleResult → END
+                 + param_repr_build)]
+           → ConstraintExtract (Pass 1-5: unified constraint extraction)
+           → BuildParamRelations (expr generation + dim var substitution)
+           → BuildParamConstraint (subgraph: fetch + attrs + dims + assemble)
+           → AssembleResult → END
     """
     graph.add_node("init_doc", traced_node("init_doc")(_init_doc))
     graph.add_node("product_support", traced_node("product_support")(_product_support))
@@ -337,15 +329,12 @@ def _build_extract(graph: StateGraph, *, is_first: bool, is_last: bool) -> None:
     graph.add_node("dformat_extract", traced_node("dformat_extract")(_dformat_extract))
     graph.add_node("optional_extract", traced_node("optional_extract")(_optional_extract))
     graph.add_node("array_length_extract", traced_node("array_length_extract")(_array_length_extract))
-    graph.add_node("allowed_range_extract", traced_node("allowed_range_extract")(_allowed_range_extract))
     graph.add_node("return_code_extract", traced_node("return_code_extract")(_return_code_extract))
     graph.add_node("determinism_extract", traced_node("determinism_extract")(_determinism_extract))
     graph.add_node("dtype_combo_extract", traced_node("dtype_combo_extract")(_dtype_combo_extract))
     graph.add_node("param_relation_extract", traced_subgraph("param_relation_extract")(create_param_relation_subgraph()))
-    graph.add_node("build_param_relations", traced_node("build_param_relations")(_build_param_relations))
-    graph.add_node("build_single_param_constraint", traced_node("build_single_param_constraint")(_build_single_param_constraint))
-    graph.add_node("cross_param_constraint", traced_node("cross_param_constraint")(_cross_param_constraint))
     graph.add_node("constraint_extract", traced_node("constraint_extract")(_constraint_extract))
+    graph.add_node("build_param_relations", traced_node("build_param_relations")(_build_param_relations))
     bpc_subgraph = create_build_param_constraint_subgraph()
     graph.add_node("build_param_constraint", traced_subgraph("build_param_constraint")(bpc_subgraph))
     graph.add_node("assemble_result", traced_node("assemble_result")(_assemble_result))
@@ -363,19 +352,13 @@ def _build_extract(graph: StateGraph, *, is_first: bool, is_last: bool) -> None:
     for n in _DETAIL_EXTRACTORS:
         graph.add_edge("llm_description_extract", n)
 
-    # Converge: param_relation_extract goes to build_param_relations,
-    # others go to build_single_param_constraint
+    # Converge: all extractors go to constraint_extract
     for n in _DETAIL_EXTRACTORS:
-        if n == "param_relation_extract":
-            graph.add_edge(n, "build_param_relations")
-        else:
-            graph.add_edge(n, "build_single_param_constraint")
+        graph.add_edge(n, "constraint_extract")
 
-    graph.add_edge("build_param_relations", "build_single_param_constraint")
-    graph.add_edge("build_single_param_constraint", "cross_param_constraint")
-    graph.add_edge("cross_param_constraint", "build_param_constraint")
-    graph.add_edge("build_param_constraint", "constraint_extract")
-    graph.add_edge("constraint_extract", "assemble_result")
+    graph.add_edge("constraint_extract", "build_param_relations")
+    graph.add_edge("build_param_relations", "build_param_constraint")
+    graph.add_edge("build_param_constraint", "assemble_result")
 
     if is_last:
         graph.add_edge("assemble_result", END)

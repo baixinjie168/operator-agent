@@ -27,7 +27,7 @@
 - **算子名称**：标题 `# xxx`
 - **产品支持情况**：表格中每行的产品名和支持状态（√/×）
 - **功能说明**：接口功能描述、计算公式（`$$`之间的LaTeX）
-- **函数签名**：从代码块中提取 `aclnnXxxGetWorkspaceSize` 的完整参数列表（参数名 + C类型）
+- **函数签名**：从代码块中提取主函数的完整参数列表（参数名 + C类型）。两段式算子为 `aclnnXxxGetWorkspaceSize`，单函数算子（如 `aclnnCalculateMatmulWeightSize`）为算子同名函数
 - **参数表格**：在"参数说明"章节的HTML表格中，表头为：
   `参数名 | 输入/输出 | 描述 | 使用说明 | 数据类型 | 数据格式 | 维度(shape) | 非连续Tensor`
   - 需去除 `<ul>`, `<li>`, `<code>` 等HTML标签获取纯文本
@@ -193,7 +193,19 @@ JSON约束文档的完整结构详见 `references/json-schema.md`。核心结构
 - 解析 `expr` 中出现的所有变量名（如 `x1`, `alpha`, `out` 等）
 - 对比 `relation_params` 列表
 - 遗漏的参数 → **警告**
-- 使用了不存在的参数名（在 `inputs`/`outputs` 中找不到） → **失败**
+- 使用了不存在的参数名（在 `inputs`/`outputs` 中找不到） → **先查参数别名映射，再判定**
+
+**参数别名解析**（重要）：
+
+约束表达式中可能使用**简写参数名**（如 `weight` 代替 `weight1`/`weight2`），这些简写名不在 `inputs`/`outputs` 中但有合法映射关系。检查前先读取别名映射文件：
+
+> 文件路径：`knowledge/operator-constraint-checker/param-alias.md`
+
+别名映射规则：
+- **重命名**（1对1）：如 `expertTokens` → `[expertTokensOptional]`，简写名等同于单个实际参数，标记为 **PASS**，在审查意见中注明别名关系。
+- **广播AND**（1对多）：如 `weight` → `[weight1, weight2]`，约束需同时适用于所有实际参数，标记为 **PASS**，注明展开后的实际参数。若 `relation_params` 仅列了简写名而未展开为所有实际参数，标记为 **WARN**（建议补充）。
+- **查询优先级**：算子专属映射 > 全局默认映射 > 无映射。
+- 若简写名在别名文件中也找不到，**才**标记为 **失败（真正无效引用）**。
 
 ##### 4.2 src_text 原文准确性
 
@@ -261,7 +273,7 @@ HTML 中所有 CSS 和 JS 必须内联，不依赖外部资源。
 1. **平台维度**：JSON的 `inputs`/`outputs` 和 `constraints_in_parameters` 都按产品名分组，检查时需针对每个支持的产品分别验证。如果多个产品的检查结果完全一致，可以在报告中合并展示并标注
 2. **衍生参数**：JSON中 `is_operator_param: true` 的参数（如 batch_size, hidden_size, time_step）是衍生参数，在Markdown中可能不直接出现在参数表格中，而是出现在使用说明文本里。维度1检查时需特殊处理
 3. **src_text对照**：每条约束的 `src_text` 字段保存了Markdown原文描述，是验证表达式正确性的直接依据
-4. **两段式接口**：检查时主要关注 `GetWorkspaceSize` 接口的参数约束。`workspaceSize`、`executor` 是框架参数，不纳入参数检查
+4. **主接口**：检查时主要关注主接口的参数约束。两段式算子为 `GetWorkspaceSize`，单函数算子（如 `aclnnCalculateMatmulWeightSize`）为唯一函数。`workspaceSize`、`executor` 是框架参数，不纳入参数检查
 5. **表达式语言**：JSON中的 `expr` 使用Python风格表达式，按Python语义理解。`.range_value` 表示引用参数的取值
 6. **可选参数**：参数名含Optional的参数，在表达式中需检查 `is None` 判断是否完整
 7. **函数签名解析**：从 `function_signature` 或 Markdown代码块中提取参数列表时，需要去掉 `const`、`*`、`&` 修饰符来获取纯类型名

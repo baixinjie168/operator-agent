@@ -8,19 +8,16 @@ dtype resolution uses a 3-level fallback chain:
   2. dtype_combinations table -> dtype_by_platform[platform][param_name]
   3. param type -> _ARRAY_TYPE_DTYPE_FALLBACK mapping (e.g. aclIntArray -> "int")
 
-A previous 3rd "legacy data_type -> _split_csv" fallback was removed: the DB
-exposes data_type and dtype_desc as aliases of the SAME column, so level 1
-already covers it. Worse, applying _split_csv directly to a platform-keyed JSON
-string mangles it (splitting on / and 、 chars inside the JSON structure),
-producing garbage like ["Atlas A2 ...\": \"FLOAT16", ...]. For platforms
-absent from the dtype cell (e.g. null-pointer-only), the empty result is now
-preserved instead of being overwritten.
+Level 3 derives dtype from the parameter's C type when levels 1 and 2 both
+yield nothing.  Array types (aclIntArray etc.) have an inherent primitive
+dtype; non-tensor scalar types (bool, int64_t, char, etc.) fall back to the
+type name itself.  Tensor types (aclTensor, aclTensorList) are excluded —
+their dtype must come from levels 1/2, not the type name.
 
-The current 3rd level is different: it derives dtype from the parameter's C
-type when levels 1 and 2 both yield nothing. Array types (aclIntArray etc.)
-have an inherent primitive dtype; other types (aclTensor, aclScalar, ...) fall
-back to the type name itself so downstream generators always receive a
-non-empty dtype list.
+Null-pointer-only detection: when usage_notes for a platform contains explicit
+null-pointer phrases (e.g. "只支持传空指针"), the param has no dtype on that
+platform (N/A).  The broad "不支持" pattern was removed because it matched
+non-null-pointer contexts like "暂不支持设为True".
 """
 
 from __future__ import annotations
@@ -42,16 +39,27 @@ logger = logging.getLogger(__name__)
 
 # Patterns indicating a parameter must be null (empty pointer) on a platform,
 # meaning it has no dtype — effectively N/A.
-_NULL_POINTER_RE = re.compile(r"(只支持传空指针|传空指针|必须为空指针|仅支持空指针|不支持)")
+# NOTE: "不支持" was removed because it is too broad — it matches phrases like
+# "暂不支持设为True" or "不支持某些枚举值" which do NOT mean the param is
+# null-pointer-only.  Only explicit null-pointer phrases are matched.
+_NULL_POINTER_RE = re.compile(r"(只支持传空指针|传空指针|必须为空指针|仅支持空指针)")
 
 # Level-3 dtype fallback: when dtype_desc and dtype_combinations both yield
 # nothing, derive dtype from the parameter's C type.  Array types have an
-# inherent primitive dtype; all other types fall back to the type name itself.
+# inherent primitive dtype; non-tensor scalar types (bool, int64_t, char, etc.)
+# fall back to the type name itself so downstream generators always receive a
+# non-empty dtype list.  Tensor types (aclTensor, aclTensorList) are excluded —
+# their dtype must come from dtype_desc or dtype_combinations, not the type
+# name, because "aclTensor" is a type, not a data type.
 _ARRAY_TYPE_DTYPE_FALLBACK: dict[str, str] = {
     "aclIntArray": "int",
     "aclFloatArray": "float",
     "aclBoolArray": "bool",
 }
+
+# Types for which the Level-3 type-name fallback must NOT apply.
+# These are container/handle types whose "type name" is not a valid dtype.
+_NO_DTYPE_FALLBACK_TYPES = frozenset({"aclTensor", "aclTensorList"})
 
 
 def _parse_array_length(raw: str) -> dict:
@@ -133,12 +141,17 @@ async def attrs_build_node(state: BuildParamConstraintState) -> dict[str, Any]:
                     # Level 3 fallback: derive dtype from param type when
                     # Level 1 and 2 both yield nothing.  Array types
                     # (aclIntArray etc.) map to their inherent primitive dtype;
-                    # other types use the type name itself as a best-effort
-                    # fallback so downstream generators always receive a
-                    # non-empty dtype list.  Skipped for null-pointer-only
-                    # params (handled above) and when ptype itself is empty.
+                    # non-tensor scalar types (bool, int64_t, char, etc.) use
+                    # the type name itself as a best-effort fallback so
+                    # downstream generators always receive a non-empty dtype
+                    # list.  Tensor types (aclTensor, aclTensorList) are
+                    # excluded — "aclTensor" is a type, not a dtype, so
+                    # returning it would be misleading.  Skipped for
+                    # null-pointer-only params (handled above) and when ptype
+                    # itself is empty.
                     if not dtypes and ptype:
-                        dtypes = [_ARRAY_TYPE_DTYPE_FALLBACK.get(ptype, ptype)]
+                        if ptype not in _NO_DTYPE_FALLBACK_TYPES:
+                            dtypes = [_ARRAY_TYPE_DTYPE_FALLBACK.get(ptype, ptype)]
             else:
                 dtypes = _split_csv(dtype_raw)
 

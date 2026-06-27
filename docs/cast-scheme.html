@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>aclnnNpuFormatCast 多函数文档解析修复方案</title>
+<style>
+:root{--bg:#0d1117;--card:#161b22;--border:#30363d;--text:#e6edf3;--dim:#8b949e;--blue:#58a6ff;--green:#3fb950;--red:#f85149;--amber:#d29922;--purple:#bc8cff;--blueL:#0d2d5a;--greenL:#0d2818;--redL:#2a0d0d;--amberL:#2a2008}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'SF Mono','Cascadia Code','Consolas',monospace;background:var(--bg);color:var(--text);line-height:1.7;font-size:14px}
+.wrapper{max-width:1140px;margin:0 auto;padding:32px 24px}
+h1{font-size:22px;color:var(--blue);border-bottom:1px solid var(--border);padding-bottom:12px;margin-bottom:24px}
+h2{font-size:17px;color:var(--green);margin:28px 0 12px;padding:8px 12px;background:var(--greenL);border-left:3px solid var(--green);border-radius:4px}
+h3{font-size:15px;color:var(--amber);margin:20px 0 8px;padding:6px 10px;background:var(--amberL);border-left:3px solid var(--amber);border-radius:4px}
+h4{font-size:13px;color:var(--purple);margin:14px 0 6px}
+p{margin:8px 0}.dim{color:var(--dim);font-size:12px}
+.section{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:16px 20px;margin-bottom:16px}
+.problem{background:var(--redL);border:1px solid #f8514944;border-radius:8px;padding:14px 18px;margin-bottom:12px}
+.problem h3{color:var(--red);background:none;border:none;padding:0;margin-bottom:6px}
+.proposal{background:var(--blueL);border:1px solid #58a6ff44;border-radius:8px;padding:14px 18px;margin-bottom:12px}
+.proposal h3{color:var(--blue);background:none;border:none;padding:0;margin-bottom:6px}
+.ok{background:var(--greenL);border:1px solid #3fb95044;border-radius:8px;padding:14px 18px;margin-bottom:12px}
+.ok h3{color:var(--green);background:none;border:none;padding:0;margin-bottom:6px}
+table{width:100%;border-collapse:collapse;margin:12px 0;font-size:12px}
+th{text-align:left;padding:8px 10px;border:1px solid var(--border);background:#21262d;color:var(--blue);font-weight:600}
+td{padding:6px 10px;border:1px solid var(--border);vertical-align:top}
+tr:hover td{background:#1c2128}
+code{background:#21262d;color:var(--amber);padding:2px 6px;border-radius:4px;font-size:12px}
+pre{background:#21262d;border:1px solid var(--border);border-radius:6px;padding:14px;overflow-x:auto;font-size:12px;line-height:1.5;margin:12px 0}
+pre .k{color:var(--blue)}pre .s{color:var(--green)}pre .n{color:var(--purple)}pre .c{color:var(--dim)}pre .r{color:var(--red)}
+ul,ol{margin:8px 0 8px 20px}li{margin:4px 0}
+.flow{background:#21262d;border:1px solid var(--border);border-radius:6px;padding:14px 16px;margin:12px 0;font-size:12px;line-height:1.8}
+.flow .node{display:inline-block;padding:3px 10px;border-radius:4px;margin:2px}
+.flow .ws{background:var(--blueL);color:var(--blue);border:1px solid #58a6ff55}
+.flow .exe{background:var(--amberL);color:var(--amber);border:1px solid #d2992255}
+.flow .calc{background:var(--greenL);color:var(--green);border:1px solid #3fb95055}
+.flow .arr{color:var(--dim);margin:0 4px}
+.diff-block{display:flex;gap:12px;margin:12px 0;flex-wrap:wrap}
+.diff-col{flex:1;min-width:340px}
+.diff-label{font-size:11px;font-weight:700;margin-bottom:4px;padding:3px 8px;border-radius:4px;display:inline-block}
+.diff-cur{background:var(--redL);color:var(--red)}
+.diff-new{background:var(--greenL);color:var(--green)}
+.toc{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:16px 20px;margin-bottom:24px}
+.toc a{color:var(--blue);text-decoration:none}
+.toc a:hover{text-decoration:underline}
+.toc ol{margin:6px 0 0 20px}.toc li{margin:3px 0}
+</style>
+</head>
+<body>
+<div class="wrapper">
+
+<h1>aclnnNpuFormatCast 多函数文档解析修复方案</h1>
+<p class="dim">目标：将含 3 个函数（含额外的 CalculateSizeAndFormat）的文档解析为与 aclnnFFNV3.json 结构一致的约束文件 | 日期：2026-06-27</p>
+<div class="toc"><strong>目录</strong><ol>
+<li><a href="#bg">背景：文档特殊性与当前症状</a></li>
+<li><a href="#root">根因分析（4 个根因）</a></li>
+<li><a href="#overview">解决方案总览</a></li>
+<li><a href="#phase1">阶段 1：章节类型基础设施</a></li>
+<li><a href="#phase2">阶段 2：函数分组辅助函数</a></li>
+<li><a href="#phase3">阶段 3：章节获取补全</a></li>
+<li><a href="#phase4">阶段 4：table_column_extract 函数感知匹配</a></li>
+<li><a href="#phase5">阶段 5：inputs/outputs 组装</a></li>
+<li><a href="#phase6">阶段 6：get_section_by_type 健壮性（可选）</a></li>
+<li><a href="#nodes">节点顺序与新节点说明</a></li>
+<li><a href="#scenario">多场景处理说明</a></li>
+<li><a href="#verify">验证计划</a></li>
+<li><a href="#files">改动文件汇总</a></li>
+</ol></div>
+
+<div class="section" id="bg">
+<h2>1. 背景：文档特殊性与当前症状</h2>
+<h3>1.1 文档结构</h3>
+<p><code>operators/trans-ten/aclnnNpuFormatCast.md</code> 比常规算子文档多了 <b>一个独立的预处理函数</b> <code>aclnnNpuFormatCastCalculateSizeAndFormat</code>，共 3 个函数：</p>
+<table>
+<tr><th>函数</th><th>参数</th><th>说明</th></tr>
+<tr><td><code>aclnnNpuFormatCastCalculateSizeAndFormat</code></td><td>srcTensor, dstFormat, additionalDtype, dstShape, dstShapeSize, actualFormat</td><td>预处理：计算目标张量的 shape 和实际数据格式</td></tr>
+<tr><td><code>aclnnNpuFormatCastGetWorkspaceSize</code></td><td>srcTensor, dstTensor, workspaceSize, executor</td><td>两段式接口第一段（常规）</td></tr>
+<tr><td><code>aclnnNpuFormatCast</code></td><td>workspace, workspaceSize, executor, stream</td><td>两段式接口第二段（常规）</td></tr>
+</table>
+<p>每个函数在文档中都有独立的 <code>## 函数名</code> H2 章节和 <code>- **参数说明**</code> H3 子章节（含 HTML 参数表）。</p>
+<h3>1.2 当前症状</h3>
+<p>运行 extract 流水线后，<code>res/check0627/cons/aclnnNpuFormatCast.json</code> 的结果：</p>
+<div class="diff-block">
+<div class="diff-col"><span class="diff-label diff-cur">当前输出（缺失）</span>
+<pre><span class="r">inputs:</span>  srcTensor, quantization_type
+<span class="r">outputs:</span> dstTensor
+<span class="c">缺失的 CalculateSizeAndFormat 参数：
+  dstFormat, additionalDtype (inputs)
+  dstShape, dstShapeSize, actualFormat (outputs)</span></pre>
+</div>
+<div class="diff-col"><span class="diff-label diff-new">期望输出（同 FFNV3 结构）</span>
+<pre><span class="k">inputs:</span>  srcTensor, dstFormat, additionalDtype,
+          quantization_type (+ 隐式参数 C0)
+<span class="k">outputs:</span> dstTensor, dstShape, dstShapeSize, actualFormat
+<span class="c">顶层 key 结构与 aclnnFFNV3.json 一致</span></pre>
+</div>
+</div>
+<p>值得注意的是：<code>dtype_support_description</code> 字段中<b>已经包含</b> <code>aclnnNpuFormatCastCalculateSizeAndFormat.*</code> 的条目——说明 dtype 组合被正确提取了，只是参数没有被放入 inputs/outputs。</p>
+</div>
+
+<div class="section" id="root">
+<h2>2. 根因分析</h2>
+<p>通过追踪完整解析流水线代码，定位到 <b>4 个根因</b>，它们共同导致 CalculateSizeAndFormat 函数的参数全部丢失。</p>
+<div class="problem">
+<h3>根因 1：章节分类错误（section_splitter.py）</h3>
+<p><code>_classify_h2()</code> 只识别三类 H2 标题：</p>
+<pre><span class="k">if</span> heading.endswith(<span class="s">"GetWorkspaceSize"</span>):  <span class="c"># GET_WORKSPACE_SIZE</span>
+<span class="k">if</span> heading == operator_name:              <span class="c"># EXECUTE_API</span>
+<span class="k">if</span> 匹配 H2_PATTERNS(...):                 <span class="c"># 产品支持/功能说明/...</span>
+<span class="k">else</span>:                                     <span class="c"># UNKNOWN  &lt;- CalculateSizeAndFormat 落入此处</span></pre>
+<p><code>aclnnNpuFormatCastCalculateSizeAndFormat</code> 不以 <code>GetWorkspaceSize</code> 结尾、不等于算子名、不匹配任何 H2 模式 -&gt; 分类为 <b>UNKNOWN</b>。</p>
+<p>更严重的是，它的 H3 子章节 <code>参数说明</code> 被 <code>_classify_h3()</code> 分类为 <b><code>params_get_workspace</code></b>（因为父类型不是 <code>EXECUTE_API</code>）。</p>
+<p>用实际文档运行 <code>split_sections()</code> 确认：</p>
+<pre><span class="c"># 实际章节划分结果（13 个 section）</span>
+[3] <span class="r">params_get_workspace</span>        <span class="c"># CalculateSizeAndFormat 的参数表（错误分类！）</span>
+[4] <span class="r">return_codes_get_workspace</span>  <span class="c"># CalculateSizeAndFormat 的返回值表</span>
+[5] get_workspace_size          <span class="c"># GetWorkspaceSize H2</span>
+[6] <span class="r">params_get_workspace</span>        <span class="c"># GetWorkspaceSize 的参数表（被同名遮蔽！）</span>
+[7] return_codes_get_workspace  <span class="c"># GetWorkspaceSize 的返回值表</span>
+[8] execute_api / [9] params_execute / [10] return_codes_execute ...</pre>
+</div>
+<div class="problem">
+<h3>根因 2：get_section_by_type 只返回第一个匹配（document_tools.py）</h3>
+<pre><span class="k">def</span> get_section_by_type(doc_id, section_type):
+    <span class="k">for</span> section <span class="k">in</span> parsed[<span class="s">"sections"</span>]:
+        <span class="k">if</span> section[<span class="s">"section_type"</span>] == section_type:
+            <span class="k">return</span> section  <span class="c"># 只返回第一个匹配！</span>
+    <span class="k">return</span> None</pre>
+<p>根因 1 产生了两个 <code>params_get_workspace</code> 章节，调用 <code>get_section(doc_id, "params_get_workspace")</code> 只返回 <b>CalculateSizeAndFormat 的参数表</b>（排在文档前面），GetWorkspaceSize 的参数表被完全遮蔽，下游永远看不到。</p>
+</div>
+<div class="problem">
+<h3>根因 3：_build_inputs_outputs 只保留 WorkspaceSize 函数参数（assemble_result.py）</h3>
+<pre><span class="c"># assemble_result.py _build_inputs_outputs()</span>
+<span class="k">for</span> p <span class="k">in</span> params:
+    fn = p.get(<span class="s">"function_name"</span>, <span class="s">""</span>)
+    <span class="k">if</span> <span class="r">not fn.endswith("WorkspaceSize")</span>:  <span class="c"># CalculateSizeAndFormat 被排除！</span>
+        <span class="k">continue</span></pre>
+<p>即便 CalculateSizeAndFormat 的参数被提取到 DB，最终组装 inputs/outputs 时也被过滤掉。当前输出验证：</p>
+<ul>
+<li><b>INPUTS</b>: 只有 <code>srcTensor</code> + <code>quantization_type</code>（缺失 <code>dstFormat</code>, <code>additionalDtype</code>）</li>
+<li><b>OUTPUTS</b>: 只有 <code>dstTensor</code>（缺失 <code>dstShape</code>, <code>dstShapeSize</code>, <code>actualFormat</code>）</li>
+</ul>
+</div>
+<div class="problem">
+<h3>根因 4：多个节点按 ws/exe 二分分组，CalculateSizeAndFormat 参数被归入 exe 组</h3>
+<p>以下节点用 <code>is_ws_function()</code>（判断函数名是否含 <code>GetWorkspaceSize</code>）做二分组，CalculateSizeAndFormat 参数被归入 exe 组，用 <code>params_execute</code> 章节提取（错误章节）：</p>
+<table>
+<tr><th>节点</th><th>文件:行</th><th>问题</th></tr>
+<tr><td>allowed_range_extract</td><td><code>allowed_range_extract.py:68-69</code></td><td>calc 参数归入 exe，用 params_execute 章节提取</td></tr>
+<tr><td>llm_description_extract</td><td><code>fetch_sections.py:56-57</code>, <code>extract_exe.py:26</code></td><td>同上</td></tr>
+<tr><td>table_column_extract</td><td><code>table_column_extract.py:34-36</code></td><td>不 fetch params_calculate_size</td></tr>
+<tr><td>constraint_extract</td><td><code>constraint_extract.py:1440-1441</code></td><td>同上</td></tr>
+<tr><td>param_relation_extract</td><td><code>fetch_sections.py:32-33</code></td><td>同上</td></tr>
+<tr><td>return_code_extract</td><td><code>return_code_extract.py:36-37</code></td><td>不 fetch return_codes_calculate_size</td></tr>
+</table>
+</div>
+</div>
+
+<div class="section" id="overview">
+<h2>3. 解决方案总览</h2>
+<div class="proposal">
+<h3>核心思路</h3>
+<p>为 <code>CalculateSizeAndFormat</code> 类函数建立 <b>独立的章节类型和函数分组</b>，让它贯穿整个解析流水线。<b>不需要新增节点或调整节点顺序</b>——所有改动都在现有节点内部完成。</p>
+</div>
+<div class="flow">
+<span class="dim">数据流变化：</span><br>
+<span class="dim">现状:</span> 文档 <span class="arr">-&gt;</span> <span class="node exe">UNKNOWN H2</span> <span class="arr">-&gt;</span> <span class="node exe">params_get_workspace (遮蔽)</span> <span class="arr">-&gt;</span> 只剩 srcTensor<br>
+<span class="dim">目标:</span> 文档 <span class="arr">-&gt;</span> <span class="node calc">CALCULATE_SIZE_API H2</span> <span class="arr">-&gt;</span> <span class="node calc">params_calculate_size (独立)</span> <span class="arr">-&gt;</span> 完整参数
+</div>
+<p>三层修复链路：</p>
+<ol>
+<li><b>章节类型分离</b>（阶段 1-2）：CalculateSizeAndFormat 获得独立 section_type，不再遮蔽 GetWorkspaceSize</li>
+<li><b>函数感知匹配</b>（阶段 3-4）：各节点 fetch 正确章节，table_column_extract 按函数名匹配参数表</li>
+<li><b>组装过滤放宽</b>（阶段 5）：_build_inputs_outputs 接纳 CalculateSizeAndFormat 参数</li>
+</ol>
+</div>
+
+<div class="section" id="phase1">
+<h2>4. 阶段 1：章节类型基础设施</h2>
+<h3>4.1 新增 SectionType（enums.py）</h3>
+<p>文件：<code>packages/shared/src/shared/models/enums.py</code></p>
+<pre><span class="k">class</span> SectionType(StrEnum):
+    ...
+    CALCULATE_SIZE_API = <span class="s">"calculate_size_api"</span>                     <span class="c"># 新增：H2</span>
+    PARAMS_CALCULATE_SIZE = <span class="s">"params_calculate_size"</span>                 <span class="c"># 新增：H3 参数说明</span>
+    RETURN_CODES_CALCULATE_SIZE = <span class="s">"return_codes_calculate_size"</span>       <span class="c"># 新增：H3 返回值</span></pre>
+<h3>4.2 章节分类逻辑（section_splitter.py）</h3>
+<p>文件：<code>packages/mcp-server/src/mcp_server/parsers/section_splitter.py</code></p>
+<h4>4.2a _classify_h2() — 新增 CalculateSizeAndFormat 检测</h4>
+<pre><span class="k">def</span> _classify_h2(heading, operator_name):
+    heading_stripped = heading.strip()
+    <span class="k">if</span> heading_stripped.endswith(<span class="s">"GetWorkspaceSize"</span>):
+        <span class="k">return</span> SectionType.GET_WORKSPACE_SIZE
+    <span class="k">if</span> heading_stripped.endswith(<span class="s">"CalculateSizeAndFormat"</span>):      <span class="c"># 新增</span>
+        <span class="k">return</span> SectionType.CALCULATE_SIZE_API
+    <span class="k">if</span> heading_stripped == operator_name:
+        <span class="k">return</span> SectionType.EXECUTE_API
+    <span class="k">for</span> pattern, section_type <span class="k">in</span> H2_PATTERNS:
+        <span class="k">if</span> pattern.search(heading_stripped):
+            <span class="k">return</span> section_type
+    <span class="k">return</span> SectionType.UNKNOWN</pre>
+<h4>4.2b _classify_h3() — 父类型为 CALCULATE_SIZE_API 时分类到独立类型</h4>
+<pre><span class="k">def</span> _classify_h3(heading, parent_type):
+    <span class="k">for</span> pattern, section_type <span class="k">in</span> H3_PATTERNS:
+        <span class="k">if</span> pattern.search(heading):
+            <span class="k">if</span> section_type == SectionType.PARAMS_GET_WORKSPACE:
+                <span class="k">if</span> parent_type == SectionType.EXECUTE_API:
+                    <span class="k">return</span> SectionType.PARAMS_EXECUTE
+                <span class="k">if</span> parent_type == SectionType.CALCULATE_SIZE_API:  <span class="c"># 新增</span>
+                    <span class="k">return</span> SectionType.PARAMS_CALCULATE_SIZE
+                <span class="k">return</span> SectionType.PARAMS_GET_WORKSPACE
+            <span class="k">if</span> section_type == SectionType.RETURN_CODES_GET_WORKSPACE:
+                <span class="k">if</span> parent_type == SectionType.EXECUTE_API:
+                    <span class="k">return</span> SectionType.RETURN_CODES_EXECUTE
+                <span class="k">if</span> parent_type == SectionType.CALCULATE_SIZE_API:  <span class="c"># 新增</span>
+                    <span class="k">return</span> SectionType.RETURN_CODES_CALCULATE_SIZE
+                <span class="k">return</span> SectionType.RETURN_CODES_GET_WORKSPACE
+            <span class="k">return</span> section_type
+    <span class="k">return</span> SectionType.UNKNOWN</pre>
+<h4>4.2c pre-H3 body 发射 — 将 CALCULATE_SIZE_API 加入特殊处理列表</h4>
+<pre><span class="k">if</span> any(line.strip() <span class="k">for</span> line <span class="k">in</span> pre_h3_body) <span class="k">or</span> section_type <span class="k">in</span> (
+    SectionType.GET_WORKSPACE_SIZE,
+    SectionType.EXECUTE_API,
+    SectionType.CALCULATE_SIZE_API,  <span class="c"># 新增</span>
+):</pre>
+<h3>4.3 同步更新 classify_section（document_parser.py）</h3>
+<p>文件：<code>packages/mcp-server/src/mcp_server/parsers/document_parser.py</code></p>
+<p><code>classify_section()</code> 虽然在流水线中未被直接调用（<code>parse_operator_document</code> 用的是 <code>raw.section_type</code>），但测试文件引用了它，需保持一致并补充测试。</p>
+</div>
+
+<div class="section" id="phase2">
+<h2>5. 阶段 2：函数分组辅助函数</h2>
+<h3>5.1 新增辅助函数（param_validators.py）</h3>
+<p>文件：<code>packages/agent/src/agent/utils/param_validators.py</code></p>
+<pre><span class="k">def</span> is_calc_function(function_name: str) -&gt; bool:
+    <span class="s">&quot;&quot;&quot;Return True if function_name is a CalculateSizeAndFormat variant.&quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="s">"CalculateSize"</span> <span class="k">in</span> function_name
+
+<span class="k">def</span> is_first_stage_function(function_name: str) -&gt; bool:
+    <span class="s">&quot;&quot;&quot;Return True for GetWorkspaceSize or CalculateSizeAndFormat functions
+    (both have parameter tables and are first stage APIs).&quot;&quot;&quot;</span>
+    <span class="k">return</span> is_ws_function(function_name) <span class="k">or</span> is_calc_function(function_name)</pre>
+<h3>5.2 re-export（context_utils.py）</h3>
+<p>文件：<code>packages/agent/src/agent/nodes/context_utils.py</code></p>
+<p>与现有 <code>_is_ws_function</code> 的 re-export 模式一致，新增 re-export <code>is_calc_function</code>、<code>is_first_stage_function</code>。</p>
+</div>
+
+<div class="section" id="phase3">
+<h2>6. 阶段 3：章节获取补全</h2>
+<p>所有需要 fetch <code>params_calculate_size</code> / <code>return_codes_calculate_size</code> 的节点：</p>
+<table>
+<tr><th>#</th><th>文件</th><th>改动</th></tr>
+<tr><td>3.1</td><td><code>table_column_extract.py</code></td><td>_SECTION_TYPES 增加 params_calculate_size；_fetch_sections_text 改为返回 [(section_type, content)] 列表（见阶段 4）</td></tr>
+<tr><td>3.2</td><td><code>constraint_extract.py:1440</code></td><td>新增 calc_section = await get_section(doc_id, "params_calculate_size")，将 content 拼入 ws_content</td></tr>
+<tr><td>3.3</td><td><code>param_relation_extract/fetch_sections.py:32</code></td><td>新增获取 params_calculate_size，拼入 ws_section_content</td></tr>
+<tr><td>3.4</td><td><code>return_code_extract.py:36</code></td><td>新增 calc_section = await get_section(doc_id, "return_codes_calculate_size")；新增 _extract_one 任务用 f"{operator_name}CalculateSizeAndFormat" 作为 function_name</td></tr>
+<tr><td>3.5</td><td><code>allowed_range_extract.py</code></td><td>_WS_SECTION_TYPES 增加 params_calculate_size, return_codes_calculate_size；分组逻辑改用 is_first_stage_function</td></tr>
+<tr><td>3.6</td><td><code>llm_description_extract/fetch_sections.py</code></td><td>_WS_SECTION_TYPES 增加 params_calculate_size, return_codes_calculate_size；分组逻辑改用 is_first_stage_function</td></tr>
+</table>
+<div class="proposal">
+<h3>分组策略：将 CalculateSizeAndFormat 参数归入 ws 组（first-stage）</h3>
+<p>CalculateSizeAndFormat 参数和 GetWorkspaceSize 一样拥有参数表，属于"第一段接口"。将其归入 ws 组而非 exe 组，这样 <code>extract_ws.py</code> 会用包含两张表的 <code>ws_sections_text</code> 来处理它们，LLM 能根据 function_name 区分。</p>
+<pre><span class="c"># allowed_range_extract.py / fetch_sections.py 分组改动</span>
+<span class="c"># 现状</span>
+ws_params  = [p <span class="k">for</span> p <span class="k">in</span> params <span class="k">if</span> is_ws_function(p[<span class="s">"function_name"</span>])]
+exe_params = [p <span class="k">for</span> p <span class="k">in</span> params <span class="k">if</span> <span class="r">not</span> is_ws_function(p[<span class="s">"function_name"</span>])]
+<span class="c"># 改为</span>
+ws_params  = [p <span class="k">for</span> p <span class="k">in</span> params <span class="k">if</span> <span class="k">is_first_stage_function</span>(p[<span class="s">"function_name"</span>])]
+exe_params = [p <span class="k">for</span> p <span class="k">in</span> params <span class="k">if</span> <span class="k">not</span> is_first_stage_function(p[<span class="s">"function_name"</span>])]</pre>
+</div>
+</div>
+
+<div class="section" id="phase4">
+<h2>7. 阶段 4：table_column_extract 函数感知匹配（核心改动）</h2>
+<div class="problem">
+<h3>问题</h3>
+<p>当前 <code>_extract_from_sections</code> 把所有章节文本拼接后按参数名匹配（取第一个匹配）。<code>srcTensor</code> 同时出现在 CalculateSizeAndFormat 和 GetWorkspaceSize 两张表中，会导致跨函数错配。</p>
+</div>
+<div class="proposal">
+<h3>方案：按 section_type 分组匹配</h3>
+<p>每个参数只在自己所属函数的表中查找。重构 <code>_extract_from_sections</code>：</p>
+<h4>新增：函数名 -&gt; 参数表 section_type 映射</h4>
+<pre><span class="k">def</span> _function_to_param_section(fn: str) -&gt; str:
+    <span class="k">if</span> <span class="s">"CalculateSize"</span> <span class="k">in</span> fn:
+        <span class="k">return</span> <span class="s">"params_calculate_size"</span>
+    <span class="k">if</span> <span class="s">"GetWorkspaceSize"</span> <span class="k">in</span> fn:
+        <span class="k">return</span> <span class="s">"params_get_workspace"</span>
+    <span class="k">return</span> <span class="s">"params_execute"</span></pre>
+<h4>重构 _fetch_sections_text -&gt; _fetch_sections（返回列表）</h4>
+<pre><span class="k">async def</span> _fetch_sections(doc_id) -&gt; list[tuple[str, str]]:
+    sections = []
+    <span class="k">for</span> st <span class="k">in</span> [<span class="s">"params_calculate_size"</span>, <span class="s">"params_get_workspace"</span>, <span class="s">"params_execute"</span>]:
+        section = <span class="k">await</span> _mcp_client.get_section(doc_id, st)
+        <span class="k">if</span> section <span class="k">and</span> section.get(<span class="s">"content"</span>):
+            sections.append((st, section[<span class="s">"content"</span>]))
+    <span class="k">return</span> sections</pre>
+<h4>重构 _extract_from_sections：按 section_type 分组解析表</h4>
+<pre><span class="k">def</span> _extract_from_sections(sections, params):
+    <span class="c"># 按 section_type 分组解析表</span>
+    tables_by_section = {}
+    <span class="k">for</span> section_type, content <span class="k">in</span> sections:
+        tables, raw_tables = parse_html_tables_with_raw(content)
+        <span class="k">for</span> i, grid <span class="k">in</span> enumerate(tables):
+            <span class="k">if</span> <span class="k">not</span> grid <span class="k">or</span> <span class="k">not</span> is_table_form(grid[0]):
+                <span class="k">continue</span>
+            col_map = detect_table_columns(grid[0])
+            name_idx = find_param_name_column(grid[0])
+            tables_by_section.setdefault(section_type, []).append(
+                (grid, raw_tables[i], col_map, name_idx))
+    results = []
+    <span class="k">for</span> param <span class="k">in</span> params:
+        fn = param.get(<span class="s">"function_name"</span>, <span class="s">""</span>)
+        section_type = <span class="k">_function_to_param_section</span>(fn)  <span class="c"># 只查对应函数的表</span>
+        tables = tables_by_section.get(section_type, [])
+        <span class="k">for</span> grid, raw_grid, col_map, name_idx <span class="k">in</span> tables:
+            extracted = extract_columns_as_json(
+                grid, raw_grid, col_map, param_name, param_type, name_idx)
+            <span class="k">if</span> extracted:
+                <span class="k">break</span>
+        ...</pre>
+<p>这样 <code>srcTensor</code>（属于 GetWorkspaceSize 函数）只在 <code>params_get_workspace</code> 表中查找，<code>srcTensor</code>（属于 CalculateSizeAndFormat 函数）只在 <code>params_calculate_size</code> 表中查找，互不干扰。</p>
+</div>
+</div>
+
+<div class="section" id="phase5">
+<h2>8. 阶段 5：inputs/outputs 组装（assemble_result.py）</h2>
+<p>文件：<code>packages/agent/src/agent/nodes/assemble_result.py</code></p>
+<div class="proposal">
+<h3>放宽 _build_inputs_outputs 函数名过滤</h3>
+<pre><span class="c"># 现状</span>
+<span class="k">if</span> <span class="r">not fn.endswith("WorkspaceSize")</span>:
+    <span class="k">continue</span>
+<span class="c"># 改为</span>
+<span class="k">if</span> <span class="k">not (</span>fn.endswith(<span class="s">"WorkspaceSize"</span>) <span class="k">or</span> <span class="s">"CalculateSize"</span> <span class="k">in</span> fn<span class="k">)</span>:
+    <span class="k">continue</span></pre>
+<p>CalculateSizeAndFormat 的参数会进入 inputs/outputs，按 <code>direction</code> 字段（由 table_column_extract 和 llm_description_extract 填充）自动分流：</p>
+<table>
+<tr><th>参数</th><th>direction</th><th>归属</th><th>类型</th></tr>
+<tr><td>srcTensor</td><td>输入</td><td>inputs</td><td>aclTensor</td></tr>
+<tr><td>dstFormat</td><td>输入</td><td>inputs</td><td>int</td></tr>
+<tr><td>additionalDtype</td><td>可选输入</td><td>inputs</td><td>int</td></tr>
+<tr><td>dstShape</td><td>输出</td><td>outputs</td><td>int64_t</td></tr>
+<tr><td>dstShapeSize</td><td>输出</td><td>outputs</td><td>uint64_t</td></tr>
+<tr><td>actualFormat</td><td>输出</td><td>outputs</td><td>int</td></tr>
+<tr><td>dstTensor</td><td>输出（LLM 纠正）</td><td>outputs</td><td>aclTensor</td></tr>
+</table>
+</div>
+</div>
+
+<div class="section" id="phase6">
+<h2>9. 阶段 6：get_section_by_type 健壮性提升（可选但推荐）</h2>
+<p>文件：<code>packages/mcp-server/src/mcp_server/tools/document_tools.py</code></p>
+<p><code>get_section_by_type</code> 只返回第一个匹配。虽然阶段 1 修复后不再有重名章节，但为防止未来类似文档出现问题，建议新增返回所有匹配的方法：</p>
+<pre><span class="k">def</span> get_sections_by_type(doc_id, section_type) -&gt; list[dict]:
+    <span class="s">&quot;&quot;&quot;Return ALL sections matching section_type.&quot;&quot;&quot;</span>
+    parsed = get_parsed_by_doc_id(doc_id)
+    <span class="k">if</span> <span class="k">not</span> parsed:
+        <span class="k">return</span> []
+    <span class="k">return</span> [s <span class="k">for</span> s <span class="k">in</span> parsed.get(<span class="s">"sections"</span>, [])
+            <span class="k">if</span> s.get(<span class="s">"section_type"</span>) == section_type]</pre>
+</div>
+
+<div class="section" id="nodes">
+<h2>10. 节点顺序与新节点说明</h2>
+<div class="ok">
+<h3>不需要新增节点，也不需要调整节点顺序</h3>
+<p>现有流水线结构保持不变：</p>
+</div>
+<div class="flow">
+InitDoc <span class="arr">-&gt;</span> [ProductSupport <span class="dim">||</span> FunctionSignature <span class="dim">||</span> FunctionExplanation]
+<span class="arr">-&gt;</span> <span class="node ws">TableColumnExtract</span> <span class="arr">-&gt;</span> <span class="node ws">LlmDescriptionExtract</span> <span class="arr">-&gt;</span> [detail extractors <span class="dim">||</span>]
+<span class="arr">-&gt;</span> ConstraintExtract <span class="arr">-&gt;</span> BuildParamRelations <span class="arr">-&gt;</span> BuildParamConstraint <span class="arr">-&gt;</span> AssembleResult
+</div>
+<p>所有改动都是在现有节点<b>内部</b>扩展对 CalculateSizeAndFormat 函数的支持：<code>function_signature_extract</code> 已经能提取所有函数签名（prompt 要求"提取所有函数"），无需修改。</p>
+</div>
+
+<div class="section" id="scenario">
+<h2>11. 多场景处理说明</h2>
+<p>文档的"约束说明"章节包含 <code>&lt;details&gt;</code> 块，按平台分别列出不同的 dtype/format 组合和 C0 计算方法：</p>
+<table>
+<tr><th>平台</th><th>dstFormat 支持</th><th>C0 计算方法</th></tr>
+<tr><td>Atlas 350 加速卡</td><td>仅 ACL_FORMAT_FRACTAL_NZ(29)</td><td>C0 = 32B / size of additionalDtype</td></tr>
+<tr><td>Atlas A2 / A3</td><td>ND, NZ, NCDHW, NDC1HWC0, FRACTAL_Z_3D</td><td>C0 = 32B / size of srcTensor 基础类型</td></tr>
+</table>
+<p>这部分由 <code>dtype_combo_extract</code>（LLM）和 <code>constraint_extract</code>（5 Pass）处理，<b>已经能正确提取</b>（当前输出可见 <code>dtype_support_description</code> 有正确的 per-platform 条目）。改动后 CalculateSizeAndFormat 参数进入 inputs/outputs，这些约束就能引用到已定义的参数了。</p>
+<p>另外，C0 作为隐式参数（计算值）目前在 constraints 中被引用但未定义在 inputs 中，这是次要问题，可在本方案落地后单独处理。</p>
+</div>
+
+<div class="section" id="verify">
+<h2>12. 验证计划</h2>
+<ol>
+<li><b>单元测试</b>：在 <code>tests/mcp_server/test_section_splitter.py</code> 中新增用例，验证 <code>aclnnNpuFormatCastCalculateSizeAndFormat</code> H2 -&gt; <code>CALCULATE_SIZE_API</code>，其参数说明 -&gt; <code>params_calculate_size</code></li>
+<li><b>单元测试</b>：在 <code>test_document_parser.py</code> 中为 <code>classify_section</code> 补充 CalculateSizeAndFormat 用例</li>
+<li><b>端到端验证</b>：对 <code>operators/trans-ten/aclnnNpuFormatCast.md</code> 重新运行 extract 流水线，检查输出 JSON：
+<ul>
+<li><code>inputs</code> 包含 <code>srcTensor</code>, <code>dstFormat</code>, <code>additionalDtype</code>（+ <code>quantization_type</code>）</li>
+<li><code>outputs</code> 包含 <code>dstTensor</code>, <code>dstShape</code>, <code>dstShapeSize</code>, <code>actualFormat</code></li>
+<li>顶层 key 结构与 <code>aclnnFFNV3.json</code> 一致</li>
+</ul>
+</li>
+<li><b>回归验证</b>：对 <code>aclnnFFNV3.md</code> 等常规文档重新运行，确认无回归（这些文档没有 CalculateSizeAndFormat 函数，新增逻辑不应触发）</li>
+</ol>
+</div>
+
+<div class="section" id="files">
+<h2>13. 改动文件汇总</h2>
+<table>
+<tr><th>文件</th><th>改动类型</th><th>阶段</th></tr>
+<tr><td><code>packages/shared/src/shared/models/enums.py</code></td><td>新增 3 个 SectionType</td><td>1</td></tr>
+<tr><td><code>packages/mcp-server/.../parsers/section_splitter.py</code></td><td>_classify_h2, _classify_h3, pre-H3 发射</td><td>1</td></tr>
+<tr><td><code>packages/mcp-server/.../parsers/document_parser.py</code></td><td>classify_section 同步</td><td>1</td></tr>
+<tr><td><code>packages/agent/.../utils/param_validators.py</code></td><td>新增 is_calc_function, is_first_stage_function</td><td>2</td></tr>
+<tr><td><code>packages/agent/.../nodes/context_utils.py</code></td><td>re-export 新函数</td><td>2</td></tr>
+<tr><td><code>packages/agent/.../nodes/table_column_extract.py</code></td><td>章节获取 + 函数感知匹配重构</td><td>3+4</td></tr>
+<tr><td><code>packages/agent/.../nodes/constraint_extract.py</code></td><td>fetch params_calculate_size</td><td>3</td></tr>
+<tr><td><code>packages/agent/.../nodes/param_relation_extract/fetch_sections.py</code></td><td>fetch params_calculate_size</td><td>3</td></tr>
+<tr><td><code>packages/agent/.../nodes/return_code_extract.py</code></td><td>fetch return_codes_calculate_size</td><td>3</td></tr>
+<tr><td><code>packages/agent/.../nodes/allowed_range_extract.py</code></td><td>分组 + 章节</td><td>3</td></tr>
+<tr><td><code>packages/agent/.../nodes/llm_description_extract/fetch_sections.py</code></td><td>分组 + 章节</td><td>3</td></tr>
+<tr><td><code>packages/agent/.../nodes/assemble_result.py</code></td><td>_build_inputs_outputs 放宽过滤</td><td>5</td></tr>
+<tr><td><code>packages/mcp-server/.../tools/document_tools.py</code></td><td>get_sections_by_type（可选）</td><td>6</td></tr>
+<tr><td><code>tests/mcp_server/test_section_splitter.py</code></td><td>新增测试</td><td>—</td></tr>
+<tr><td><code>tests/mcp_server/test_document_parser.py</code></td><td>新增测试</td><td>—</td></tr>
+</table>
+<div class="ok">
+<h3>总结</h3>
+<p>本方案通过 <b>章节类型分离 -&gt; 函数感知匹配 -&gt; 组装过滤放宽</b> 三层修复，将 aclnnNpuFormatCast 解析为与 aclnnFFNV3 结构一致的约束文件，同时保证常规文档（无 CalculateSizeAndFormat 函数）无回归。所有改动在现有节点内部完成，不新增节点、不调整节点顺序。</p>
+</div>
+</div>
+
+</div>
+</body>
+</html>

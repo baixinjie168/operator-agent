@@ -83,11 +83,16 @@ _PROMPT_TEMPLATE = """Your task is to analyze the constraint extraction results 
 
 1. Read the JSON data file, focus on the `constraints_in_parameters` field and `inputs`/`outputs` fields.
 2. Read the original Markdown document, focus on:
-   - The parameter table in the GetWorkspaceSize section: each parameter's **使用说明** column contains constraint descriptions
+   - The parameter table in the GetWorkspaceSize section (or the operator main parameter section for single-function operators like aclnnCalculateMatmulWeightSize): each parameter's **使用说明** column contains constraint descriptions
    - The constraints section (if present)
    - The function prototype section: function signatures define actual parameters
-3. Perform the following two-dimension analysis
-4. Write the analysis result as HTML to: {output_path}
+3. Read the parameter alias mapping file: knowledge/operator-constraint-checker/param-alias.md
+   - This file maps shorthand parameter names (used in constraint expressions) to actual parameter names.
+   - If a referenced param is not in inputs/outputs but IS in the alias file, treat it as a known alias (PASS, not FAIL).
+   - Single-element mapping (e.g. expertTokens -> [expertTokensOptional]): rename, valid.
+   - Multi-element mapping (e.g. weight -> [weight1, weight2]): broadcast AND, the constraint applies to all listed params.
+4. Perform the following two-dimension analysis
+5. Write the analysis result as HTML to: {output_path}
 
 ## Analysis Dimension 1: Missing Constraints
 
@@ -106,8 +111,21 @@ For each missing constraint, provide: parameter name, original text, suggested e
 For EACH constraint in `constraints_in_parameters`, verify:
 - Semantic accuracy: does the expression match the original text meaning?
 - expr_type correctness: type_equality for dtype, shape_dependency for shape, etc.
-- Parameter reference validity: all referenced params must exist
+- Parameter reference validity: all referenced params must exist in inputs/outputs OR be known aliases (see param-alias.md)
 - src_text accuracy: does it match the original document
+
+### Parameter Alias Resolution (IMPORTANT)
+
+Constraint expressions may use shorthand parameter names that don't directly exist in inputs/outputs.
+Before marking a parameter reference as "FAIL (not found)", check the alias mapping file:
+  knowledge/operator-constraint-checker/param-alias.md
+
+Rules:
+- If a referenced param is not in inputs/outputs, check if it exists in the alias file for this operator.
+- Single-element mapping (e.g. "expertTokens" -> ["expertTokensOptional"]): treat as rename. Mark as PASS and note the alias in the review comment.
+- Multi-element mapping (e.g. "weight" -> ["weight1", "weight2"]): broadcast AND semantics. The constraint applies to ALL listed actual params. Mark as PASS and note which actual params it expands to.
+- If the param is not in inputs/outputs AND not in the alias file, THEN mark as FAIL (truly invalid reference).
+- Also check: for multi-element aliases, relation_params should ideally list all actual params or the shorthand. If only the shorthand is listed, mark as WARN (should expand relation_params).
 
 ## Output Format
 
