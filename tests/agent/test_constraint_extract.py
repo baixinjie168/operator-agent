@@ -6,21 +6,29 @@ Covers:
 - _strip_html: HTML tag removal from section content
 - _pass6b_conditional_shapes_from_params: conditional shape pattern detection
 - _pass7_dtype_constraints: dtype constraint generation from dtype_combos
+- _extract_src_context: document-original context extraction (Item 6)
+- _try_deterministic_range(return_match=True): backward-compatible match return (Item 6)
+- _pass7b_conditional_dtype: conditional dtype → type_dependency (Item 4b)
 """
 
 from __future__ import annotations
 
 import json
-
-import pytest
+import re
 
 from agent.nodes.constraint_extract import (
+    _collect_seen_exprs,
+    _deduplicate_relations,
+    _detect_condition_clause,
+    _extract_src_context,
     _expr_exists,
     _normalize_expr,
-    _strip_html,
+    _pass3b_dim_equalities,
     _pass6b_conditional_shapes_from_params,
+    _pass7b_conditional_dtype,
+    _strip_html,
+    _try_deterministic_range,
 )
-
 
 # ── _normalize_expr ──────────────────────────────────────────────────────────
 
@@ -98,6 +106,89 @@ class TestExprExists:
 
     def test_empty_existing(self):
         assert _expr_exists([], "x.dtype == y.dtype") is False
+
+
+# ── _normalize_expr: new patterns (Item 7) ──────────────────────────────────
+
+class TestNormalizeExprNewPatterns:
+    """T7: Phase 3 Item 7 — new divisibility / multiple patterns."""
+
+    def test_divisibility_pattern(self):
+        assert _normalize_expr("oriHeight % 16 == 0") == "oriHeight % 16 == 0"
+
+    def test_multiple_equality_pattern(self):
+        assert _normalize_expr("N1 == 2 * K2") == "N1 == 2 * K2"
+
+    def test_divisibility_with_spaces(self):
+        assert _normalize_expr("x % 4 == 0") == _normalize_expr("x   %   4   ==   0")
+
+
+# ── _deduplicate_relations (Item 7 — R1 platform-aware) ────────────────────
+
+class TestDeduplicateRelations:
+    """T7-*: Phase 3 Item 7 cross-source semantic dedup."""
+
+    def _rel(self, expr, etype="cross_param_constraint", platform="", src="原文"):
+        return {
+            "platform": platform,
+            "params": ["x", "y"],
+            "relation_object": json.dumps({
+                "expr": expr, "expr_type": etype, "src_text": src,
+            }),
+        }
+
+    def test_t7_1_commutative_dtype_dedup(self):
+        """T7-1: x.dtype==y.dtype and y.dtype==x.dtype dedup to 1."""
+        new = [
+            self._rel("x.dtype == y.dtype", etype="type_equality"),
+            self._rel("y.dtype == x.dtype", etype="self_string_length", src="正则"),
+        ]
+        _, deduped = _deduplicate_relations([], new)
+        assert len(deduped) == 1
+        kept = json.loads(deduped[0]["relation_object"])
+        assert kept["expr_type"] == "type_equality"
+
+    def test_t7_3_guard_not_deleted(self):
+        """T7-3: guarded vs unguarded have different keys, both kept."""
+        new = [
+            self._rel("x.shape[0] == N", etype="shape_equality"),
+            self._rel("(x.shape[0] == N) if x is not None else True",
+                      etype="shape_equality"),
+        ]
+        _, deduped = _deduplicate_relations([], new)
+        assert len(deduped) == 2
+
+    def test_t7_4_triple_repeat_dedup(self):
+        """T7-4: 3 identical exprs -> 1."""
+        new = [self._rel("self.shape == gradInput.shape") for _ in range(3)]
+        _, deduped = _deduplicate_relations([], new)
+        assert len(deduped) == 1
+
+    def test_t7_7_existing_not_touched(self):
+        """T7-7: existing relations are never removed."""
+        existing = [self._rel("x.dtype == y.dtype", etype="type_equality")]
+        new = [self._rel("y.dtype == x.dtype", etype="self_string_length")]
+        e, n = _deduplicate_relations(existing, new)
+        assert len(e) == 1  # existing unchanged
+        assert len(n) == 0  # new duplicate removed
+
+    def test_t7_platform_aware_no_cross_merge(self):
+        """R1: same expr on different platforms must NOT merge."""
+        new = [
+            self._rel("x.shape == y.shape", platform="A2"),
+            self._rel("x.shape == y.shape", platform="A3"),
+        ]
+        _, deduped = _deduplicate_relations([], new)
+        assert len(deduped) == 2
+
+    def test_t7_platform_common_same_platform_merges(self):
+        """R1: same expr same (empty) platform -> merge."""
+        new = [
+            self._rel("x.shape == y.shape", platform=""),
+            self._rel("x.shape == y.shape", platform=""),
+        ]
+        _, deduped = _deduplicate_relations([], new)
+        assert len(deduped) == 1
 
 
 # ── _strip_html ──────────────────────────────────────────────────────────────
@@ -197,3 +288,339 @@ class TestPass6bConditionalShapes:
         # src_text should not contain HTML tags
         src = results[0]["source_citation"]
         assert "<td>" not in src
+
+
+# ── _collect_seen_exprs (Item 3 helper) ──────────────────────────────────────
+
+class TestCollectSeenExprs:
+    """T3-7: extract expr set from existing relations (dict + JSON string)."""
+
+    def test_dict_relation_object(self):
+        existing = [
+            {"relation_object": {"expr": "K1 == N2"}},
+        ]
+        seen = _collect_seen_exprs(existing)
+        assert "K1 == N2" in seen
+
+    def test_json_string_relation_object(self):
+        existing = [
+            {"relation_object": json.dumps({"expr": "N1 == 2 * K2"})},
+        ]
+        seen = _collect_seen_exprs(existing)
+        assert "N1 == 2 * K2" in seen
+
+    def test_invalid_json_skipped(self):
+        existing = [
+            {"relation_object": "not json"},
+            {"relation_object": 123},
+        ]
+        seen = _collect_seen_exprs(existing)
+        # Invalid JSON is skipped via `continue`; non-dict values (int) fail
+        # the isinstance(obj, dict) check. Neither adds to the set.
+        assert seen == set()
+
+    def test_empty_existing(self):
+        assert _collect_seen_exprs([]) == set()
+
+
+# ── _detect_condition_clause ─────────────────────────────────────────────────
+
+class TestDetectConditionClause:
+    def test_activation_clause(self):
+        text = "激活层为geglu/swiglu/reglu时，且N1=2*K2"
+        cond = _detect_condition_clause(text, text.index("N1="))
+        assert "activation in" in cond
+        assert "geglu" in cond
+        assert "swiglu" in cond
+
+    def test_no_clause_returns_empty(self):
+        text = "需满足K1=N2"
+        cond = _detect_condition_clause(text, text.index("K1="))
+        assert cond == ""
+
+    def test_non_activation_clause_not_encoded(self):
+        """当X时 without 激活 → detected but not encoded (conservative)."""
+        text = "当mode为high时，K1=N2"
+        cond = _detect_condition_clause(text, text.index("K1="))
+        # Non-activation conditions return "" so the equality is emitted
+        # unconditionally (never dropped).
+        assert cond == ""
+
+
+# ── _pass3b_dim_equalities (Item 3) ──────────────────────────────────────────
+
+def _implicit_param(name):
+    return {
+        "var_name": name,
+        "is_constant": False,
+        "is_external_constant": False,
+        "is_quantization_type": False,
+    }
+
+
+class TestPass3bDimEqualities:
+    """T3-1..T3-6: dimension-equality extraction."""
+
+    def test_t3_1_simple_equality(self):
+        text = "所有场景下需满足K1=N2"
+        ips = [_implicit_param("K1"), _implicit_param("N2")]
+        results = _pass3b_dim_equalities(text, ips, [])
+        assert len(results) == 1
+        assert results[0]["relation_object"]["expr"] == "K1 == N2"
+        assert results[0]["relation_type"] == "cross_param_constraint"
+        assert results[0]["relation_object"]["expr_type"] == "cross_variable_equality"
+
+    def test_t3_2_multiple_equality(self):
+        text = "且N1=2*K2"
+        ips = [_implicit_param("N1"), _implicit_param("K2")]
+        results = _pass3b_dim_equalities(text, ips, [])
+        assert len(results) == 1
+        assert results[0]["relation_object"]["expr"] == "N1 == 2 * K2"
+
+    def test_t3_3_conditional_equality(self):
+        text = "激活层为geglu/swiglu/reglu时，且N1=2*K2"
+        ips = [_implicit_param("N1"), _implicit_param("K2")]
+        results = _pass3b_dim_equalities(text, ips, [])
+        assert len(results) == 1
+        expr = results[0]["relation_object"]["expr"]
+        assert "N1 == 2 * K2" in expr
+        assert "if" in expr
+        assert "activation in" in expr
+        assert "else True" in expr
+
+    def test_t3_4_unknown_variable_filtered(self):
+        """K1=foo where foo is not an implicit var → no constraint."""
+        text = "K1=foo"
+        ips = [_implicit_param("K1")]  # foo not in var_names
+        results = _pass3b_dim_equalities(text, ips, [])
+        assert results == []
+
+    def test_t3_5_numeric_rhs_filtered(self):
+        """K1=65536 has numeric RHS → not a dim equality (Pass 3 handles it)."""
+        text = "K1=65536"
+        ips = [_implicit_param("K1")]
+        results = _pass3b_dim_equalities(text, ips, [])
+        assert results == []
+
+    def test_t3_6_dedup_duplicate_equality(self):
+        """K1=N2 appearing twice → only one constraint."""
+        text = "需满足K1=N2，另外K1=N2再次出现"
+        ips = [_implicit_param("K1"), _implicit_param("N2")]
+        results = _pass3b_dim_equalities(text, ips, [])
+        assert len(results) == 1
+
+    def test_t3_7_dedup_against_existing(self):
+        """Existing constraint with same expr → new one skipped."""
+        text = "需满足K1=N2"
+        ips = [_implicit_param("K1"), _implicit_param("N2")]
+        existing = [
+            {"relation_object": {"expr": "K1 == N2"}},
+        ]
+        results = _pass3b_dim_equalities(text, ips, existing)
+        assert results == []
+
+    def test_t3_8_empty_sections_returns_empty(self):
+        """Pass 3 failure blanks sections_text → Pass 3b returns []."""
+        ips = [_implicit_param("K1"), _implicit_param("N2")]
+        assert _pass3b_dim_equalities("", ips, []) == []
+        assert _pass3b_dim_equalities("   ", ips, []) == []
+
+    def test_no_implicit_params_returns_empty(self):
+        assert _pass3b_dim_equalities("K1=N2", [], []) == []
+
+    def test_nmul_matched_before_eq(self):
+        """N1=2*K2 must not be split into N1=2 by the equality regex."""
+        text = "N1=2*K2"
+        ips = [_implicit_param("N1"), _implicit_param("K2")]
+        results = _pass3b_dim_equalities(text, ips, [])
+        assert len(results) == 1
+        assert results[0]["relation_object"]["expr"] == "N1 == 2 * K2"
+
+    def test_chinese_equality(self):
+        text = "K1与N2相等"
+        ips = [_implicit_param("K1"), _implicit_param("N2")]
+        results = _pass3b_dim_equalities(text, ips, [])
+        assert len(results) == 1
+        assert results[0]["relation_object"]["expr"] == "K1 == N2"
+
+    def test_chinese_multiple(self):
+        text = "N1是K2的2倍"
+        ips = [_implicit_param("N1"), _implicit_param("K2")]
+        results = _pass3b_dim_equalities(text, ips, [])
+        assert len(results) == 1
+        assert results[0]["relation_object"]["expr"] == "N1 == 2 * K2"
+
+    def test_self_equality_filtered(self):
+        """X=X must not produce a tautological constraint."""
+        text = "K1=K1"
+        ips = [_implicit_param("K1")]
+        results = _pass3b_dim_equalities(text, ips, [])
+        assert results == []
+
+
+# ── Item 6: _extract_src_context ────────────────────────────────────────────
+
+class TestExtractSrcContext:
+    """Item 6: document-original context extraction (T6-1, T6-2)."""
+
+    def test_t6_1_returns_context_around_match(self):
+        """T6-1: returns ±50 chars of context containing the matched text."""
+        text = "前面一些文字 " + "取值范围为0~100" + " 后面一些文字" * 5
+        m = re.search(r"0~100", text)
+        result = _extract_src_context(text, m)
+        assert "0~100" in result
+        assert len(result) > 5  # not empty
+
+    def test_t6_2_match_at_edge(self):
+        """T6-2: match near the edge — truncated but not empty."""
+        text = "取值范围为0~100"
+        m = re.search(r"0~100", text)
+        result = _extract_src_context(text, m)
+        assert "0~100" in result
+
+    def test_strips_html(self):
+        """HTML tags in context are removed."""
+        text = "prefix <td>取值范围为0~100</td> suffix"
+        m = re.search(r"0~100", text)
+        result = _extract_src_context(text, m)
+        assert "<td>" not in result
+        assert "0~100" in result
+
+    def test_empty_text_returns_empty(self):
+        m = re.search(r"0", "0")
+        assert _extract_src_context("", m) == ""
+
+    def test_none_match_returns_empty(self):
+        assert _extract_src_context("some text", None) == ""
+
+    def test_custom_radius(self):
+        text = "aaaaaaaaaa0~100bbbbbbbbbb"
+        m = re.search(r"0~100", text)
+        result = _extract_src_context(text, m, radius=2)
+        assert "0~100" in result
+        # radius=2 → only 2 chars on each side
+        assert len(result) <= len("0~100") + 4
+
+
+# ── Item 6: _try_deterministic_range(return_match=True) ─────────────────────
+
+class TestTryDeterministicRangeReturnMatch:
+    """Item 6: backward-compatible return_match parameter (T6-7)."""
+
+    def test_t6_7_backward_compat_default(self):
+        """Default return_match=False returns a 2-tuple (no match)."""
+        result = _try_deterministic_range("取值范围为0~100")
+        assert result is not None
+        assert len(result) == 2  # (value_list, ar_type)
+
+    def test_return_match_true_returns_3_tuple(self):
+        """return_match=True returns a 3-tuple including the re.Match."""
+        result = _try_deterministic_range("取值范围为0~100", return_match=True)
+        assert result is not None
+        assert len(result) == 3  # (value_list, ar_type, match)
+        value_list, ar_type, match = result
+        assert ar_type == "range"
+        assert isinstance(match, re.Match)
+
+    def test_no_match_returns_none(self):
+        assert _try_deterministic_range("no range here", return_match=True) is None
+
+    def test_match_context_matches_text(self):
+        """The returned match's context can be extracted via _extract_src_context."""
+        text = "前文 取值范围为0~100 后文"
+        result = _try_deterministic_range(text, return_match=True)
+        assert result is not None
+        _, _, match = result
+        ctx = _extract_src_context(text, match)
+        assert "0~100" in ctx
+
+
+# ── Item 4b: _pass7b_conditional_dtype ──────────────────────────────────────
+
+class TestPass7bConditionalDtype:
+    """Item 4b: conditional dtype → type_dependency constraint (T4-5, T4-8)."""
+
+    def test_t4_5_generates_type_dependency(self):
+        """T4-5: structured dtype JSON → type_dependency constraint."""
+        params = [{
+            "param_name": "x",
+            "function_name": "aclnnFFNV3",
+            "data_type": json.dumps({"量化": "INT8", "*": "FLOAT16"},
+                                   ensure_ascii=False),
+        }]
+        results = _pass7b_conditional_dtype(params, [])
+        assert len(results) == 1
+        rel = results[0]
+        obj = rel["relation_object"]
+        assert obj["expr_type"] == "type_dependency"
+        assert "x.dtype == 'INT8'" in obj["expr"]
+        assert "quantization" in obj["expr"]
+        assert "x.dtype == 'FLOAT16'" in obj["expr"]
+
+    def test_t4_8_skipped_when_type_equality_exists(self):
+        """T4-8: existing type_equality for same param → skipped."""
+        existing = [{
+            "function_name": "aclnnFFNV3",
+            "params": ["x"],
+            "relation_object": {
+                "expr_type": "type_equality",
+                "expr": "x.dtype == 'FLOAT16'",
+                "relation_params": ["x"],
+                "src_text": "",
+            },
+        }]
+        params = [{
+            "param_name": "x",
+            "function_name": "aclnnFFNV3",
+            "data_type": json.dumps({"量化": "INT8", "*": "FLOAT16"},
+                                   ensure_ascii=False),
+        }]
+        results = _pass7b_conditional_dtype(params, existing)
+        assert results == []
+
+    def test_non_conditional_dtype_skipped(self):
+        """Plain {"*: "FLOAT16"} has no condition branch → skipped."""
+        params = [{
+            "param_name": "x",
+            "function_name": "aclnnOp",
+            "data_type": json.dumps({"*": "FLOAT16"}),
+        }]
+        assert _pass7b_conditional_dtype(params, []) == []
+
+    def test_empty_data_type_skipped(self):
+        params = [{"param_name": "x", "function_name": "aclnnOp", "data_type": ""}]
+        assert _pass7b_conditional_dtype(params, []) == []
+
+    def test_non_json_data_type_skipped(self):
+        params = [{"param_name": "x", "function_name": "aclnnOp",
+                   "data_type": "FLOAT16"}]
+        assert _pass7b_conditional_dtype(params, []) == []
+
+    def test_dtype_desc_field_compatible(self):
+        """dtype_desc field name is also accepted (agent db.py fallback)."""
+        params = [{
+            "param_name": "x",
+            "function_name": "aclnnOp",
+            "dtype_desc": json.dumps({"量化": "INT8", "*": "FLOAT16"},
+                                     ensure_ascii=False),
+        }]
+        results = _pass7b_conditional_dtype(params, [])
+        assert len(results) == 1
+
+    def test_multiple_cond_branches(self):
+        """Multiple condition branches produce 'and'-joined clauses."""
+        params = [{
+            "param_name": "x",
+            "function_name": "aclnnOp",
+            "data_type": json.dumps(
+                {"量化": "INT8", "训练": "FLOAT32", "*": "FLOAT16"},
+                ensure_ascii=False,
+            ),
+        }]
+        results = _pass7b_conditional_dtype(params, [])
+        assert len(results) == 1
+        expr = results[0]["relation_object"]["expr"]
+        assert " and " in expr
+
+    def test_empty_params_returns_empty(self):
+        assert _pass7b_conditional_dtype([], []) == []

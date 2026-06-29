@@ -52,10 +52,12 @@ not({enum_param}.range_value == "{value}"
 
 输出:
   expr_type: "shape_value_dependency"
-  expr: "((weight1.shape == [E.range_value, K1.range_value, N1.range_value]) if expertTokensOptional is not None else (weight1.shape == [K1.range_value, N1.range_value])) and ((antiquantScaleOptional.shape == [E.range_value, 1, N1.range_value]) if quantization_type.range_value == 'per-channel' else (antiquantScaleOptional.shape == [1]) if quantization_type.range_value == 'per-tensor' else True) if antiquantScaleOptional is not None else True"
+  expr: "(weight1.shape == [E.range_value, K1.range_value, N1.range_value] if expertTokensOptional is not None else weight1.shape == [K1.range_value, N1.range_value]) and ((antiquantScaleOptional.shape == [E.range_value, 1, N1.range_value] if quantization_type.range_value == 'per-channel' else antiquantScaleOptional.shape == [1]) if antiquantScaleOptional is not None else True)"
 
 注意:
 - 有专家时 weight1 为 3 维 [E, K1, N1]，无专家时为 2 维 [K1, N1]
 - per-channel/per-tensor 条件由 quantization_type.range_value 驱动
 - antiquantScaleOptional 是可选参数，需加 is not None 守卫
 - E/K1/N1 是隐式维度变量，用 .range_value 引用
+- 多场景互斥时优先使用因式分解的简洁形式（见 mutual_exclusion.md），
+  禁止生成超长嵌套 if-else 堆叠（>500字符）或重复子表达式 3+ 次

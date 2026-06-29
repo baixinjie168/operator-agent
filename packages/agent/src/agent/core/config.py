@@ -60,6 +60,16 @@ class Settings(BaseSettings):
     # When True, Phase2b runs regardless of LLM confidence level.
     force_phase2b: bool = False
 
+    # Phase 3 switches -------------------------------------------------------
+    # constraint_semantic_dedup: cross-source / cross-expr_type semantic
+    # dedup in constraint_extract (Item 7). When False, only the legacy
+    # string-based _expr_exists dedup runs.
+    constraint_semantic_dedup: bool = Field(default=True)
+    # expr_simplify: post-generation simplification of over-long exprs in
+    # complex_relation_agent + build_param_relations retry (Item 8). When
+    # False, _simplify_expr is skipped.
+    expr_simplify: bool = Field(default=True)
+
     # Constraint check Agent: separate model for post-pipeline verification.
     # Uses a different provider/model from the generation pipeline to avoid
     # self-evaluation bias.  Defaults to DeepSeek for stronger reasoning.

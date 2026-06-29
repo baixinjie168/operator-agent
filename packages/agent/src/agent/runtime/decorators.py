@@ -42,6 +42,7 @@ _AGENT_MAP: dict[str, str] = {
     "build_param_relations": "constraint",
     "build_single_param_constraint": "constraint",
     "build_param_constraint": "constraint",
+    "constraint_completeness_check": "constraint",
     "assemble_result": "constraint",
     # ── GeneratorAgent ──
     "generate_cases": "case",
@@ -202,6 +203,7 @@ def _node_label(node_id: str) -> str:
         "param_relation_extract": "参数约束关系",
         "build_param_relations": "参数关系构建",
         "build_param_constraint": "参数约束构建",
+        "constraint_completeness_check": "约束完整性校验",
         "assemble_result": "约束结果组装",
         "generate_cases": "测试用例生成",
         "case_match_model": "匹配数据模型",
@@ -260,6 +262,11 @@ def _node_done_msg(node_id: str, result: dict) -> str:
         return "参数关系构建完成"
     elif node_id == "build_param_constraint":
         return "参数约束构建完成"
+    elif node_id == "constraint_completeness_check":
+        rpt = result.get("completeness_report", {}) if isinstance(result, dict) else {}
+        inj = rpt.get("injected", 0) if isinstance(rpt, dict) else 0
+        rev = rpt.get("needs_review", 0) if isinstance(rpt, dict) else 0
+        return f"约束完整性校验完成。注入 {inj} 条, 待审查 {rev} 项"
     elif node_id == "assemble_result":
         return "约束结果组装完成"
     elif node_id == "generate_cases":
@@ -322,6 +329,7 @@ def _node_progress_pct(node_id: str) -> int:
         "param_relation_extract": 95,
         "build_param_relations": 96,
         "build_param_constraint": 98,
+        "constraint_completeness_check": 98,
         "assemble_result": 99,
         "generate_cases": 100,
         "case_match_model": 25,

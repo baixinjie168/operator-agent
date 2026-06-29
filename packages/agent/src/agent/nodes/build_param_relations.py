@@ -23,6 +23,7 @@ from agent.mcp_client import MCPClient
 from agent.nodes.state import PipelineState
 from agent.prompts import RELATION_OBJECT_BUILD_PROMPT
 from agent.core.llm import create_llm
+from agent.utils.expr_validation import _simplify_expr
 from agent.utils.expr_validation import validate_expr as _validate_expr
 from agent.utils.llm_common import CONCURRENCY_LIMIT, parse_json_response
 from agent.runtime.context import get_context
@@ -467,11 +468,50 @@ async def _batch_extract_relation_objects(
                     external_constants, implicit_param_names,
                 )
                 if not is_valid:
+                    # Phase 3 Item 8: attempt post-generation simplification
+                    # before giving up. If the expr was rejected for excessive
+                    # redundancy (FFNV3 [50] copy-paste pattern), _simplify_expr
+                    # factors out the repeated sub-expression and may produce a
+                    # valid form without another LLM round.
+                    if settings.expr_simplify:
+                        simplified = _simplify_expr(expr)
+                        if simplified != expr:
+                            is_valid2, _ = _validate_expr(
+                                simplified, rel.get("params", []),
+                                external_constants, implicit_param_names,
+                            )
+                            if is_valid2:
+                                result["expr"] = simplified
+                                result["_simplified"] = True
+                                logger.info(
+                                    "ComplexRelationAgent: simplified expr "
+                                    "validated for id=%s (%d -> %d chars)",
+                                    rel.get("id", "?"), len(expr), len(simplified),
+                                )
+                                return result
+                    # Phase 3 Item 8: simplified form still invalid (or not
+                    # simplified) -> retry Agent once with error hint guiding
+                    # factored form. DeepAgent calls are costly, so only 1 retry
+                    # (unlike simple relations which retry up to expr_max_retries).
                     logger.warning(
-                        "ComplexRelationAgent expr invalid for id=%s: %s",
+                        "ComplexRelationAgent expr invalid for id=%s: %s — retrying with hint",
                         rel.get("id", "?"), error,
                     )
+                    retry_result = await _retry_complex_with_hint(
+                        rel, error, signatures_text,
+                        param_shapes_text, implicit_params_text,
+                    )
+                    expr2 = retry_result.get("expr", "")
+                    if expr2:
+                        is_valid3, _ = _validate_expr(
+                            expr2, rel.get("params", []),
+                            external_constants, implicit_param_names,
+                        )
+                        if is_valid3:
+                            return retry_result
+                    # Retry still failed -> empty expr + marker (original behaviour)
                     result["expr"] = ""
+                    result["_validation_error"] = error
         else:
             # Type 1: simple param relation -> current single-shot LLM
             result = await _extract_with_retry(
@@ -496,6 +536,69 @@ async def _batch_extract_relation_objects(
 
     results = await asyncio.gather(*[_process_one(r) for r in relations])
     return list(results)
+
+
+async def _retry_complex_with_hint(
+    rel: dict,
+    error: str,
+    signatures_text: str,
+    param_shapes_text: str,
+    implicit_params_text: str,
+) -> dict[str, str]:
+    """Retry a complex relation (type 4) after Phase 0 validation failure.
+
+    Injects the validation error as a hint into the user message, asking
+    the Agent to regenerate using the factored form (all((expr) if cond
+    else True for ...)) per the mutual_exclusion.md / SKILL.md rules.
+
+    Only ONE retry — DeepAgent calls are costly. On failure, callers fall
+    back to empty expr + ``_validation_error`` marker (original behaviour).
+    """
+    from agent.nodes.build_param_constraint.complex_relation_agent import (
+        _get_complex_relation_agent,
+        _extract_ai_text,
+        _parse_agent_response,
+    )
+
+    hint = (
+        "## 上次生成失败\n"
+        "上次生成的 expr 校验失败：" + error + "\n"
+        "请按因式分解规则重新生成简洁表达式：\n"
+        "- 多场景互斥用 all((expr) if (cond) else True for ...) 形式\n"
+        "- 禁止重复子表达式 3+ 次\n"
+        "- expr 总长度不超过 500 字符\n"
+    )
+    user_msg = (
+        "## Relation\n"
+        "- relation_type: " + rel.get("relation_type", "") + "\n"
+        "- params: " + json.dumps(rel.get("params", []), ensure_ascii=False) + "\n"
+        "- description: " + rel.get("description", "") + "\n"
+        "- source_citation: " + rel.get("source_citation", "") + "\n\n"
+        + hint + "\n"
+        "## Function Signatures\n" + signatures_text + "\n\n"
+        "## Parameter Shapes\n" + param_shapes_text + "\n\n"
+        + implicit_params_text + "\n"
+    )
+    try:
+        agent = _get_complex_relation_agent()
+        result = await agent.ainvoke({
+            "messages": [{"role": "user", "content": user_msg}],
+        })
+        ai_text = await _extract_ai_text(result)
+        parsed = _parse_agent_response(ai_text)
+    except Exception:
+        logger.exception("ComplexRelationAgent retry failed")
+        return {"expr_type": "", "expr": "", "confidence": "low"}
+
+    # Apply simplification to the retry result as well
+    if settings.expr_simplify:
+        expr = parsed.get("expr", "")
+        if expr and len(expr) > 500:
+            simplified = _simplify_expr(expr)
+            if simplified != expr:
+                parsed["expr"] = simplified
+                parsed["_simplified"] = True
+    return parsed
 
 
 # ---------------------------------------------------------------------------
