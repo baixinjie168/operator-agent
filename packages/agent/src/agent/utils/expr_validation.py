@@ -306,6 +306,198 @@ def _canonicalize_node(node) -> str:  # noqa: ANN001
 # path (or the initial Agent call) can succeed without another LLM round.
 
 
+def _has_ifexp(expr: str) -> bool:
+    """Check if *expr* contains an IfExp (conditional expression).
+
+    Shared helper used by FIX-5 (contradiction detection) and FIX-9
+    (None guard validation) to skip conditional constraints.
+    """
+    if not expr:
+        return False
+    try:
+        tree = ast.parse(expr, mode="eval")
+    except SyntaxError:
+        return False
+    return any(isinstance(n, ast.IfExp) for n in ast.walk(tree))
+
+
+# ---------------------------------------------------------------------------
+# FIX-5: Constraint contradiction detection
+# ---------------------------------------------------------------------------
+
+
+def _extract_eq_targets(expr: str, param: str) -> list:
+    """Extract what *param* is compared to in ``param == X`` clauses.
+
+    Returns a list of constant values that *param* is equated to.
+    """
+    try:
+        tree = ast.parse(expr, mode="eval")
+    except SyntaxError:
+        return []
+    targets: list = []
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Compare)
+            and len(node.ops) == 1
+            and isinstance(node.ops[0], ast.Eq)
+        ):
+            # Match either ``param == X`` or ``param.range_value == X``
+            left = node.left
+            if isinstance(left, ast.Name) and left.id == param:
+                for cmp in node.comparators:
+                    if isinstance(cmp, ast.Constant):
+                        targets.append(cmp.value)
+            elif (
+                isinstance(left, ast.Attribute)
+                and isinstance(left.value, ast.Name)
+                and left.value.id == param
+            ):
+                for cmp in node.comparators:
+                    if isinstance(cmp, ast.Constant):
+                        targets.append(cmp.value)
+    return targets
+
+
+def _check_pair_contradiction(
+    expr_i: str, expr_j: str, shared_params: set[str],
+) -> str:
+    """Check if two constraints contradict on a shared param.
+
+    R11: skip if either expr contains IfExp (conditional constraint).
+    Returns a reason string if contradiction found, empty string otherwise.
+    """
+    # R11: skip conditional constraints
+    if _has_ifexp(expr_i) or _has_ifexp(expr_j):
+        return ""
+    for param in shared_params:
+        ti = _extract_eq_targets(expr_i, param)
+        tj = _extract_eq_targets(expr_j, param)
+        if ti and tj:
+            for a in ti:
+                for b in tj:
+                    if a != b:
+                        return f"{param}=={a} vs {param}=={b}"
+    return ""
+
+
+def detect_constraint_contradictions(
+    constraints: list[dict],
+) -> list[tuple[int, int, str]]:
+    """FIX-5: Detect contradictory constraint pairs.
+
+    O(n^2) where n is the number of constraints per platform (typically < 30).
+    Skips conditional constraints (containing IfExp) per R11.
+
+    Returns a list of (index_i, index_j, reason) tuples.
+    """
+    contradictions: list[tuple[int, int, str]] = []
+    for i in range(len(constraints)):
+        for j in range(i + 1, len(constraints)):
+            pi = set(constraints[i].get("relation_params", []))
+            pj = set(constraints[j].get("relation_params", []))
+            if not pi & pj:
+                continue
+            reason = _check_pair_contradiction(
+                constraints[i].get("expr", ""),
+                constraints[j].get("expr", ""),
+                pi & pj,
+            )
+            if reason:
+                contradictions.append((i, j, reason))
+    return contradictions
+
+
+# ---------------------------------------------------------------------------
+# FIX-9: None guard validation (standalone, R14: does NOT modify validate_expr)
+# ---------------------------------------------------------------------------
+
+
+def _accesses_attr(expr: str, param_name: str) -> bool:
+    """Check if *expr* accesses an attribute of *param_name*.
+
+    Returns True if expr contains ``param_name.attr`` (e.g. ``bias.shape``).
+    On SyntaxError, returns True (conservative: assume it does access).
+    """
+    try:
+        tree = ast.parse(expr, mode="eval")
+    except SyntaxError:
+        return True
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Attribute):
+            if isinstance(node.value, ast.Name) and node.value.id == param_name:
+                return True
+    return False
+
+
+def _has_none_guard(expr: str, param_name: str) -> bool:
+    """Check if *expr* contains a None guard for *param_name*.
+
+    Returns True if expr contains ``param_name is None`` or
+    ``param_name is not None``.
+    """
+    try:
+        tree = ast.parse(expr, mode="eval")
+    except SyntaxError:
+        return True
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Compare):
+            if isinstance(node.left, ast.Name) and node.left.id == param_name:
+                for cmp in node.comparators:
+                    if isinstance(cmp, ast.Constant) and cmp.value is None:
+                        return True
+    # Also check ``param_name is not None`` patterns where param_name is on
+    # the right side of ``is not`` / ``is`` comparisons
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Compare):
+            for cmp in node.comparators:
+                if isinstance(cmp, ast.Name) and cmp.id == param_name:
+                    if isinstance(node.left, ast.Constant) and node.left.value is None:
+                        return True
+    return False
+
+
+def validate_none_guard(
+    expr: str,
+    params: list[str],
+    param_optional_map: dict[str, bool] | None = None,
+) -> tuple[bool, str]:
+    """FIX-9: Validate that optional params have None guards.
+
+    R6: uses the DB ``is_optional`` field (via *param_optional_map*) instead
+        of name heuristics.
+    R14: standalone function — does NOT modify ``validate_expr`` signature.
+
+    Checks if any optional parameter (per *param_optional_map*) is accessed
+    via ``.shape``/``.dtype``/``.format``/``.range_value`` without a
+    corresponding ``param is not None`` guard.  Skips conditional
+    constraints (containing IfExp) per R6/FIX-5 shared logic.
+
+    Args:
+        expr: Python expression string.
+        params: List of parameter names in the constraint.
+        param_optional_map: ``{param_name: is_optional}`` from DB. When
+            None or empty, returns ``(True, "")`` (no-op).
+
+    Returns:
+        ``(is_valid, error_message)``.
+    """
+    if not param_optional_map:
+        return True, ""
+    optional_params = [
+        p for p in params if param_optional_map.get(p, False)
+    ]
+    if not optional_params:
+        return True, ""
+    for opt in optional_params:
+        if _accesses_attr(expr, opt) and not _has_none_guard(expr, opt):
+            # Skip if IfExp (conditional) — shared from FIX-5
+            if _has_ifexp(expr):
+                continue
+            return False, f"Optional param {opt} without None guard"
+    return True, ""
+
+
 def _simplify_expr(expr: str) -> str:
     """Post-generation simplification: factor out a sub-expression repeated
     3+ times inside a top-level ``BoolOp(And)`` or nested ``IfExp``.

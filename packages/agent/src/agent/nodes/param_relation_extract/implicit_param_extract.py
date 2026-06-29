@@ -679,6 +679,10 @@ def _candidate_to_mapping(candidate: dict) -> dict:
         "tensor_param": candidate["tensor_param"],
         "dim_index": candidate["dim_index"],
         "shape_text": candidate["shape_text"],
+        # FIX-12: store the source section text (surrounding context) so
+        # parameter_representation_build can use document原文 as src_text
+        # instead of the internal shape_text label.
+        "source_section_text": candidate.get("surrounding_text", ""),
         "is_constant": False,
         "constant_value": None,
         "slot_index": candidate["slot_index"],

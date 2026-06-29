@@ -5,8 +5,10 @@ from __future__ import annotations
 import json
 import logging
 import re
+from difflib import SequenceMatcher
 from typing import Any
 
+from agent.core.config import settings
 from agent.mcp_client import MCPClient
 from agent.nodes.state import PipelineState
 from agent.utils.param_alias import expand_expr, load_alias_map
@@ -165,8 +167,91 @@ async def assemble_result_node(state: PipelineState) -> dict[str, Any]:
         ):
             _inject_parameter_representations(constraints_ip, param_reprs_data)
 
-        # Step 3h: Expand parameter alias shorthand names in constraints
+        # FIX-6: Inject allowed_range_value as constraints (before dedup).
+        # R4: src_text from AR; R5: ensure platform keys; R15: .range_value ref.
+        ar_injected = _inject_allowed_range_as_constraints(
+            constraints_ip, inputs_dict, outputs_dict, product_support_list,
+        )
+        if ar_injected:
+            logger.info(
+                "assemble_result: injected %d AR constraints for %s",
+                ar_injected, operator_name,
+            )
+
+        # FIX-8: Expand aliases FIRST (so shorthand names are resolved
+        # before FIX-2 filtering).  Step 3h (existing).
         _expand_aliases_in_constraints(operator_name, constraints_ip)
+
+        # FIX-2: Filter invalid param refs AFTER alias expansion (R1).
+        # Build valid param set: inputs + outputs + implicit +
+        # external_constants (R2) + ALL params cross-function (R12).
+        valid_params: set[str] = set(inputs_dict) | set(outputs_dict)
+        if mappings:
+            valid_params |= {
+                m.get("var_name") for m in mappings if m.get("var_name")
+            }
+        for pc in platform_constants:  # R2: include external constants
+            cname = pc.get("const_name", "")
+            if cname:
+                valid_params.add(cname)
+        # R12: include ALL params (cross-function) — params queried at L71
+        valid_params |= {
+            p.get("param_name") for p in params if p.get("param_name")
+        }
+        filtered = _filter_invalid_param_refs(constraints_ip, valid_params)
+        if filtered:
+            logger.info(
+                "assemble_result: filtered %d invalid constraints for %s",
+                filtered, operator_name,
+            )
+
+        # FIX-10: Source citation existence verification (after FIX-2 param
+        # legality, before FIX-1 semantic dedup).  Deletes constraints whose
+        # src_text cannot be found in the document — covers the "params legal
+        # but src_text fabricated" gap that FIX-2 cannot catch.
+        if settings.relation_verify_source:
+            from agent.utils.section_utils import resolve_ws_exe_content
+
+            ws_text, exe_text, _constraints_text = await resolve_ws_exe_content(
+                _mcp_client, doc_id,
+            )
+            # resolve_ws_exe_content already appends constraints_text to
+            # ws_text (see section_utils._CONSTRAINTS_PREFIX); do NOT append
+            # _constraints_text again here to avoid duplicating doc content.
+            document_text = f"{ws_text}\n\n{exe_text}"
+            src_report = _filter_fabricated_src_text(
+                constraints_ip, document_text,
+                threshold=settings.relation_verify_source_threshold,
+            )
+            if src_report["deleted"]:
+                logger.info(
+                    "assemble_result: FIX-10 deleted %d fabricated-src "
+                    "constraints for %s (kept=%d, skipped=%d)",
+                    src_report["deleted"], operator_name,
+                    src_report["kept"], src_report["skipped"],
+                )
+
+        # FIX-1: Semantic dedup (after filtering removes invalid refs)
+        deduped = _deduplicate_constraints_semantic(constraints_ip)
+        if deduped:
+            logger.info(
+                "assemble_result: deduplicated %d constraints for %s",
+                deduped, operator_name,
+            )
+
+        # FIX-5: Contradiction detection (skips IfExp constraints, R11)
+        from agent.utils.expr_validation import detect_constraint_contradictions
+
+        for plat, clist in constraints_ip.items():
+            contradictions = detect_constraint_contradictions(clist)
+            for i, j, reason in contradictions:
+                logger.warning(
+                    "assemble_result: contradiction on %s: %s", plat, reason,
+                )
+                clist[i]["_contradiction_warning"] = reason
+
+        # FIX-13: expr_type normalization
+        _normalize_expr_types(constraints_ip)
 
         # Step 4: Save to constraints_result table
         await _mcp_client.save_constraints_result(
@@ -632,15 +717,18 @@ def _merge_and_complete(
     for v, t, s in entries:
         if t == "enum" and v:
             return v, t, s
-    # bool (ar_type "range" with a single bool scalar)
+    # bool (single bool scalar) — force "enum" type regardless of upstream.
+    # Bool values are discrete, not a continuous range. This is a defensive
+    # measure: after Fix-1 _parse_range_expr already returns "enum" for bool,
+    # so the enum branch above handles the normal path. This branch catches
+    # any bool entry that still carries a "range" type from other sources.
     for v, t, s in entries:
         if (
-            t == "range"
-            and isinstance(v, list)
+            isinstance(v, list)
             and len(v) == 1
             and isinstance(v[0], bool)
         ):
-            return v, t, s
+            return v, "enum", s
     # range merge
     lo: int | None = None
     hi: int | None = None
@@ -749,11 +837,14 @@ def _parse_range_expr(expr: str, expr_type: str) -> tuple[list | None, str]:
                 missing side is left as None; callers must enforce completeness)
     """
     # Bool: "x.range_value == False" / "x.range_value == True"
+    # Bool values are discrete (True/False), not a continuous range —
+    # use "enum" type so downstream dedup/injection logic treats them
+    # as discrete values, not as [lo, hi] range pairs.
     if expr_type == "self_value_dependency" or ".range_value ==" in expr:
         m = re.search(r"\.range_value\s*==\s*(True|False)", expr)
         if m:
             val = m.group(1) == "True"
-            return [val], "range"
+            return [val], "enum"
         return None, ""
 
     # Enum: "x.range_value in [32, 64]" / "x.range_value in ['ND', 'NZ']"
@@ -974,6 +1065,10 @@ def _build_constraints_in_parameters(
 
         # Dedup: skip single-param value_dependency when allowed_range_value covers it
         # But do NOT skip when type="enum" (enum semantics differ from range)
+        # Exception: bool enum (single bool value like [False]) — the
+        # value_dependency expr "x.range_value == False" is fully equivalent
+        # to allowed_range_value [False] with type "enum", so dedup is safe
+        # and prevents duplication with the self_value_enum injected by FIX-6.
         expr_type = obj.get("expr_type", "")
         rel_params = obj.get("relation_params", [])
         if (
@@ -981,8 +1076,16 @@ def _build_constraints_in_parameters(
             and len(rel_params) == 1
             and rel_params[0] in ar_lookup
         ):
-            _, ar_type = ar_lookup[rel_params[0]]
+            val, ar_type = ar_lookup[rel_params[0]]
             if ar_type != "enum":
+                skipped_count += 1
+                continue
+            # Bool enum: single bool value — dedup to avoid duplication
+            if (
+                isinstance(val, list)
+                and len(val) == 1
+                and isinstance(val[0], bool)
+            ):
                 skipped_count += 1
                 continue
 
@@ -1048,6 +1151,307 @@ def _expand_aliases_in_constraints(
             expanded_count,
             operator_name,
         )
+
+
+def _has_range_constraint(clist: list[dict], pname: str) -> bool:
+    """Check if *pname* already has a self_value_range/enum constraint."""
+    for c in clist:
+        if pname not in c.get("relation_params", []):
+            continue
+        if c.get("expr_type") in ("self_value_range", "self_value_enum"):
+            return True
+    return False
+
+
+def _build_ar_expr(pname: str, vals: list, ar_type: str) -> str:
+    """Build a constraint expr from allowed_range_value.
+
+    R15: use ``pname.range_value`` (not bare pname) for consistency with
+    the codebase convention (single_param_constraint.py, implicit_value_constraint.py).
+    """
+    rv = f"{pname}.range_value"
+    if not vals:
+        return ""
+    # Range type: vals[0] is [lo, hi]
+    if ar_type == "range" and isinstance(vals[0], list):
+        lo, hi = vals[0][0], vals[0][1]
+        parts: list[str] = []
+        if lo is not None:
+            parts.append(f"{rv} >= {lo}")
+        if hi is not None:
+            parts.append(f"{rv} <= {hi}")
+        return " and ".join(parts) if parts else ""
+    # Enum / bool: vals is a flat list
+    return f"{rv} in {vals}"
+
+
+def _inject_allowed_range_as_constraints(
+    constraints_ip: dict[str, list[dict]],
+    inputs_dict: dict[str, Any],
+    outputs_dict: dict[str, Any],
+    supported_platforms: list[str],
+) -> int:
+    """FIX-6: Inject allowed_range_value as self_value_range/enum constraints.
+
+    Converts the structured ``allowed_range_value`` (already filled in
+    inputs/outputs) into constraint records, so parameters whose value
+    ranges were extracted by ``allowed_range_build`` but never produced as
+    LLM relations still appear in ``constraints_in_parameters``.
+
+    R4: src_text comes from the AR's own src_text.
+    R5: platforms without an existing constraints_ip key are created.
+    R15: expr uses ``pname.range_value`` for codebase consistency.
+    """
+    from agent.utils.platform_utils import resolve_target_platforms
+
+    injected = 0
+    for io_dict in (inputs_dict, outputs_dict):
+        for pname, plat_constraints in io_dict.items():
+            if not isinstance(plat_constraints, dict):
+                continue
+            for plat, data in plat_constraints.items():
+                if not isinstance(data, dict):
+                    continue
+                ar = data.get("allowed_range_value", {})
+                if not isinstance(ar, dict):
+                    continue
+                vals = ar.get("value", [])
+                ar_type = ar.get("type", "range")
+                if not vals:
+                    continue
+                # Skip if a self_value_range/enum constraint already exists
+                if _has_range_constraint(constraints_ip.get(plat, []), pname):
+                    continue
+                expr = _build_ar_expr(pname, vals, ar_type)
+                if not expr:
+                    continue
+                targets = resolve_target_platforms(plat, supported_platforms)
+                ar_src = ar.get("src_text", "")  # R4
+                constraint = {
+                    "expr_type": (
+                        "self_value_range" if ar_type == "range"
+                        else "self_value_enum"
+                    ),
+                    "expr": expr,
+                    "relation_params": [pname],
+                    "src_text": ar_src,
+                }
+                for t in targets:
+                    if t not in constraints_ip:
+                        constraints_ip[t] = []  # R5
+                    constraints_ip[t].append(dict(constraint))
+                    injected += 1
+    return injected
+
+
+def _filter_invalid_param_refs(
+    constraints_ip: dict[str, list[dict]],
+    valid_params: set[str],
+) -> int:
+    """FIX-2: Filter constraints that reference non-existent parameters.
+
+    MUST be called AFTER ``_expand_aliases_in_constraints`` (R1) so that
+    shorthand names are already resolved.  *valid_params* MUST include
+    external constants (R2) and all cross-function params (R12).
+    """
+    removed = 0
+    for plat, clist in constraints_ip.items():
+        kept: list[dict] = []
+        for c in clist:
+            params = c.get("relation_params", [])
+            invalid = [p for p in params if p not in valid_params]
+            if invalid:
+                logger.warning(
+                    "assemble_result: filtering constraint with invalid "
+                    "params %s on %s", invalid, plat,
+                )
+                removed += 1
+                continue
+            kept.append(c)
+        constraints_ip[plat] = kept
+    return removed
+
+
+# ---------------------------------------------------------------------------
+# FIX-10: Source citation existence verification
+# ---------------------------------------------------------------------------
+
+# HTML tag regex (inline, mirrors constraint_extract._strip_html without the
+# cross-module import of a private function).
+_HTML_TAG_RE_FIX10 = re.compile(r"<[^>]+>")
+
+
+def _strip_html_inline(text: str) -> str:
+    """Remove HTML tags, preserving inner content.
+
+    Inline implementation matching constraint_extract._strip_html logic,
+    avoiding a cross-module reference to a private function.
+    """
+    if not text:
+        return text
+    return _HTML_TAG_RE_FIX10.sub("", text).strip()
+
+
+def _normalize_for_match(text: str) -> str:
+    """Normalize text for fuzzy matching: strip HTML -> remove whitespace ->
+    remove punctuation -> lowercase.
+    """
+    text = _strip_html_inline(text)
+    text = re.sub(r"[\s]+", "", text)
+    text = re.sub(r"[　，、。；：“”‘’（）\[\]\{\},.;:!?()\-]", "", text)
+    return text.lower()
+
+
+def _source_exists_in_doc(
+    src: str, doc_norm: str, threshold: float = 0.3,
+) -> tuple[bool, float]:
+    """Check whether *src* appears in the document.
+
+    Uses the first 80 chars of the normalized src as the match window. If
+    src_text exceeds 80 chars, only the first 80 chars are matched (a
+    performance trade-off; most src_text values are < 80 chars).
+    """
+    src_norm = _normalize_for_match(src)
+    if not src_norm:
+        return True, 1.0
+    if src_norm in doc_norm:
+        return True, 1.0
+    window = src_norm[:80]
+    best = 0.0
+    step = max(1, len(window) // 4)
+    for i in range(0, max(1, len(doc_norm) - len(window) + 1), step):
+        chunk = doc_norm[i:i + len(window) + 20]
+        ratio = SequenceMatcher(None, window, chunk).ratio()
+        best = max(best, ratio)
+        if best >= 0.6:  # early-exit optimization, not a separate threshold
+            break
+    return best >= threshold, best
+
+
+# expr_type set that skips src_text verification:
+# - parameter_representation: src_text is a shape label / source_section_text
+#   (deterministically generated, not LLM-fabricated).
+# - self_value_range / self_value_enum: src_text may come from FIX-6 AR
+#   injection or placeholders ("正则提取:..." / "YAML..."), neither of which
+#   is document prose.  Note: LLM-generated self_value_range is also skipped
+#   by design (see mixed-fix.html §7.4 known limitations).
+_SKIP_SRC_CHECK = frozenset({
+    "parameter_representation",
+    "self_value_range",
+    "self_value_enum",
+})
+
+
+def _filter_fabricated_src_text(
+    constraints_ip: dict[str, list[dict]],
+    document_text: str,
+    *,
+    threshold: float = 0.3,
+) -> dict[str, int]:
+    """FIX-10: Delete constraints whose src_text is absent from the document.
+
+    Empty-document guard: if *document_text* is empty (DB error / missing
+    section), verification is skipped entirely to avoid deleting every
+    non-skipped constraint.
+    """
+    # Empty-document guard (blocking safety net)
+    if not document_text or not document_text.strip():
+        logger.warning(
+            "FIX-10: empty document_text, skipping verification "
+            "(would otherwise delete all non-skipped constraints)"
+        )
+        return {"deleted": 0, "kept": 0, "skipped": 0}
+
+    doc_norm = _normalize_for_match(document_text)
+    report = {"deleted": 0, "kept": 0, "skipped": 0}
+    for plat, clist in constraints_ip.items():
+        kept: list[dict] = []
+        for c in clist:
+            etype = c.get("expr_type", "")
+            src = c.get("src_text", "")
+            if etype in _SKIP_SRC_CHECK or not src.strip():
+                kept.append(c)
+                report["skipped"] += 1
+                continue
+            exists, ratio = _source_exists_in_doc(src, doc_norm, threshold)
+            if exists:
+                kept.append(c)
+                report["kept"] += 1
+            else:
+                report["deleted"] += 1
+                logger.warning(
+                    "FIX-10: %s src not found (ratio=%.2f, threshold=%.2f)",
+                    plat, ratio, threshold,
+                )
+        constraints_ip[plat] = kept
+    return report
+
+
+def _deduplicate_constraints_semantic(
+    constraints_ip: dict[str, list[dict]],
+) -> int:
+    """FIX-1: Cross-source semantic dedup.
+
+    When a ``parameter_representation`` constraint and an LLM-generated
+    constraint are semantically equivalent (same AST canonical key), keep
+    the ``parameter_representation`` and remove the duplicate.
+    """
+    from agent.utils.expr_validation import _semantic_expr_key
+
+    removed = 0
+    for plat, clist in constraints_ip.items():
+        # Collect keys from parameter_representation constraints
+        repr_keys: set[str] = set()
+        for c in clist:
+            if c.get("expr_type") == "parameter_representation":
+                key = _semantic_expr_key(c.get("expr", ""))
+                if key:
+                    repr_keys.add(key)
+        if not repr_keys:
+            continue
+        kept: list[dict] = []
+        for c in clist:
+            if c.get("expr_type") == "parameter_representation":
+                kept.append(c)
+                continue
+            key = _semantic_expr_key(c.get("expr", ""))
+            if key and key in repr_keys:
+                removed += 1
+                continue
+            kept.append(c)
+        constraints_ip[plat] = kept
+    return removed
+
+
+def _is_dtype_only(expr: str) -> bool:
+    """FIX-13: Check if all Attribute accesses in *expr* are .dtype only."""
+    import ast as _ast
+
+    try:
+        tree = _ast.parse(expr, mode="eval")
+    except SyntaxError:
+        return False
+    for node in _ast.walk(tree):
+        if isinstance(node, _ast.Attribute):
+            if node.attr not in ("dtype",):
+                return False
+    return True
+
+
+def _normalize_expr_types(
+    constraints_ip: dict[str, list[dict]],
+) -> None:
+    """FIX-13: Normalize expr_type for dtype-only constraints.
+
+    Constraints that only compare ``.dtype`` attributes but are tagged
+    ``cross_param_constraint`` are re-tagged as ``type_equality``.
+    """
+    for plat, clist in constraints_ip.items():
+        for c in clist:
+            if c.get("expr_type") != "cross_param_constraint":
+                continue
+            if _is_dtype_only(c.get("expr", "")):
+                c["expr_type"] = "type_equality"
 
 
 def _build_dtype_support(dtype_combos: list[dict]) -> dict[str, list[dict]]:

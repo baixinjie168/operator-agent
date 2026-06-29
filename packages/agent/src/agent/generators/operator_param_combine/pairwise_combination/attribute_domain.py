@@ -117,12 +117,8 @@ class AttributeDomain:
         if isinstance(raw, int):
             return [raw]
         if isinstance(raw, list):
-            vals = []
-            for item in raw:
-                if isinstance(item, int):
-                    vals.append(item)
-                elif isinstance(item, list) and len(item) == 2 and all(isinstance(v, int) for v in item):
-                    vals.extend(range(item[0], item[1] + 1))
+            # 新枚举格式：已经是 [v1, v2, ...] 列表，直接收集 int 值
+            vals = [item for item in raw if isinstance(item, int)]
             return sorted(set(vals)) if vals else [ParamModelConfig.DEFAULT_TENSOR_SHAPE_DIM]
         return [ParamModelConfig.DEFAULT_TENSOR_SHAPE_DIM]
 

@@ -70,6 +70,17 @@ class Settings(BaseSettings):
     # False, _simplify_expr is skipped.
     expr_simplify: bool = Field(default=True)
 
+    # FIX-10: Source citation existence verification.
+    # When True, constraints whose src_text cannot be found in the document
+    # (ws + exe + constraints sections) are deleted as fabricated citations.
+    # Complements FIX-2 (param legality) to cover "params legal but src_text
+    # fabricated" scenarios.
+    relation_verify_source: bool = Field(default=True)
+    # Similarity threshold for the sliding-window fuzzy match (FIX-10b).
+    # best >= threshold -> KEEP, otherwise DELETE. 0.3 is permissive on purpose
+    # to avoid deleting legitimately-paraphrased citations.
+    relation_verify_source_threshold: float = Field(default=0.3)
+
     # Constraint check Agent: separate model for post-pipeline verification.
     # Uses a different provider/model from the generation pipeline to avoid
     # self-evaluation bias.  Defaults to DeepSeek for stronger reasoning.

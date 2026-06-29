@@ -122,9 +122,7 @@ async def constraint_assemble_node(state: BuildParamConstraintState) -> dict[str
                     dim_struct_failed.append(plat)
                 elif dims:
                     ok = all(
-                        (isinstance(d, list) and len(d) == 2
-                         and all(isinstance(x, (int, float)) for x in d))
-                        or isinstance(d, int)
+                        isinstance(d, int) and 0 <= d <= 8
                         for d in dims
                     )
                     if ok:
@@ -132,13 +130,9 @@ async def constraint_assemble_node(state: BuildParamConstraintState) -> dict[str
                     else:
                         dim_struct_failed.append(plat)
 
-                if dims:
-                    for d in dims:
-                        if isinstance(d, list) and len(d) == 2:
-                            lo, hi = d[0], d[1]
-                            if hi is not None and hi > 2**31:
-                                dim_align_failed.append(plat)
-                                break
+                # 2^31 alignment check removed: old per-dim [min, max] format
+                # is deprecated; new enum format dims are all int rank values
+                # in [0, 8], which can never exceed 2^31.
 
                 ar_data = plat_data.get("allowed_range_value", {})
                 ar_value = ar_data.get("value", []) if isinstance(ar_data, dict) else []

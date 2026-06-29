@@ -25,6 +25,7 @@ from agent.prompts import RELATION_OBJECT_BUILD_PROMPT
 from agent.core.llm import create_llm
 from agent.utils.expr_validation import _simplify_expr
 from agent.utils.expr_validation import validate_expr as _validate_expr
+from agent.utils.expr_validation import validate_none_guard
 from agent.utils.llm_common import CONCURRENCY_LIMIT, parse_json_response
 from agent.runtime.context import get_context
 from agent.runtime.events import EventType, Span, SpanType
@@ -69,6 +70,22 @@ FEW_SHOT_EXAMPLES = {
         "bad": "tuple(x.shape) == tuple(y.shape)",
         "good": "list(x.shape) == list(y.shape)",
         "note": "禁止使用 tuple()，用 list() 代替，或直接用 x.shape == y.shape 比较",
+    },
+    # FIX-16: Additional examples for None guard, conditional, enum
+    "none_guard": {
+        "bad": "biasOptional.shape[0] == N",
+        "good": "(biasOptional.shape[0] == N) if biasOptional is not None else True",
+        "note": "可选参数的属性引用必须有 None 守卫包装",
+    },
+    "conditional_branch": {
+        "bad": "N1 == 2 * K2",
+        "good": "(N1 == 2 * K2) if (activation.range_value in [geglu, swiglu, reglu]) else True",
+        "note": "条件约束必须保留条件守卫，条件不满足时返回 True",
+    },
+    "enum_completeness": {
+        "bad": "groupType.range_value in [0, 1]",
+        "good": "groupType.range_value in [-1, 0, 2]",
+        "note": "枚举值必须与文档完全一致，不可遗漏",
     },
 }
 
@@ -201,11 +218,22 @@ def _parse_relation_object_response(text: str) -> dict[str, str]:
 
 
 def _select_relevant_example(error: str, expr: str) -> str:
-    """Select the most relevant Few-shot example based on error type."""
+    """Select the most relevant Few-shot example based on error type.
+
+    R17: use precise error-message keyword matching instead of broad
+    expr-content matching, to avoid false-matching legal expressions.
+    """
     error_lower = error.lower()
     expr_lower = expr.lower()
 
-    if "implies" in expr_lower:
+    # R17: precise error-message matching for FIX-16 examples
+    if "without none guard" in error_lower:
+        ex = FEW_SHOT_EXAMPLES["none_guard"]
+    elif "contradiction" in error_lower:
+        ex = FEW_SHOT_EXAMPLES["conditional_branch"]
+    elif "enum" in error_lower and "in [" in expr_lower:
+        ex = FEW_SHOT_EXAMPLES["enum_completeness"]
+    elif "implies" in expr_lower:
         ex = FEW_SHOT_EXAMPLES["syntax_implies"]
     elif "null" in expr_lower:
         ex = FEW_SHOT_EXAMPLES["syntax_null"]
@@ -260,10 +288,12 @@ async def _extract_with_retry(
     implicit_params_text: str = "",
     external_constants: set[str] | None = None,
     implicit_param_names: set[str] | None = None,
+    param_optional_map: dict[str, bool] | None = None,
 ) -> dict[str, str]:
     """Phase 2a: Extract with enhanced retry (max 2 attempts).
 
     On validation failure, inject relevant Few-shot example before retrying.
+    FIX-9: also validates None guards for optional params (R14: standalone).
     """
     last_error = ""
     last_expr = ""
@@ -298,6 +328,16 @@ async def _extract_with_retry(
                 is_valid, error = _validate_expr(
                     expr, params, external_constants, implicit_param_names,
                 )
+                # FIX-9: None guard validation (R14: standalone, alongside
+                # _validate_expr; does NOT modify validate_expr signature)
+                if is_valid:
+                    guard_ok, guard_error = validate_none_guard(
+                        expr, params, param_optional_map,
+                    )
+                    if not guard_ok:
+                        is_valid = False
+                        error = guard_error
+
                 if is_valid:
                     return result
 
@@ -427,6 +467,7 @@ async def _batch_extract_relation_objects(
     implicit_params_text: str = "",
     external_constants: set[str] | None = None,
     implicit_param_names: set[str] | None = None,
+    param_optional_map: dict[str, bool] | None = None,
 ) -> list[dict[str, str]]:
     """Batch LLM extraction with three-layer protection.
 
@@ -467,6 +508,14 @@ async def _batch_extract_relation_objects(
                     expr, rel.get("params", []),
                     external_constants, implicit_param_names,
                 )
+                # FIX-9: None guard validation for complex relations too
+                if is_valid:
+                    guard_ok, guard_error = validate_none_guard(
+                        expr, rel.get("params", []), param_optional_map,
+                    )
+                    if not guard_ok:
+                        is_valid = False
+                        error = guard_error
                 if not is_valid:
                     # Phase 3 Item 8: attempt post-generation simplification
                     # before giving up. If the expr was rejected for excessive
@@ -519,6 +568,7 @@ async def _batch_extract_relation_objects(
                 implicit_params_text=implicit_params_text,
                 external_constants=external_constants,
                 implicit_param_names=implicit_param_names,
+                param_optional_map=param_optional_map,
             )
 
             # Check if semantic verification is needed (Phase 2b)
@@ -718,6 +768,14 @@ async def build_param_relations_node(state: PipelineState) -> dict[str, Any]:
             if not m.get("is_external_constant") and not m.get("is_constant"):
                 implicit_param_names.add(m["var_name"])
 
+        # FIX-9: Build param_optional_map from DB is_optional field (R6).
+        # Used by validate_none_guard to detect missing None guards.
+        param_optional_map: dict[str, bool] = {}
+        for p in params or []:
+            pn = p.get("param_name", "")
+            if pn:
+                param_optional_map[pn] = bool(p.get("is_optional", False))
+
         # Step 2: Build signature context (enriched with shape info)
         signatures_text = _format_signatures(sigs, params or [])
         param_shapes_text = _build_param_shapes_text(params or [])
@@ -753,6 +811,7 @@ async def build_param_relations_node(state: PipelineState) -> dict[str, Any]:
                 implicit_params_text=implicit_params_text,
                 external_constants=external_const_names,
                 implicit_param_names=implicit_param_names,
+                param_optional_map=param_optional_map,
             )
             for (idx, _), result in zip(needs_llm, extracted):
                 llm_results[idx] = result

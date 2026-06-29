@@ -189,7 +189,7 @@ class PairwiseParamCombinationGenerator:
                 dim_count = ParamModelConfig.DEFAULT_TENSOR_SHAPE_DIM
             else:
                 dim_count = random.choice(dim_value) if isinstance(dim_value, list) else dim_value
-        dim_count = int(dim_count) if dim_count else ParamModelConfig.DEFAULT_TENSOR_SHAPE_DIM
+        dim_count = int(dim_count) if dim_count is not None else ParamModelConfig.DEFAULT_TENSOR_SHAPE_DIM
 
         dim_profile = raw_case.get(param_name, {}).get("dim_value_profile")
         if dim_profile is None:
