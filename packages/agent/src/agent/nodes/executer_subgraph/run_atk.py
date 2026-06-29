@@ -12,9 +12,14 @@ The flow:
    - ``/home/operator_atk/atk_executor/{operator_name}_executor.py``
 
 3. Run the ``atk node --backend cpu task`` command via
-   ``source <env_init> && ...`` so the CANN environment is loaded before
-   atk starts.  The command's exit code decides ``status``
-   (``success`` / ``failed`` / ``timeout``).
+   ``source <env_init> && source <conda_init> && conda activate atk_env && ...``
+   so both the CANN environment and conda are loaded before atk starts.
+   The explicit ``source`` calls are required because asyncssh runs the
+   command in a non-interactive, non-login remote shell that does NOT
+   read ``~/.bashrc`` — meaning conda's initialize hook never fires and
+   ``conda`` is not on PATH unless we source ``conda.sh`` ourselves.
+   The command's exit code decides ``status`` (``success`` / ``failed`` /
+   ``timeout``).
 
 4. Find the latest ``<operator_name>_*`` output directory under
    ``/home/operator_atk/atk_output``, download the ``report/`` xlsx and
@@ -64,7 +69,7 @@ _REMOTE_OUTPUT_ROOT = f"{_REMOTE_HOME}/atk_output"
 
 # Default CANN env init script on Ascend hosts.  Operators may override
 # per-server via ``state["server_info"]["env_init_script"]``.
-_DEFAULT_ENV_INIT = "/usr/local/Ascend/ascend-toolkit/set_env.sh"
+_DEFAULT_ENV_INIT = "source /home/marine/miniconda3/etc/profile.d/conda.sh && conda activate atk_env"
 
 # Cap on the remote ``atk node --backend cpu task`` invocation.  ATK
 # runs can be slow on large case sets; 30 minutes is the existing default
@@ -102,6 +107,7 @@ def _build_atk_command(
     executor_remote = _remote_executor_path(operator_name)
     return (
         f"cd {_REMOTE_HOME} && "
+        f"{env_init} && "
         f"atk node --backend cpu task "
         f"-c {cases_remote} "
         f"-p {executor_remote} "
