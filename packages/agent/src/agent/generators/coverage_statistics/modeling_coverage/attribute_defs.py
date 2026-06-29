@@ -183,18 +183,11 @@ def _resolve_dim_list(raw_dims: Any) -> List[int]:
     """
     解析算子约束 JSON 中的 dimensions/array_length 字段为取值列表。
 
-    dimensions 字段（新枚举格式）：
+    dimensions 字段的格式可能是：
       - [1, 2, 3, 4]        -> 直接枚举
-      - [0, 3, 4]           -> 离散枚举（0 维 / 3 维 / 4 维）
+      - [[1, 4], [2, 3]]    -> 区间 [min, max] 展开
       - None                 -> 使用默认范围 1~8
       - "N/A"                -> 不适用，返回空列表
-
-    array_length 字段（仍用区间格式，未迁移）：
-      - [[1, 4], [2, 3]]    -> 区间 [min, max] 展开
-      - [128]               -> 单值
-
-    注意：此函数被 dimensions 和 array_length 共用，区间展开分支
-    必须保留以兼容 array_length 的 [[min, max]] 格式。
     """
     if raw_dims is None:
         return list(range(DEFAULT_DIM_COUNT_MIN, DEFAULT_DIM_COUNT_MAX + 1))
@@ -205,9 +198,9 @@ def _resolve_dim_list(raw_dims: Any) -> List[int]:
     if isinstance(raw_dims, list):
         result = []
         for d in raw_dims:
-            if isinstance(d, list) and len(d) >= 2:  # 区间展开（array_length 仍用此格式）
+            if isinstance(d, list) and len(d) >= 2:
                 result.extend(range(d[0], d[1] + 1))
-            elif isinstance(d, (int, float)):  # 枚举值（dimensions 新格式走此分支）
+            elif isinstance(d, (int, float)):
                 result.append(int(d))
         return sorted(set(result)) if result else [DEFAULT_DIM_COUNT_MIN]
 
