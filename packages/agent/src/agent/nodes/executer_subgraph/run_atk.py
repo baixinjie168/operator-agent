@@ -181,8 +181,29 @@ async def exec_run_atk_node(state: PipelineState) -> dict[str, Any]:
 
     try:
         # ── 2. SFTP upload cases + executor ────────────────────────────────
+        # generator.py produces an ATK-friendly "expanded" JSON alongside the
+        # original cases file (see generator.py: base + "_expanded.json").
+        # ATK requires the nested-list format and does not understand the
+        # ``length`` shorthand in the original cases, so always upload the
+        # expanded variant rather than the raw cases_path.
+        cases_path_p = Path(cases_path)
+        expanded_local_path = cases_path_p.with_name(
+            cases_path_p.stem + "_expanded.json"
+        )
+        if not expanded_local_path.is_file():
+            result.status = "error"
+            result.error_message = (
+                f"expanded cases 不存在: {expanded_local_path} — "
+                f"exec_generate_atk 未生成 expanded JSON"
+            )
+            result.duration = time.monotonic() - overall_start
+            return {
+                "exec_result": result.model_dump(),
+                "error": result.error_message,
+            }
+
         try:
-            await sftp_upload(conn, cases_path, _remote_cases_path(operator_name))
+            await sftp_upload(conn, str(expanded_local_path), _remote_cases_path(operator_name))
             await sftp_upload(conn, executor_path, _remote_executor_path(operator_name))
         except SSHEngineError as e:
             logger.exception("exec_run_atk: SFTP upload failed for %s", operator_name)
