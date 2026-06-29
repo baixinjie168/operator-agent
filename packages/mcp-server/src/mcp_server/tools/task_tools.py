@@ -2,13 +2,9 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from shared.utils import now_iso as _now_iso
 
 from mcp_server.db import get_db
-
-
-def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 def create_task(name: str, total_count: int, upload_dir: str) -> dict:
@@ -121,6 +117,30 @@ def update_task_item_status(
     )
     conn.commit()
     return {"updated": True}
+
+
+def reset_task_item(item_id: int) -> dict:
+    """Reset a single task item to 'pending', clearing error and timestamps.
+
+    Used for per-item retry: the caller resets the item then re-runs the
+    task via run_task(), which picks up all pending items.
+
+    Args:
+        item_id: Task item ID.
+
+    Returns:
+        dict with item_id and updated flag.
+    """
+    db = get_db()
+    conn = db.conn
+    conn.execute(
+        "UPDATE task_items SET status = 'pending', error = NULL, "
+        "started_at = NULL, finished_at = NULL "
+        "WHERE id = ?",
+        (item_id,),
+    )
+    conn.commit()
+    return {"item_id": item_id, "updated": True}
 
 
 def get_pending_task_items(task_id: int) -> list[dict]:

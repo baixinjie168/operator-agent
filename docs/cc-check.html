@@ -1,0 +1,597 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>约束检查 Claude Code CLI 实现方案</title>
+<style>
+:root{--bg:#0d1117;--card:#161b22;--border:#30363d;--text:#e6edf3;--dim:#9198a1;--accent:#58a6ff;--green:#3fb950;--warn:#d29922;--danger:#f85149;--purple:#bc8cff}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Noto Sans SC",sans-serif;line-height:1.7}
+.wrap{max-width:1100px;margin:0 auto;padding:40px}
+section{margin-bottom:48px}
+h2{font-size:24px;font-weight:700;margin-bottom:14px;padding-bottom:10px;border-bottom:2px solid var(--border)}
+h3{font-size:18px;font-weight:600;margin:28px 0 10px;color:var(--accent)}
+h4{font-size:15px;font-weight:600;margin:18px 0 8px;color:var(--purple)}
+p{margin-bottom:10px}ul,ol{margin:8px 0 14px 24px}li{margin-bottom:5px}
+.lead{color:var(--dim);font-size:15px;margin-bottom:16px}
+table{width:100%;border-collapse:collapse;margin:14px 0;font-size:14px}
+th{background:var(--card);color:var(--accent);text-align:left;padding:10px 14px;border-bottom:1px solid var(--border)}
+td{padding:9px 14px;border-bottom:1px solid var(--border);vertical-align:top}
+pre{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:16px;overflow-x:auto;margin:12px 0;font-size:13px;line-height:1.5}
+code{font-family:"Consolas",monospace}
+:not(pre)>code{background:rgba(110,118,129,0.2);padding:2px 6px;border-radius:4px;font-size:0.9em;color:var(--accent)}
+.card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:20px;margin:14px 0}
+.tag{display:inline-block;padding:2px 8px;border-radius:4px;font-size:12px;font-weight:600}
+.tag-green{background:rgba(63,185,80,0.15);color:var(--green)}.tag-blue{background:rgba(88,166,255,0.15);color:var(--accent)}.tag-yellow{background:rgba(210,153,34,0.15);color:var(--warn)}.tag-red{background:rgba(248,81,73,0.15);color:var(--danger)}
+.callout{border-radius:8px;padding:14px 18px;margin:14px 0;border-left:4px solid;font-size:14px}
+.callout-info{background:rgba(88,166,255,0.08);border-color:var(--accent)}.callout-success{background:rgba(63,185,80,0.08);border-color:var(--green)}.callout-warn{background:rgba(210,153,34,0.08);border-color:var(--warn)}
+.callout strong{display:block;margin-bottom:4px}
+.diagram{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:24px;margin:14px 0;font-family:monospace;font-size:13px;line-height:1.6;overflow-x:auto;white-space:pre}
+.footer{text-align:center;padding:30px;color:var(--dim);font-size:13px;border-top:1px solid var(--border);margin-top:30px}
+.step{display:flex;gap:16px;margin:16px 0;align-items:flex-start}
+.step-num{flex-shrink:0;width:32px;height:32px;border-radius:50%;background:var(--accent);color:var(--bg);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px}
+.step-body{flex:1}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<section>
+<h2>0 概述</h2>
+<p class="lead">在 LangGraph 管线的约束检查 Node 中，创建隔离的 Claude Code 工作空间，从 <code>.env</code> 读取模型配置，通过 <code>subprocess</code> 调用 <code>claude -p</code> 完成约束检查。</p>
+<div class="callout callout-info">
+<strong>目标</strong>
+将 <code>constraint_check_agent.py</code> 从 DeepAgents + LocalShellBackend 改为 Claude Code CLI。<br>
+配置全部来自 <code>.env</code>（通过 <code>Settings</code> 类），不依赖全局 <code>~/.claude/settings.json</code>。<br>
+调用方（<code>routes/query.py</code>、<code>routes/task.py</code>、<code>task_engine.py</code>）接口不变。
+</div>
+</section>
+
+<section>
+<h2>1 架构</h2>
+<div class="diagram">LangGraph Pipeline
+  |
+  +-- ... 提取节点 (DeepAgents, 不变) ...
+  |
+  +-- constraint_check Node  &lt;-- 本方案改造
+  |   |
+  |   |  constraint_check_agent.py
+  |   |  +----------------------------------------------+
+  |   |  | 1. _create_workspace()                      |
+  |   |  |    +-- tempfile.mkdtemp()                   |
+  |   |  |    +-- copy .claude/skills/... -&gt; workspace  |
+  |   |  |    +-- write .claude/settings.json          |  &lt;-- 从 .env 读取
+  |   |  |    +-- write operator.md + constraints.json |
+  |   |  |                                            |
+  |   |  | 2. subprocess.run(claude -p ...)           |
+  |   |  |    cwd = workspace (隔离)                   |
+  |   |  |    --model sonnet -&gt; glm-5.2               |
+  |   |  |    --allowedTools "Read Write"              |
+  |   |  |    Claude Code 实例 (14+ 轮)                |
+  |   |  |      +-- 加载 skill                        |
+  |   |  |      +-- Read operator.md                  |
+  |   |  |      +-- Read constraints.json             |
+  |   |  |      +-- 多轮分析交叉验证                   |
+  |   |  |      +-- Write report.html                 |
+  |   |  |                                            |
+  |   |  | 3. read report.html -&gt; return              |
+  |   |  | 4. shutil.rmtree(workspace)                |
+  |   |  +----------------------------------------------+
+  |   |
+  |   +--&gt; HTML 报告 (存 DB, 显示 UI)
+  |
+  +-- ... 后续节点 ...</div>
+</section>
+
+<section>
+<h2>2 配置设计（.env + config.py）</h2>
+
+<h3>2.1 .env 新增项</h3>
+<pre><code># --- 约束检查：Claude Code CLI ---
+# 启用 Claude CLI 方式（false 时 fallback 到 DeepAgents）
+CONSTRAINT_CHECK_CC_ENABLED=true
+
+# Anthropic 兼容端点（不同于 OpenAI 兼容端点）
+# DashScope: https://dashscope.aliyuncs.com/apps/anthropic
+CONSTRAINT_CHECK_CC_BASE_URL=https://dashscope.aliyuncs.com/apps/anthropic
+
+# subprocess 超时（秒），CLI 多轮推理需 2-5 分钟
+CONSTRAINT_CHECK_CC_TIMEOUT=600
+
+# claude 可执行文件路径（PATH 中可找到则留空）
+CONSTRAINT_CHECK_CC_CLI_PATH=claude</code></pre>
+
+<div class="callout callout-info">
+<strong>复用已有配置</strong>
+以下配置项已在 <code>.env</code> 中存在，Claude CLI 方案直接复用，无需新增：
+<table>
+<tr><th>配置项</th><th>当前值</th><th>Claude CLI 中的用途</th></tr>
+<tr><td><code>CONSTRAINT_CHECK_LLM_PROVIDER</code></td><td><code>qwen</code></td><td>确定 API Key 来源 -&gt; <code>QWEN_API_KEY</code></td></tr>
+<tr><td><code>CONSTRAINT_CHECK_MODEL</code></td><td><code>glm-5.2</code></td><td>写入 <code>ANTHROPIC_DEFAULT_SONNET_MODEL</code></td></tr>
+<tr><td><code>QWEN_API_KEY</code></td><td><code>sk-09eab7c1...</code></td><td>写入 <code>ANTHROPIC_AUTH_TOKEN</code></td></tr>
+</table>
+</div>
+
+<h3>2.2 config.py 新增字段</h3>
+<pre><code># packages/agent/src/agent/core/config.py -- Settings 类新增
+
+class Settings(BaseSettings):
+    # ... 已有字段不变 ...
+
+    # --- Claude Code CLI for constraint check ---
+    constraint_check_cc_enabled: bool = False
+    constraint_check_cc_base_url: str = ""
+    constraint_check_cc_timeout: int = Field(default=600, ge=60, le=3600)
+    constraint_check_cc_cli_path: str = "claude"
+
+    def get_cc_settings(self) -&gt; dict:
+        """Generate workspace/.claude/settings.json content from .env."""
+        provider = self.constraint_check_llm_provider
+        api_key = self.get_provider_api_key(provider)
+        model = self.constraint_check_model or self.get_provider_model(provider)
+        base_url = self.constraint_check_cc_base_url
+
+        if not api_key:
+            raise ValueError(
+                f"API key for provider '{provider}' is required. "
+                f"Set {provider.value.upper()}_API_KEY in .env."
+            )
+        if not base_url:
+            raise ValueError(
+                "CONSTRAINT_CHECK_CC_BASE_URL is required when "
+                "CONSTRAINT_CHECK_CC_ENABLED=true"
+            )
+
+        return {
+            "env": {
+                "ANTHROPIC_AUTH_TOKEN": api_key,
+                "ANTHROPIC_BASE_URL": base_url,
+                "ANTHROPIC_DEFAULT_SONNET_MODEL": model,
+                "ANTHROPIC_DEFAULT_OPUS_MODEL": model,
+            },
+            "permissions": {
+                "allow": ["Read(*)", "Write(*)"],
+                "deny": [],
+            },
+        }</code></pre>
+
+<h3>2.3 配置关系图</h3>
+<pre><code>.env                          config.py (Settings)         workspace/.claude/settings.json
+----------------------------  ---------------------------   ----------------------------------
+CONSTRAINT_CHECK_CC_ENABLED   -&gt; cc_enabled (bool)
+CONSTRAINT_CHECK_CC_BASE_URL  -&gt; cc_base_url -----------------&gt; env.ANTHROPIC_BASE_URL
+CONSTRAINT_CHECK_CC_TIMEOUT   -&gt; cc_timeout
+CONSTRAINT_CHECK_CC_CLI_PATH  -&gt; cc_cli_path
+
+CONSTRAINT_CHECK_LLM_PROVIDER -&gt; constraint_check_llm_provider
+  +-&gt; QWEN_API_KEY             -&gt; get_provider_api_key() -----&gt; env.ANTHROPIC_AUTH_TOKEN
+CONSTRAINT_CHECK_MODEL        -&gt; constraint_check_model ----&gt; env.ANTHROPIC_DEFAULT_SONNET_MODEL</code></pre>
+</section>
+
+<section>
+<h2>3 工作空间生命周期</h2>
+
+<div class="step">
+<div class="step-num">1</div>
+<div class="step-body">
+<h4>创建临时目录</h4>
+<pre><code>workspace = tempfile.mkdtemp(prefix=f"claude-check-{operator_name}-")
+# -&gt; /tmp/claude-check-aclnnFFNV3-a1b2c3d4/</code></pre>
+</div>
+</div>
+
+<div class="step">
+<div class="step-num">2</div>
+<div class="step-body">
+<h4>复制 Skill</h4>
+<pre><code>src = PROJECT_ROOT/.claude/skills/operator-constraint-checker/
+dst = workspace/.claude/skills/operator-constraint-checker/
+shutil.copytree(src, dst, dirs_exist_ok=True)
+
+# 结果：
+# workspace/.claude/skills/operator-constraint-checker/
+#   +-- SKILL.md              (含 YAML frontmatter: name, description)
+#   +-- references/
+#       +-- html-template.md
+#       +-- json-schema.md</code></pre>
+<p>Claude CLI 启动时自动从 <code>{cwd}/.claude/skills/</code> 发现 Skill，无需额外参数。</p>
+</div>
+</div>
+
+<div class="step">
+<div class="step-num">3</div>
+<div class="step-body">
+<h4>写入模型配置</h4>
+<pre><code>cc_settings = settings.get_cc_settings()  # 从 .env 读取
+write workspace/.claude/settings.json
+
+# 内容：
+# {
+#   "env": {
+#     "ANTHROPIC_AUTH_TOKEN": "sk-09eab7c1...",
+#     "ANTHROPIC_BASE_URL": "https://dashscope.aliyuncs.com/apps/anthropic",
+#     "ANTHROPIC_DEFAULT_SONNET_MODEL": "glm-5.2",
+#     "ANTHROPIC_DEFAULT_OPUS_MODEL": "glm-5.2"
+#   },
+#   "permissions": {
+#     "allow": ["Read(*)", "Write(*)"],
+#     "deny": []
+#   }
+# }</code></pre>
+<p>项目级 <code>settings.json</code> 覆盖全局 <code>~/.claude/settings.json</code>，只对此工作空间生效。</p>
+</div>
+</div>
+
+<div class="step">
+<div class="step-num">4</div>
+<div class="step-body">
+<h4>写入输入文件</h4>
+<pre><code>write workspace/operator.md       &lt;- 算子原文 (Markdown)
+write workspace/constraints.json  &lt;- 提取的约束 (JSON)</code></pre>
+</div>
+</div>
+
+<div class="step">
+<div class="step-num">5</div>
+<div class="step-body">
+<h4>调用 Claude CLI</h4>
+<pre><code>cmd = [
+    "claude", "-p",
+    "使用 operator-constraint-checker skill 检查约束。"
+    "算子文档：operator.md，约束文档：constraints.json，"
+    "输出路径：report.html",
+    "--model", "sonnet",              # -&gt; ANTHROPIC_DEFAULT_SONNET_MODEL = glm-5.2
+    "--allowedTools", "Read Write",   # 只允许读写文件
+    "--output-format", "json",        # 结构化输出
+]
+
+result = subprocess.run(
+    cmd,
+    cwd=workspace,        # &lt;-- 隔离的文件系统根
+    capture_output=True,
+    text=True,
+    timeout=600,          # 10 分钟
+)</code></pre>
+<p>Claude 实例只能看到 <code>workspace</code> 内的文件，使用 <code>workspace/.claude/settings.json</code> 的模型配置。</p>
+</div>
+</div>
+
+<div class="step">
+<div class="step-num">6</div>
+<div class="step-body">
+<h4>读回报告 + 清理</h4>
+<pre><code>html = read workspace/report.html
+shutil.rmtree(workspace)
+return html</code></pre>
+</div>
+</div>
+</section>
+
+<section>
+<h2>4 完整实现代码</h2>
+<h3>4.1 constraint_check_agent.py（完整重写）</h3>
+<pre><code># packages/agent/src/agent/nodes/constraint_check_agent.py
+"""Constraint check via Claude Code CLI.
+
+Creates an isolated workspace for each check, configures the model
+from .env via Settings, invokes `claude -p` as a subprocess.
+No dependency on DeepAgents, ChatOpenAI, or global ~/.claude/settings.json.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+import os
+import shutil
+import subprocess
+import tempfile
+
+from agent.core.config import settings
+
+logger = logging.getLogger(__name__)
+
+_PROJECT_ROOT = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "..")
+)
+_SKILL_SOURCE = os.path.join(
+    _PROJECT_ROOT, ".claude", "skills", "operator-constraint-checker"
+)
+
+_check_lock = asyncio.Lock()
+
+
+def _create_workspace(operator_name, markdown_content, json_constraints):
+    """Create isolated Claude Code workspace."""
+    workspace = tempfile.mkdtemp(prefix=f"claude-check-{operator_name}-")
+
+    # 1a. Copy skill
+    skill_dest = os.path.join(
+        workspace, ".claude", "skills", "operator-constraint-checker"
+    )
+    shutil.copytree(_SKILL_SOURCE, skill_dest, dirs_exist_ok=True)
+
+    # 1b. Write model config (from .env via Settings)
+    cc_settings = settings.get_cc_settings()
+    os.makedirs(os.path.join(workspace, ".claude"), exist_ok=True)
+    with open(os.path.join(workspace, ".claude", "settings.json"), "w") as f:
+        json.dump(cc_settings, f, indent=2)
+
+    # 1c. Write input files
+    with open(os.path.join(workspace, "operator.md"), "w", encoding="utf-8") as f:
+        f.write(markdown_content)
+    with open(os.path.join(workspace, "constraints.json"), "w", encoding="utf-8") as f:
+        f.write(json_constraints)
+
+    logger.info("ClaudeCLI: workspace created at %s", workspace)
+    return workspace
+
+
+_PROMPT = (
+    "使用 operator-constraint-checker skill 检查约束。"
+    "算子文档：operator.md，"
+    "约束文档：constraints.json，"
+    "输出路径：report.html"
+)
+
+
+async def run_constraint_check(markdown_content, json_constraints, operator_name):
+    """Run constraint check via Claude Code CLI.
+
+    Interface unchanged -- callers need no modification.
+    Returns HTML report string, or "" on failure.
+    """
+    if not markdown_content.strip() or not json_constraints.strip():
+        return ""
+
+    async with _check_lock:
+        return await _run_cli_check(markdown_content, json_constraints, operator_name)
+
+
+async def _run_cli_check(markdown_content, json_constraints, operator_name):
+    """Actual CLI invocation (called under _check_lock)."""
+    workspace = _create_workspace(operator_name, markdown_content, json_constraints)
+
+    cli_path = settings.constraint_check_cc_cli_path or "claude"
+    cmd = [
+        cli_path, "-p", _PROMPT,
+        "--model", "sonnet",
+        "--allowedTools", "Read Write",
+        "--output-format", "json",
+    ]
+
+    timeout = settings.constraint_check_cc_timeout
+    report_path = os.path.join(workspace, "report.html")
+
+    logger.info(
+        "ClaudeCLI: starting check for %s (cwd=%s, timeout=%ds)",
+        operator_name, workspace, timeout,
+    )
+
+    try:
+        result = await asyncio.to_thread(
+            subprocess.run, cmd,
+            cwd=workspace, capture_output=True, text=True, timeout=timeout,
+        )
+
+        if result.returncode != 0:
+            logger.error("ClaudeCLI: %s exited %d, stderr: %s",
+                operator_name, result.returncode,
+                (result.stderr or "")[:500])
+        else:
+            logger.info("ClaudeCLI: %s completed (stdout=%d chars)",
+                operator_name, len(result.stdout))
+
+        # Read HTML report
+        if os.path.exists(report_path):
+            with open(report_path, "r", encoding="utf-8") as f:
+                html = f.read()
+            logger.info("ClaudeCLI: report read for %s (%d chars)",
+                operator_name, len(html))
+            return html
+
+        # Fallback: extract from JSON stdout
+        if result.stdout:
+            try:
+                data = json.loads(result.stdout)
+                content = data.get("result", "")
+                if "&lt;html" in content.lower():
+                    return content
+            except json.JSONDecodeError:
+                pass
+
+        logger.error("ClaudeCLI: no report found for %s", operator_name)
+        return ""
+
+    except subprocess.TimeoutExpired:
+        logger.error("ClaudeCLI: timeout for %s after %ds", operator_name, timeout)
+        return ""
+    except FileNotFoundError:
+        logger.error("ClaudeCLI: '%s' not found. Set CONSTRAINT_CHECK_CC_CLI_PATH", cli_path)
+        return ""
+    except Exception as e:
+        logger.exception("ClaudeCLI: failed for %s: %s", operator_name, e)
+        return ""
+    finally:
+        shutil.rmtree(workspace, ignore_errors=True)
+        logger.info("ClaudeCLI: workspace cleaned for %s", operator_name)</code></pre>
+</section>
+
+<section>
+<h3>4.2 config.py 新增字段</h3>
+<pre><code># packages/agent/src/agent/core/config.py -- 在 Settings 类中新增
+
+    # --- Claude Code CLI for constraint check ---
+    # Master switch: when true, use `claude -p` subprocess;
+    # when false, fallback to DeepAgents (create_constraint_check_llm).
+    constraint_check_cc_enabled: bool = False
+
+    # Anthropic-compatible endpoint (different from OpenAI-compatible).
+    # DashScope: https://dashscope.aliyuncs.com/apps/anthropic
+    constraint_check_cc_base_url: str = ""
+
+    # subprocess timeout in seconds (CLI multi-turn takes 2-5 min)
+    constraint_check_cc_timeout: int = Field(default=600, ge=60, le=3600)
+
+    # claude executable path (default: "claude" from PATH)
+    constraint_check_cc_cli_path: str = "claude"
+
+    def get_cc_settings(self) -&gt; dict:
+        """Generate workspace/.claude/settings.json content from .env.
+
+        Reads API key + model from existing constraint_check_* config.
+        Does NOT depend on global ~/.claude/settings.json.
+        """
+        provider = self.constraint_check_llm_provider
+        api_key = self.get_provider_api_key(provider)
+        model = self.constraint_check_model or self.get_provider_model(provider)
+        base_url = self.constraint_check_cc_base_url
+
+        if not api_key:
+            raise ValueError(
+                f"API key for provider '{provider}' is required."
+            )
+        if not base_url:
+            raise ValueError(
+                "CONSTRAINT_CHECK_CC_BASE_URL is required when CC_ENABLED=true"
+            )
+
+        return {
+            "env": {
+                "ANTHROPIC_AUTH_TOKEN": api_key,
+                "ANTHROPIC_BASE_URL": base_url,
+                "ANTHROPIC_DEFAULT_SONNET_MODEL": model,
+                "ANTHROPIC_DEFAULT_OPUS_MODEL": model,
+            },
+            "permissions": {
+                "allow": ["Read(*)", "Write(*)"],
+                "deny": [],
+            },
+        }</code></pre>
+</section>
+
+<section>
+<h3>4.3 .env 新增项</h3>
+<pre><code># --- 约束检查：Claude Code CLI ---
+CONSTRAINT_CHECK_CC_ENABLED=true
+CONSTRAINT_CHECK_CC_BASE_URL=https://dashscope.aliyuncs.com/apps/anthropic
+CONSTRAINT_CHECK_CC_TIMEOUT=600
+CONSTRAINT_CHECK_CC_CLI_PATH=claude
+
+# 以下已有，复用：
+# CONSTRAINT_CHECK_LLM_PROVIDER=qwen      -&gt; 决定 API Key 来源
+# CONSTRAINT_CHECK_MODEL=glm-5.2          -&gt; 模型名
+# QWEN_API_KEY=sk-09eab7c1...             -&gt; API Key</code></pre>
+</section>
+
+<section>
+<h2>5 隔离性分析</h2>
+<table>
+<tr><th>维度</th><th>隔离方式</th><th>说明</th></tr>
+<tr><td><strong>文件系统</strong></td><td><code>cwd=workspace</code> (tempdir)</td><td>Claude 只能 Read/Write workspace 内文件。项目代码、全局配置不可见。</td></tr>
+<tr><td><strong>模型配置</strong></td><td><code>workspace/.claude/settings.json</code></td><td>项目级 settings 覆盖全局。API Key / Base URL / Model 全部从 <code>.env</code> 读取。</td></tr>
+<tr><td><strong>Skill</strong></td><td>复制到 <code>workspace/.claude/skills/</code></td><td>从项目 <code>.claude/skills/operator-constraint-checker/</code> 复制。不依赖全局 skill。</td></tr>
+<tr><td><strong>工具权限</strong></td><td><code>--allowedTools "Read Write"</code></td><td>禁止 Bash/Grep/Glob，只允许读写文件。</td></tr>
+<tr><td><strong>进程隔离</strong></td><td><code>subprocess</code></td><td>Claude 是独立进程，崩溃不影响 FastAPI 主进程。</td></tr>
+<tr><td><strong>并发隔离</strong></td><td><code>_check_lock</code> + subprocess 串行</td><td>同时只有一个 Claude 实例运行。</td></tr>
+<tr><td><strong>生命周期</strong></td><td><code>finally: shutil.rmtree()</code></td><td>工作空间用完即删，不留痕迹。</td></tr>
+</table>
+
+<div class="callout callout-warn">
+<strong>注意：全局 settings 仍会被加载</strong>
+Claude CLI 非 <code>--bare</code> 模式下，全局 <code>~/.claude/settings.json</code> 仍会被读取。但项目级 <code>workspace/.claude/settings.json</code> 的 <code>env</code> 字段会覆盖全局同名变量。如果需要完全隔离，添加 <code>--bare</code> 标志（但需改用 <code>ANTHROPIC_API_KEY</code> 而非 <code>ANTHROPIC_AUTH_TOKEN</code>）。
+</div>
+</section>
+
+<section>
+<h2>6 调用方接口（不变）</h2>
+<p>所有调用方保持不变，<code>run_constraint_check()</code> 签名和返回值完全一致：</p>
+<pre><code># routes/query.py -- 单算子检查 (不变)
+from agent.nodes.constraint_check_agent import run_constraint_check
+html = await run_constraint_check(content, json_constraints, operator_name)
+
+# routes/task.py -- 批量检查 (不变)
+html = await run_constraint_check(content, json_constraints, operator_name)
+
+# task_engine.py -- 自动检查 (不变)
+html = await run_constraint_check(content, json_constraints, operator_name)</code></pre>
+<p>无需修改任何 route 或 engine 代码。</p>
+</section>
+
+<section>
+<h2>7 Fallback 策略（可选）</h2>
+<p>当 <code>CONSTRAINT_CHECK_CC_ENABLED=false</code> 或 CLI 不可用时，自动 fallback 到 DeepAgents：</p>
+<pre><code># constraint_check_agent.py -- run_constraint_check 入口
+
+async def run_constraint_check(markdown_content, json_constraints, operator_name):
+    if not markdown_content.strip() or not json_constraints.strip():
+        return ""
+
+    async with _check_lock:
+        if settings.constraint_check_cc_enabled:
+            # 方式 A: Claude Code CLI
+            html = await _run_cli_check(markdown_content, json_constraints, operator_name)
+            if html:
+                return html
+            logger.warning("ClaudeCLI failed, falling back to DeepAgents")
+
+        # 方式 B: DeepAgents fallback
+        return await _run_deepagents_check(markdown_content, json_constraints, operator_name)
+
+
+async def _run_deepagents_check(markdown_content, json_constraints, operator_name):
+    """DeepAgents fallback (原 constraint_check_agent.py 逻辑)."""
+    from agent.nodes._constraint_check_da import run_constraint_check as _da_check
+    return await _da_check(markdown_content, json_constraints, operator_name)</code></pre>
+<p>将原 DeepAgents 版本重命名为 <code>_constraint_check_da.py</code> 保留。</p>
+</section>
+
+<section>
+<h2>8 实施步骤</h2>
+<table>
+<tr><th>步骤</th><th>文件</th><th>改动</th></tr>
+<tr><td>1</td><td><code>.env</code></td><td>新增 4 个 <code>CONSTRAINT_CHECK_CC_*</code> 配置项</td></tr>
+<tr><td>2</td><td><code>config.py</code></td><td>Settings 类新增 4 个字段 + <code>get_cc_settings()</code> 方法</td></tr>
+<tr><td>3</td><td><code>constraint_check_agent.py</code></td><td>完整重写为 CLI 版本（本文 4.1）</td></tr>
+<tr><td>4</td><td>(可选) <code>_constraint_check_da.py</code></td><td>原 DeepAgents 版本改名保留，作为 fallback</td></tr>
+<tr><td>5</td><td>—</td><td>测试：启动项目，在 UI 点击「约束检查」，观察日志</td></tr>
+</table>
+
+<div class="callout callout-success">
+<strong>预期效果</strong>
+<ul>
+<li>不再出现 <code>Retrying request to /chat/completions</code>（无 ChatOpenAI 调用）</li>
+<li>不再出现 <code>max_tokens=16384</code> 超时（CLI 1M context）</li>
+<li>日志显示 <code>ClaudeCLI: workspace created</code> -&gt; <code>starting check</code> -&gt; <code>completed</code></li>
+<li>HTML 报告由 Claude 的 14+ 轮推理生成，精度更高</li>
+</ul>
+</div>
+</section>
+
+<section>
+<h2>9 关键 CLI 参数</h2>
+<table>
+<tr><th>参数</th><th>值</th><th>作用</th></tr>
+<tr><td><code>-p</code></td><td>—</td><td>非交互模式，输出后退出</td></tr>
+<tr><td><code>--model</code></td><td><code>sonnet</code></td><td>别名，映射到 <code>ANTHROPIC_DEFAULT_SONNET_MODEL</code></td></tr>
+<tr><td><code>--allowedTools</code></td><td><code>"Read Write"</code></td><td>只允许读写文件，禁止 Bash 等</td></tr>
+<tr><td><code>--output-format</code></td><td><code>json</code></td><td>返回 JSON 结构化结果</td></tr>
+</table>
+
+<h3>关于 <code>--model sonnet</code></h3>
+<p>Claude CLI 的 <code>--model</code> 接受别名（<code>sonnet</code>/<code>opus</code>/<code>haiku</code>），不直接写模型名。别名映射到 settings.json 中的环境变量：</p>
+<pre><code>--model sonnet -&gt; env.ANTHROPIC_DEFAULT_SONNET_MODEL -&gt; glm-5.2
+--model opus   -&gt; env.ANTHROPIC_DEFAULT_OPUS_MODEL   -&gt; glm-5.2
+--model haiku  -&gt; env.ANTHROPIC_DEFAULT_HAIKU_MODEL  -&gt; (未设置)</code></pre>
+<p>在 <code>get_cc_settings()</code> 中，我们将 <code>SONNET</code> 和 <code>OPUS</code> 都设为 <code>constraint_check_model</code>，所以 <code>--model sonnet</code> 就会用 <code>.env</code> 中的模型。</p>
+</section>
+
+<div class="footer">
+<p>约束检查 Claude Code CLI 实现方案 - 2026-06-26</p>
+<p>配置来源：.env | 隔离方式：tempdir + subprocess | 调用方接口：不变</p>
+</div>
+
+</div>
+</body>
+</html>

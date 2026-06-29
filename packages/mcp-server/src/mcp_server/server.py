@@ -13,12 +13,16 @@ from mcp_server.tools.document_tools import (
     check_document_version,
     delete_operator,
     do_save_product_support,
+    get_constraint_check_report,
+    get_doc_for_constraint_check,
+    get_doc_for_check_by_name,
     get_parsed_document,
     get_section_by_type,
     list_all_operators,
     parse_document,
     query_parameters,
     query_params_by_doc_id,
+    save_constraint_check_report,
     save_document,
     save_parameters,
     save_parsed_document,
@@ -206,6 +210,9 @@ from mcp_server.tools.task_tools import (
 )
 from mcp_server.tools.task_tools import (
     stop_task as _stop_task,
+)
+from mcp_server.tools.task_tools import (
+    reset_task_item as _reset_task_item,
 )
 
 mcp = FastMCP("operator-agent-mcp-server")
@@ -1421,6 +1428,79 @@ def stop_task(task_id: int) -> str:
         JSON string with task_id, reset_count, completed_count, failed_count.
     """
     result = _stop_task(task_id)
+    return json.dumps(result, ensure_ascii=False)
+
+
+@mcp.tool()
+def reset_task_item(item_id: int) -> str:
+    """Reset a single task item to 'pending', clearing error and timestamps.
+
+    Used for per-item retry: reset the item, then re-run the task.
+
+    Args:
+        item_id: Task item ID to reset.
+
+    Returns:
+        JSON string with item_id and updated flag.
+    """
+    result = _reset_task_item(item_id)
+    return json.dumps(result, ensure_ascii=False)
+
+
+@mcp.tool()
+def save_constraint_check(doc_id: int, report_html: str) -> str:
+    """Save constraint check HTML report to document_versions.
+
+    Args:
+        doc_id: Primary key of document_versions table.
+        report_html: Full HTML report string.
+
+    Returns:
+        JSON string with saved status.
+    """
+    result = save_constraint_check_report(doc_id, report_html)
+    return json.dumps(result, ensure_ascii=False)
+
+
+@mcp.tool()
+def get_constraint_check(doc_id: int) -> str:
+    """Retrieve constraint check HTML report from document_versions.
+
+    Args:
+        doc_id: Primary key of document_versions table.
+
+    Returns:
+        JSON string with report key (HTML string or null).
+    """
+    result = get_constraint_check_report(doc_id)
+    return json.dumps(result, ensure_ascii=False)
+
+
+@mcp.tool()
+def get_doc_for_check(doc_id: int) -> str:
+    """Retrieve raw content + json_constraints for constraint checking.
+
+    Args:
+        doc_id: Primary key of document_versions table.
+
+    Returns:
+        JSON string with content, json_constraints, operator_name.
+    """
+    result = get_doc_for_constraint_check(doc_id)
+    return json.dumps(result, ensure_ascii=False)
+
+
+@mcp.tool()
+def get_doc_for_check_by_name_tool(operator_name: str) -> str:
+    """Retrieve raw content + json_constraints by operator name (latest version).
+
+    Args:
+        operator_name: Operator name.
+
+    Returns:
+        JSON string with doc_id, content, json_constraints, operator_name.
+    """
+    result = get_doc_for_check_by_name(operator_name)
     return json.dumps(result, ensure_ascii=False)
 
 

@@ -83,6 +83,13 @@ _EXCLUDE_WORDS = frozenset({
     "INT8", "INT16", "INT32", "INT64",
     "UINT8", "UINT16", "UINT32", "UINT64",
     "BOOL", "STRING",
+    # -- CANN parameter type names --
+    # These appear in type annotations like "x（aclTensor*）" and must not
+    # be mistaken for dimension variables when the shape-tuple regex
+    # matches the parentheses in type annotations.
+    "aclTensor", "aclTensorList", "aclScalar",
+    "aclIntArray", "aclFloatArray", "aclBoolArray",
+    "aclOpExecutor",
     # -- Common non-variable identifiers from Markdown / URLs --
     "common", "md", "html", "http", "https", "www",
     "aclnn", "aclrt", "device", "host",
@@ -538,7 +545,7 @@ def _get_implicit_params_agent() -> Any:
     if _implicit_params_agent is not None:
         return _implicit_params_agent
 
-    from agent.utils.llm_common import create_llm
+    from agent.core.llm import create_llm
 
     kb = _load_implicit_params_knowledge()
     system_prompt = _AGENT_SYSTEM_PROMPT_TEMPLATE

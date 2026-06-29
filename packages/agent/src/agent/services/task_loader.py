@@ -18,24 +18,9 @@ import yaml
 from agent.core.config import settings
 from agent.mcp_client import MCPClient
 from agent.services.task_engine import run_task
+from agent.utils.file_utils import extract_operator_name_from_file as _extract_operator_name
 
 logger = logging.getLogger(__name__)
-
-
-def _extract_operator_name(file_path: Path) -> str:
-    """Extract operator name from file stem."""
-    import re
-
-    stem = file_path.stem
-    try:
-        content = file_path.read_text(encoding="utf-8")
-        for line in content.split("\n"):
-            m = re.match(r"^#{1,2}\s+(aclnn?\w+)", line)
-            if m:
-                return m.group(1).strip()
-    except Exception:
-        pass
-    return stem
 
 
 def load_task_config(config_path: str | Path) -> dict:

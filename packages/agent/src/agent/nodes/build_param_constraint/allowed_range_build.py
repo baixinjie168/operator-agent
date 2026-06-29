@@ -16,7 +16,8 @@ from agent.core.config import settings
 from agent.nodes.build_param_constraint._helpers import _normalize_type, _split_csv
 from agent.nodes.build_param_constraint.state import BuildParamConstraintState
 from agent.prompts import ALLOWED_RANGE_VALUE_BUILD_PROMPT
-from agent.utils.llm_common import CONCURRENCY_LIMIT, create_llm, parse_json_response
+from agent.core.llm import create_llm
+from agent.utils.llm_common import CONCURRENCY_LIMIT, parse_json_response
 from agent.utils.param_validators import is_bool_type, is_tensor_type
 from agent.utils.semantic_rules import (
     get_allowed_range_for_scalar,
@@ -26,50 +27,123 @@ from agent.utils.semantic_rules import (
 logger = logging.getLogger(__name__)
 
 
+# ---------------------------------------------------------------------------
+# Bool narrowing helpers (Phase 0)
+# ---------------------------------------------------------------------------
+
+# Patterns that indicate a bool param cannot be True (or False).
+# Matches: "暂不支持配为True", "不支持配为True", "不能为True", "仅支持False"
+_BOOL_NOT_TRUE_RE = re.compile(
+    r"不支持.*(?:配|设|置).*True|暂不支持.*True|不能.*True|仅支持.*False|只支持.*False",
+    re.IGNORECASE,
+)
+_BOOL_NOT_FALSE_RE = re.compile(
+    r"不支持.*(?:配|设|置).*False|暂不支持.*False|不能.*False|仅支持.*True|只支持.*True",
+    re.IGNORECASE,
+)
+
+
+def _collect_bool_param_text(param: dict) -> str:
+    """Collect all text that may contain bool constraint info for a param.
+
+    usage_notes is stored as a JSON string like '{"*": "..."}' or
+    '{"platform": "..."}'.  We parse and flatten it to plain text.
+    """
+    parts: list[str] = []
+    for field in ("usage_notes", "llm_description", "param_desc"):
+        raw = param.get(field, "") or ""
+        if not raw:
+            continue
+        # usage_notes may be a JSON {platform: text} dict
+        try:
+            parsed = json.loads(raw) if isinstance(raw, str) and raw.startswith("{") else None
+        except (json.JSONDecodeError, TypeError):
+            parsed = None
+        if isinstance(parsed, dict):
+            parts.extend(str(v) for v in parsed.values() if v)
+        else:
+            parts.append(str(raw))
+    return " ".join(parts)
+
+
+def _narrow_bool_from_text(text: str) -> bool | None:
+    """Check if text constrains a bool param to a single value.
+
+    Returns:
+        False  — if text says "不支持配为True" (can only be False)
+        True   — if text says "不支持配为False" (can only be True)
+        None   — if no constraint found (keep default [True, False])
+    """
+    if not text:
+        return None
+    if _BOOL_NOT_TRUE_RE.search(text):
+        return False
+    if _BOOL_NOT_FALSE_RE.search(text):
+        return True
+    return None
+
 
 # ---------------------------------------------------------------------------
 # Phase 1: Deterministic preprocessing for allowed_range_value
 # ---------------------------------------------------------------------------
 
 # Pattern: (regex, result_or_lambda)
+# For enum patterns, the lambda returns a tuple (value_list, "enum")
+# For range patterns, the lambda returns just a list (implicit "range")
 _RANGE_PATTERNS: list[tuple[str, Any]] = [
-    # "枚举值: 1, 2, 3" → [[1,1], [2,2], [3,3]] (must come before range pattern)
+    # "枚举值: 1, 2, 3" → enum [[1,1], [2,2], [3,3]]
     (
         r"枚举值\s*[:：]\s*(.+)",
-        lambda m: [
-            [int(v.strip()), int(v.strip())]
-            for v in m.group(1).split(",")
-            if v.strip().lstrip("-").isdigit()
-        ],
+        lambda m: (
+            [[int(v.strip()), int(v.strip())] for v in m.group(1).split(",") if v.strip().lstrip("-").isdigit()],
+            "enum",
+        ),
+    ),
+    # "只支持32/64" / "仅支持32、64" → enum [[32,32],[64,64]]
+    # The "只支持/仅支持" keyword signals discrete values, not a range
+    (
+        r"(?:只支持|仅支持|只能|只能是)\s*(\d+(?:\s*[/、，,]\s*\d+)+)",
+        lambda m: (
+            [[int(v.strip()), int(v.strip())] for v in re.split(r"[/、，,]", m.group(1)) if v.strip().isdigit()],
+            "enum",
+        ),
     ),
     # "32/64" → enum [[32,32], [64,64]] (slash-separated discrete values)
     (
         r"(\d+)\s*/\s*(\d+)",
-        lambda m: [
-            [int(m.group(1)), int(m.group(1))],
-            [int(m.group(2)), int(m.group(2))],
-        ],
+        lambda m: (
+            [[int(m.group(1)), int(m.group(1))], [int(m.group(2)), int(m.group(2))]],
+            "enum",
+        ),
     ),
-    # "范围0-100" / "0~100" / "[0, 100]" → [[0, 100]]
+    # "范围0-100" / "0~100" / "[0, 100]" → range [[0, 100]]
     (
         r"\[?\s*(-?\d+)\s*[,，\-~]\s*(-?\d+)\s*\]?",
-        lambda m: [[int(m.group(1)), int(m.group(2))]],
+        lambda m: ([[int(m.group(1)), int(m.group(2))]], "range"),
     ),
 ]
 
 
-def _try_deterministic_range(text: str) -> list | None:
+def _try_deterministic_range(text: str) -> tuple[list, str] | None:
     """Try deterministic extraction of range from text.
 
-    Returns parsed result if pattern matches, None otherwise.
+    Returns:
+        (value_list, ar_type) if pattern matches, None otherwise.
+        ar_type is "range" or "enum".
     """
     for pattern, extractor in _RANGE_PATTERNS:
         m = re.search(pattern, text)
         if m:
             try:
                 result = extractor(m)
-                if result:  # Only return if non-empty
-                    return result
+                # New format: (value_list, ar_type)
+                if isinstance(result, tuple) and len(result) == 2:
+                    value_list, ar_type = result
+                    if value_list:
+                        return value_list, ar_type
+                # Legacy format: just a list (implicit "range")
+                elif isinstance(result, list) and result:
+                    return result, "range"
             except (ValueError, IndexError):
                 continue
     return None
@@ -286,7 +360,14 @@ async def allowed_range_build_node(state: BuildParamConstraintState) -> dict[str
 
     for p in bool_params:
         key = f"{p['function_name']}::{p['param_name']}"
-        result[key] = {"type": "range", "value": [True, False]}
+        # Check usage_notes / llm_description for "不支持配为True/False" patterns
+        # before defaulting to [True, False].
+        bool_text = _collect_bool_param_text(p)
+        narrowed = _narrow_bool_from_text(bool_text)
+        if narrowed is not None:
+            result[key] = {"type": "range", "value": [narrowed]}
+        else:
+            result[key] = {"type": "range", "value": [True, False]}
 
     # Tensor types have no scalar value range — dimensions describe shape rank,
     # not value bounds.  Skip all extraction phases to prevent the deterministic
@@ -307,6 +388,7 @@ async def allowed_range_build_node(state: BuildParamConstraintState) -> dict[str
         ar_raw = p.get("allowed_range_value", "") or ""
         if ptype in ("char", "const char") and ar_raw.strip() and ar_raw.strip() != "[]":
             key = f"{p['function_name']}::{p['param_name']}"
+
             try:
                 ar_list = json.loads(ar_raw) if isinstance(ar_raw, str) else ar_raw
             except (json.JSONDecodeError, TypeError):
@@ -318,6 +400,22 @@ async def allowed_range_build_node(state: BuildParamConstraintState) -> dict[str
                     if isinstance(item, dict) and item.get("type") == "enum":
                         ar_type = "enum"
                         break
+
+                # For char*/const char* params, "range" type values are almost
+                # always string LENGTH constraints (e.g. "字符串长度要求(0, 128)"),
+                # not value ranges.  A string parameter's legitimate value range
+                # is always "enum" (discrete string values like activation names).
+                # Skip "range" type to avoid putting length constraints into
+                # allowed_range_value — they belong in constraints_in_parameters.
+                if ar_type == "range":
+                    result[key] = _EMPTY
+                    string_ar_count += 1
+                    logger.info(
+                        "BuildParamConstraint: skipped range-type allowed_range for "
+                        "char* param %s (likely string length constraint, not value range)",
+                        p.get("param_name", ""),
+                    )
+                    continue
 
                 if ar_type == "enum":
                     # Split comma-separated enum values into individual items
@@ -396,10 +494,11 @@ async def allowed_range_build_node(state: BuildParamConstraintState) -> dict[str
             deterministic = _try_deterministic_range(param_sentences)
 
         if deterministic is not None:
+            det_value, det_type = deterministic
             key = f"{p['function_name']}::{p['param_name']}"
             param_type = p.get("param_type", "")
-            is_valid, _ = _validate_range_structure(deterministic, param_type)
-            result[key] = {"type": "range", "value": deterministic if is_valid else []}
+            is_valid, _ = _validate_range_structure(det_value, param_type, det_type)
+            result[key] = {"type": det_type, "value": det_value if is_valid else []}
             deterministic_count += 1
         else:
             # Phase 1b: YAML semantic rules fallback for scalar params

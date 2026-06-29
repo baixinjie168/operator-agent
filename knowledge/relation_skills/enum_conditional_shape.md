@@ -42,3 +42,20 @@ not({enum_param}.range_value == "{value}"
   expr: not(quantization_type.range_value == "per-channel"
            and expertTokensOptional is not None)
        or (bias2Optional.shape == [E.range_value, N1.range_value])
+
+## 示例（FFNV3 有专家/无专家 + per-channel/per-tensor）
+
+输入: "weight1 的 shape: 有专家时为 [E, K1, N1]，无专家时为 [K1, N1]；
+       per-channel 时 antiquantScaleOptional 为 [E, 1, N1]，per-tensor 时为 [1]"
+  params: ["weight1", "antiquantScaleOptional", "expertTokensOptional"]
+  implicit_vars: E, K1, N1 (命名维度变量)
+
+输出:
+  expr_type: "shape_value_dependency"
+  expr: "((weight1.shape == [E.range_value, K1.range_value, N1.range_value]) if expertTokensOptional is not None else (weight1.shape == [K1.range_value, N1.range_value])) and ((antiquantScaleOptional.shape == [E.range_value, 1, N1.range_value]) if quantization_type.range_value == 'per-channel' else (antiquantScaleOptional.shape == [1]) if quantization_type.range_value == 'per-tensor' else True) if antiquantScaleOptional is not None else True"
+
+注意:
+- 有专家时 weight1 为 3 维 [E, K1, N1]，无专家时为 2 维 [K1, N1]
+- per-channel/per-tensor 条件由 quantization_type.range_value 驱动
+- antiquantScaleOptional 是可选参数，需加 is not None 守卫
+- E/K1/N1 是隐式维度变量，用 .range_value 引用

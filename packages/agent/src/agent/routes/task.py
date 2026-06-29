@@ -32,7 +32,7 @@ from agent.schemas.task import (
     TaskListResponse,
     TaskSummary,
 )
-from agent.services.task_engine import resume_task, retry_failed_task, run_task, stop_task
+from agent.services.task_engine import resume_task, retry_failed_task, retry_item, run_task, stop_task
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1", tags=["task"])
@@ -405,25 +405,7 @@ async def get_task_detail(task_id: int) -> TaskDetailResponse:
     )
 
 
-def _extract_operator_name(file_path: Path) -> str:
-    """Extract operator name from filename (stem).
-
-    E.g. aclnnAddRmsNorm.md -> aclnnAddRmsNorm
-    """
-    stem = file_path.stem
-    # Try to read the file and extract from H1 heading
-    try:
-        content = file_path.read_text(encoding="utf-8")
-        for line in content.split("\n"):
-            m = re.match(r"^#{1,2}\s+(.+?)-CANN社区版", line)
-            if m:
-                return m.group(1).strip()
-            m = re.match(r"^#{1,2}\s+(aclnn?\w+)", line)
-            if m:
-                return m.group(1).strip()
-    except Exception:
-        pass
-    return stem
+from agent.utils.file_utils import extract_operator_name_from_file as _extract_operator_name
 
 
 @router.get("/tasks/{task_id}/download")
@@ -587,3 +569,99 @@ async def retry_failed_operators(task_id: int) -> RetryTaskResponse:
     except Exception as e:
         logger.exception("Failed to retry task %s", task_id)
         return RetryTaskResponse(success=False, error=str(e))
+
+
+@router.post("/tasks/{task_id}/items/{item_id}/retry")
+async def retry_single_item(task_id: int, item_id: int) -> dict:
+    """Retry a single failed task item.
+
+    Resets the item to 'pending' and re-runs the task.  Only allowed when
+    the task is not currently running.
+    """
+    task = await _mcp_client.get_task(task_id)
+    if task is None:
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    try:
+        result = await retry_item(task_id, item_id)
+        return {"success": True, **result}
+    except ValueError as e:
+        return {"success": False, "error": str(e)}
+    except Exception as e:
+        logger.exception("Failed to retry item %s in task %s", item_id, task_id)
+        return {"success": False, "error": str(e)}
+
+
+@router.post("/tasks/{task_id}/check-constraints")
+async def check_task_constraints(task_id: int) -> dict:
+    """Run constraint check for all completed operators in a task.
+
+    Iterates through all task items with status='completed' and doc_id,
+    runs the constraint check agent for each, and saves HTML reports.
+    """
+    from agent.nodes.constraint_check_agent import run_constraint_check
+
+    task = await _mcp_client.get_task(task_id)
+    if task is None:
+        return {"success": False, "error": "Task not found"}
+
+    items = await _mcp_client.get_task_items(task_id)
+    completed_items = [
+        it for it in items
+        if it.get("status") == "completed" and it.get("doc_id")
+    ]
+
+    if not completed_items:
+        logger.info("Task %s: no completed operators to check", task_id)
+        return {"success": False, "error": "No completed operators to check"}
+
+    logger.info(
+        "Task %s: starting constraint check for %d operators: %s",
+        task_id, len(completed_items),
+        ", ".join(it.get("operator_name", "?") for it in completed_items),
+    )
+
+    checked = 0
+    errors: list[dict] = []
+    for i, item in enumerate(completed_items):
+        op_name = item.get("operator_name", "?")
+        logger.info("Task %s: checking %s (%d/%d)...", task_id, op_name, i + 1, len(completed_items))
+        try:
+            doc = await _mcp_client.get_doc_for_check(item["doc_id"])
+            if not doc:
+                logger.warning("Task %s: no doc data for %s, skipping", task_id, op_name)
+                continue
+            json_constraints = doc.get("json_constraints", "{}")
+            content = doc.get("content", "")
+            operator_name = doc.get("operator_name") or op_name
+            if not content.strip() or json_constraints == "{}":
+                logger.warning("Task %s: empty content/constraints for %s, skipping", task_id, op_name)
+                continue
+
+            html = await run_constraint_check(
+                content, json_constraints, operator_name,
+            )
+            if html:
+                await _mcp_client.save_constraint_check_report(item["doc_id"], html)
+                checked += 1
+                logger.info("Task %s: %s done (%d/%d)", task_id, op_name, checked, len(completed_items))
+            else:
+                errors.append({"name": op_name, "error": "Check produced no output"})
+                logger.warning("Task %s: %s produced no output", task_id, op_name)
+        except Exception as e:
+            errors.append({"name": op_name, "error": str(e)})
+            logger.warning("Task %s: %s failed: %s", task_id, op_name, e, exc_info=True)
+
+    logger.info(
+        "Task %s: constraint check complete: %d/%d checked, %d errors",
+        task_id, checked, len(completed_items), len(errors),
+    )
+
+    return {
+        "success": len(errors) == 0,
+        "checked": checked,
+        "total": len(completed_items),
+        "errors": errors,
+    }

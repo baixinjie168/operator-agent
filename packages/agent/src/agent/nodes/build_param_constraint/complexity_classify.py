@@ -18,6 +18,7 @@ _COMPLEXITY_MARKERS = re.compile(
     r"当|如果|若|条件下|per-channel|per-tensor|per-group|"
     r"不为空|为空|is not None|存在|可选|"
     r"\[.*?\]\s*[，,/、]\s*\[.*?\]"   # multi-shape candidates [E,N1]/[N1]
+    r"|场景"                           # conditional scenario (量化/非量化场景)
 )
 
 # Implicit enum params that always require Agent handling

@@ -20,6 +20,7 @@ class InterConstraintsRuleType(str, Enum):
     VALUE_DEPENDENCY = "value_dependency"
     FORMAT_EQUALITY = "format_equality"
     PRESENCE_DEPENDENCY = "presence_dependency"
+    PARAMETER_REPRESENTATION = "parameter_representation"
 
 # ==================== 通用值模型 ====================
 

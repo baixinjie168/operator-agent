@@ -85,6 +85,63 @@ async def delete_operators_batch(body: DeleteOperatorRequest) -> DeleteOperatorR
     )
 
 
+class CheckConstraintsResponse(BaseModel):
+    """Response for constraint check."""
+    success: bool = True
+    report: str | None = None
+    error: str | None = None
+
+
+@router.post("/operators/{operator_name}/check-constraints")
+async def check_constraints(operator_name: str) -> CheckConstraintsResponse:
+    """Run constraint check for a single operator, save and return HTML report."""
+    try:
+        from agent.nodes.constraint_check_agent import run_constraint_check
+
+        doc = await _mcp_client.get_doc_for_check_by_name(operator_name)
+        if doc is None:
+            return CheckConstraintsResponse(success=False, error=f"Operator '{operator_name}' not found")
+
+        doc_id = doc.get("doc_id")
+        json_constraints = doc.get("json_constraints", "{}")
+        content = doc.get("content", "")
+
+        if not content.strip() or json_constraints == "{}":
+            return CheckConstraintsResponse(success=False, error="No constraints or content to check")
+
+        html = await run_constraint_check(content, json_constraints, operator_name)
+        if not html:
+            return CheckConstraintsResponse(success=False, error="Check produced no output")
+
+        if doc_id:
+            await _mcp_client.save_constraint_check_report(doc_id, html)
+
+        return CheckConstraintsResponse(success=True, report=html)
+    except Exception as e:
+        return CheckConstraintsResponse(success=False, error=str(e))
+
+
+@router.get("/operators/{operator_name}/check-report")
+async def get_check_report(operator_name: str) -> CheckConstraintsResponse:
+    """Retrieve saved constraint check HTML report."""
+    try:
+        doc = await _mcp_client.get_doc_for_check_by_name(operator_name)
+        if doc is None:
+            return CheckConstraintsResponse(success=False, error=f"Operator '{operator_name}' not found")
+
+        doc_id = doc.get("doc_id")
+        if not doc_id:
+            return CheckConstraintsResponse(success=False, error="No document found")
+
+        report = await _mcp_client.get_constraint_check_report(doc_id)
+        return CheckConstraintsResponse(
+            success=bool(report and report.get("report")),
+            report=report.get("report") if report else None,
+        )
+    except Exception as e:
+        return CheckConstraintsResponse(success=False, error=str(e))
+
+
 @router.get("/operators/{operator_name}", response_model=OperatorDetailResponse)
 async def get_operator(operator_name: str, version: int | None = None) -> OperatorDetailResponse:
     """Retrieve a parsed operator document by name and optional version."""

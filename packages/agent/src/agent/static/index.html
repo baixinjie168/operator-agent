@@ -1168,6 +1168,7 @@ function showList() {
 }
 
 async function loadDetail(name) {
+  window._currentOperatorName = name;
   document.getElementById('queryListView').style.display = 'none';
   document.getElementById('queryDetailView').style.display = '';
   const metaEl = document.getElementById('detailMeta');
@@ -1198,6 +1199,7 @@ async function loadDetail(name) {
       <div class="detail-tab" onclick="showDetailTab(this,'tabSignatures')">函数签名</div>
       <div class="detail-tab" onclick="showDetailTab(this,'tabProducts')">产品支持</div>
       <div class="detail-tab" onclick="showDetailTab(this,'tabJsonConstraint')">JSON Constraint</div>
+      <div class="detail-tab" onclick="showDetailTab(this,'tabConstraintCheck')">约束检查</div>
       <div class="detail-tab" onclick="showDetailTab(this,'tabRaw')">Raw JSON</div>
     `;
 
@@ -1304,6 +1306,13 @@ async function loadDetail(name) {
       <div id="tabSignatures" class="detail-content" style="display:none">${sigsHtml}</div>
       <div id="tabProducts" class="detail-content" style="display:none">${prodsHtml}</div>
       <div id="tabJsonConstraint" class="detail-content" style="display:none">${jsonConHtml}</div>
+      <div id="tabConstraintCheck" class="detail-content" style="display:none">
+        <div style="display:flex;gap:8px;margin-bottom:12px">
+          <button class="secondary" onclick="runConstraintCheck('${name}')">重新检查</button>
+          <button class="secondary" onclick="downloadCheckReport('${name}')">下载报告</button>
+        </div>
+        <iframe id="checkReportFrame" style="width:100%;border:1px solid #ddd;border-radius:8px;min-height:600px"></iframe>
+      </div>
       <div id="tabRaw" class="detail-content" style="display:none">${rawHtml}</div>
     `;
   } catch (err) {
@@ -1369,6 +1378,70 @@ function showDetailTab(el, id) {
   document.querySelectorAll('.detail-content').forEach(c => c.style.display = 'none');
   el.classList.add('active');
   document.getElementById(id).style.display = '';
+  if (id === 'tabConstraintCheck') {
+    var name = el.parentElement.parentElement.querySelector('.op-name')?.textContent || '';
+    loadCheckReport(window._currentOperatorName || '');
+  }
+}
+
+/* Constraint check functions */
+async function loadCheckReport(name) {
+  if (!name) return;
+  var frame = document.getElementById('checkReportFrame');
+  if (!frame) return;
+  try {
+    var res = await fetch('/api/v1/operators/' + encodeURIComponent(name) + '/check-report');
+    var data = await res.json();
+    if (data.success && data.report) {
+      frame.srcdoc = data.report;
+    } else {
+      frame.srcdoc = '<div style="padding:40px;text-align:center;color:#999">暂无检查报告。任务完成后自动生成，或点击"重新检查"。</div>';
+    }
+  } catch (err) {
+    frame.srcdoc = '<div style="padding:40px;text-align:center;color:#f00">加载失败: ' + err.message + '</div>';
+  }
+}
+
+async function runConstraintCheck(name) {
+  if (!name) return;
+  var frame = document.getElementById('checkReportFrame');
+  if (frame) frame.srcdoc = '<div style="padding:40px;text-align:center;color:#666"><span class="spinner"></span> 正在运行约束检查...</div>';
+  try {
+    var res = await fetch('/api/v1/operators/' + encodeURIComponent(name) + '/check-constraints', { method: 'POST' });
+    var data = await res.json();
+    if (data.success && data.report) {
+      if (frame) frame.srcdoc = data.report;
+    } else {
+      alert('检查失败: ' + (data.error || '未知错误'));
+      if (frame) loadCheckReport(name);
+    }
+  } catch (err) {
+    alert('检查失败: ' + err.message);
+    if (frame) loadCheckReport(name);
+  }
+}
+
+async function downloadCheckReport(name) {
+  if (!name) return;
+  try {
+    var res = await fetch('/api/v1/operators/' + encodeURIComponent(name) + '/check-report');
+    var data = await res.json();
+    if (data.success && data.report) {
+      var blob = new Blob([data.report], { type: 'text/html' });
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url;
+      a.download = name + '_constraint_report.html';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } else {
+      alert('暂无报告可下载');
+    }
+  } catch (err) {
+    alert('下载失败: ' + err.message);
+  }
 }
 
 /* Download the JSON Constraint of a parsed operator as a .json file. */
@@ -2824,6 +2897,7 @@ function _btActions(t) {
   // Download — for tasks with completed items
   if (completed > 0 && status !== 'running' && status !== 'pending') {
     btns += '<button class="bt-btn-action btn-download" onclick="event.stopPropagation();downloadBatchTask(' + t.id + ')">下载结果</button> ';
+    btns += '<button class="bt-btn-action btn-download" onclick="event.stopPropagation();checkBatchTask(' + t.id + ')" style="color:var(--bt-purple);border-color:#e9d8fd">约束检查</button> ';
   }
   // Delete — for non-running tasks
   if (status !== 'running') {
@@ -2892,28 +2966,38 @@ async function loadBatchDetail(taskId) {
     const total = data.total_count || items.length || 0;
     const completed = data.completed_count || 0;
     const failed = data.failed_count || 0;
+    const taskStatus = data.status;
 
     let subtitle = '';
-    if (data.status === 'completed') {
+    if (taskStatus === 'completed') {
       subtitle = ' — 全部成功';
-    } else if (data.status === 'failed' || data.status === 'cancelled') {
+    } else if (taskStatus === 'failed' || taskStatus === 'cancelled') {
       subtitle = ' — ' + completed + ' 成功 / ' + failed + ' 失败';
     }
+
+    // Show "操作" column only when task is not running
+    const showActions = taskStatus !== 'running' && taskStatus !== 'pending';
 
     let itemsHtml = '<h4>算子明细（' + total + ' 个）' + subtitle + '</h4>';
     itemsHtml += '<table class="bt-item-table"><thead><tr>'
       + '<th>状态</th><th>算子名</th><th>耗时</th><th>错误</th>'
+      + (showActions ? '<th>操作</th>' : '')
       + '</tr></thead><tbody>';
     for (const it of items) {
       const icon = BT_ITEM_ICON[it.status] || '?';
       const duration = it.status === 'running' && it.started_at
         ? '...'
         : _btDuration(it.started_at, it.finished_at);
+      let actionHtml = '';
+      if (showActions && (it.status === 'failed' || it.status === 'completed')) {
+        actionHtml = '<button class="bt-btn-action btn-retry" onclick="retryBatchItem(' + taskId + ',' + it.id + ')">重试</button>';
+      }
       itemsHtml += '<tr>'
         + '<td><span class="bt-item-badge ' + (it.status || 'pending') + '">' + icon + '</span></td>'
         + '<td>' + escapeHtml(it.operator_name || '') + '</td>'
         + '<td style="color:#9ca3af">' + duration + '</td>'
         + '<td style="color:var(--bt-red);max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + escapeHtml(it.error || '') + '</td>'
+        + (showActions ? '<td>' + actionHtml + '</td>' : '')
         + '</tr>';
     }
     itemsHtml += '</tbody></table>';
@@ -2921,6 +3005,21 @@ async function loadBatchDetail(taskId) {
   } catch(e) {
     wrap.innerHTML = '<div style="color:#ef4444;font-size:.8rem">加载失败</div>';
   }
+}
+
+async function retryBatchItem(taskId, itemId) {
+  try {
+    const res = await fetch(BT_API + '/tasks/' + taskId + '/items/' + itemId + '/retry', { method: 'POST' });
+    const data = await res.json();
+    if (data.success) {
+      await loadBatchTasks();
+      _batchExpandedTaskId = taskId;
+      await renderBatchTaskTable();
+      startBatchPoll(taskId);
+    } else {
+      alert('重试失败: ' + (data.error || '未知错误'));
+    }
+  } catch(e) { alert('重试失败: ' + e.message); }
 }
 
 /* ----- Polling ----- */
@@ -2999,6 +3098,91 @@ async function deleteBatchTask(taskId) {
       alert('删除失败: ' + (data.error || '未知错误'));
     }
   } catch(e) { alert('删除失败: ' + e.message); }
+}
+
+var _checkBatchRunning = false;
+
+async function checkBatchTask(taskId) {
+  if (_checkBatchRunning) {
+    alert('约束检查正在运行中，请等待当前检查完成。');
+    return;
+  }
+  if (!confirm('将对任务 #' + taskId + ' 中所有已完成的算子运行约束检查，可能需要较长时间。确认开始？')) return;
+
+  _checkBatchRunning = true;
+
+  var body = document.getElementById('btTaskBody');
+  var wrap = document.createElement('div');
+  wrap.style.cssText = 'padding:20px;text-align:center;';
+  wrap.innerHTML = '<div style="font-size:.9rem;color:#666;margin-bottom:12px" id="checkProgress">正在获取算子列表...</div>'
+    + '<div style="max-height:200px;overflow-y:auto;text-align:left;font-size:.8rem;color:#555" id="checkLog"></div>';
+  body.innerHTML = '<tr><td colspan="6"></td></tr>';
+  body.firstChild.firstChild.appendChild(wrap);
+
+  var progressEl = document.getElementById('checkProgress');
+  var logEl = document.getElementById('checkLog');
+
+  function log(msg, ok) {
+    var line = document.createElement('div');
+    line.textContent = msg;
+    line.style.color = ok === true ? '#16a34a' : (ok === false ? '#dc2626' : '#666');
+    logEl.appendChild(line);
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  try {
+    // 1. Get task info to find completed operators
+    var taskRes = await fetch('/api/v1/tasks/' + taskId);
+    var taskData = await taskRes.json();
+    var items = (taskData.items || []).filter(function(it) {
+      return it.status === 'completed' && it.doc_id;
+    });
+
+    if (!items.length) {
+      progressEl.textContent = '没有已完成的算子可检查';
+      _checkBatchRunning = false;
+      return;
+    }
+
+    var total = items.length;
+    var checked = 0;
+    var errors = 0;
+
+    // 2. Check each operator one by one (sequential, no concurrency)
+    for (var i = 0; i < items.length; i++) {
+      var name = items[i].operator_name;
+      progressEl.innerHTML = '<span class="spinner"></span> 正在检查: ' + name
+        + ' (' + (i + 1) + '/' + total + ') - 已完成 ' + checked + ', 失败 ' + errors;
+
+      try {
+        var res = await fetch('/api/v1/operators/' + encodeURIComponent(name) + '/check-constraints', {
+          method: 'POST'
+        });
+        var data = await res.json();
+        if (data.success) {
+          checked++;
+          log(name + ' - OK', true);
+        } else {
+          errors++;
+          log(name + ' - 失败: ' + (data.error || '未知'), false);
+        }
+      } catch(e) {
+        errors++;
+        log(name + ' - 错误: ' + e.message, false);
+      }
+    }
+
+    progressEl.innerHTML = '<strong style="color:#16a34a">约束检查完成</strong>'
+      + ' - 共 ' + total + ' 个算子, 成功 ' + checked + ', 失败 ' + errors;
+    log('--- 完成 ---', checked > 0);
+  } catch(e) {
+    progressEl.innerHTML = '<span style="color:#dc2626">检查失败: ' + e.message + '</span>';
+  } finally {
+    _checkBatchRunning = false;
+  }
+
+  // Auto refresh after 3 seconds
+  setTimeout(function() { loadBatchTasks(); }, 3000);
 }
 
 </script>

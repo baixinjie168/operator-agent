@@ -3,8 +3,9 @@
 Provides:
 - JSON_BLOCK_RE: compiled regex for extracting JSON from LLM code blocks
 - CONCURRENCY_LIMIT: default semaphore limit for parallel LLM calls
-- create_llm: factory re-export from agent.core.llm
 - parse_json_response: generic JSON extraction from LLM text output
+
+Note: create_llm is now imported directly from agent.core.llm.
 """
 
 from __future__ import annotations
@@ -14,8 +15,6 @@ import logging
 import re
 from typing import Any
 
-from langchain_openai import ChatOpenAI
-
 logger = logging.getLogger(__name__)
 
 # Regex: matches ```json ... ``` or ``` ... ``` code blocks
@@ -23,17 +22,6 @@ JSON_BLOCK_RE = re.compile(r"```(?:json)?\s*([\s\S]*?)```", re.IGNORECASE)
 
 # Default concurrency limit for parallel LLM calls
 CONCURRENCY_LIMIT = 5
-
-
-def create_llm() -> ChatOpenAI:
-    """Re-export of agent.core.llm.create_llm for convenience.
-
-    Nodes can import directly from here instead of agent.core.llm
-    to keep their import lists shorter.
-    """
-    from agent.core.llm import create_llm as _create_llm
-
-    return _create_llm()
 
 
 def parse_json_response(text: str, expected_type: type = dict) -> Any | None:

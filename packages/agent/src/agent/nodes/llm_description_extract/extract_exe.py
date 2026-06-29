@@ -13,7 +13,8 @@ from typing import Any
 from agent.nodes.context_utils import _is_ws_function
 from agent.nodes.llm_description_extract.extract_ws import _extract_one
 from agent.nodes.llm_description_extract.state import DescriptionExtractState
-from agent.utils.llm_common import CONCURRENCY_LIMIT, create_llm
+from agent.core.llm import create_llm
+from agent.utils.llm_common import CONCURRENCY_LIMIT
 
 logger = logging.getLogger(__name__)
 

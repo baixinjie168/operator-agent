@@ -11,7 +11,8 @@ from agent.nodes.param_relation_extract.prompts import (
     format_implicit_params_context,
 )
 from agent.nodes.param_relation_extract.state import RelationExtractState
-from agent.utils.llm_common import create_llm, parse_json_response
+from agent.core.llm import create_llm
+from agent.utils.llm_common import parse_json_response
 
 logger = logging.getLogger(__name__)
 

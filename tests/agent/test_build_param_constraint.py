@@ -11,20 +11,26 @@ Covers:
 - Edge cases: empty, invalid JSON, markdown code blocks
 """
 
+import pytest
+
 from agent.nodes.build_param_constraint._helpers import _normalize_type
 from agent.nodes.build_param_constraint.allowed_range_build import (
     _try_deterministic_range,
     _validate_range_source,
     _validate_range_structure,
 )
+from agent.nodes.build_param_constraint.attrs_build import (
+    _ARRAY_TYPE_DTYPE_FALLBACK,
+    attrs_build_node,
+)
+from agent.nodes.build_param_constraint.fetch_param_data import (
+    _resolve_cross_references,
+)
 from agent.nodes.build_param_constraint.dimensions_agent import (
     _is_rank_format,
     _parse_dimensions_response,
     _try_deterministic_parse,
     _validate_dimensions_structure,
-)
-from agent.nodes.build_param_constraint.dimensions_build import (
-    _validate_dimensions_alignment,
 )
 
 
@@ -246,28 +252,6 @@ class TestValidateDimensionsStructure:
 
 
 # ---------------------------------------------------------------------------
-# _validate_dimensions_alignment
-# ---------------------------------------------------------------------------
-
-
-class TestValidateDimensionsAlignment:
-    def test_aligned(self):
-        is_valid, error = _validate_dimensions_alignment(3, [[1, 2], [3, 4], [5, 6]])
-        assert is_valid
-        assert error == ""
-
-    def test_mismatch_fewer(self):
-        is_valid, error = _validate_dimensions_alignment(3, [[1, 2], [3, 4]])
-        assert not is_valid
-        assert "expected 3 entries, got 2" in error
-
-    def test_mismatch_more(self):
-        is_valid, error = _validate_dimensions_alignment(2, [[1, 2], [3, 4], [5, 6]])
-        assert not is_valid
-        assert "expected 2 entries, got 3" in error
-
-
-# ---------------------------------------------------------------------------
 # _is_rank_format
 # ---------------------------------------------------------------------------
 
@@ -441,3 +425,259 @@ class TestNormalizeType:
     def test_const_in_middle_of_type_name(self):
         # Should not strip "const" if it's part of a larger word
         assert _normalize_type("const_ptr") == "const_ptr"
+
+
+# ---------------------------------------------------------------------------
+# attrs_build_node: Level-3 dtype fallback (type -> dtype)
+# ---------------------------------------------------------------------------
+
+
+def _make_state(params, sig_type_map, *, dtype_by_platform=None, platforms=None):
+    """Build minimal BuildParamConstraintState for attrs_build_node tests."""
+    return {
+        "params": params,
+        "sig_type_map": sig_type_map,
+        "all_sig_param_names": [p["param_name"] for p in params],
+        "dtype_by_platform": dtype_by_platform or {},
+        "supported_platforms": platforms or ["common"],
+    }
+
+
+def _get_dtype_value(attrs_map, fn, pn, plat="common"):
+    """Extract dtype.value from attrs_map for a given param+platform."""
+    key = f"{fn}::{pn}::{plat}"
+    return attrs_map[key]["dtype"]["value"]
+
+
+class TestDtypeFallbackMapping:
+    """Test the _ARRAY_TYPE_DTYPE_FALLBACK constant."""
+
+    def test_acl_int_array(self):
+        assert _ARRAY_TYPE_DTYPE_FALLBACK["aclIntArray"] == "int"
+
+    def test_acl_float_array(self):
+        assert _ARRAY_TYPE_DTYPE_FALLBACK["aclFloatArray"] == "float"
+
+    def test_acl_bool_array(self):
+        assert _ARRAY_TYPE_DTYPE_FALLBACK["aclBoolArray"] == "bool"
+
+    def test_acl_tensor_not_in_map(self):
+        # aclTensor falls through to the default (type name itself)
+        assert "aclTensor" not in _ARRAY_TYPE_DTYPE_FALLBACK
+
+    def test_acl_scalar_not_in_map(self):
+        assert "aclScalar" not in _ARRAY_TYPE_DTYPE_FALLBACK
+
+
+class TestAttrsBuildDtypeLevel3:
+    """Test Level-3 dtype fallback in attrs_build_node."""
+
+    @pytest.mark.asyncio
+    async def test_acl_int_array_empty_dtype(self):
+        """aclIntArray with no dtype from Level 1/2 → ['int']."""
+        params = [{"param_name": "pads", "function_name": "FusionOp"}]
+        state = _make_state(params, {"FusionOp::pads": "aclIntArray"})
+        result = await attrs_build_node(state)
+        assert _get_dtype_value(result["attrs_map"], "FusionOp", "pads") == ["int"]
+
+    @pytest.mark.asyncio
+    async def test_acl_float_array_empty_dtype(self):
+        """aclFloatArray with no dtype from Level 1/2 → ['float']."""
+        params = [{"param_name": "scales", "function_name": "FusionOp"}]
+        state = _make_state(params, {"FusionOp::scales": "aclFloatArray"})
+        result = await attrs_build_node(state)
+        assert _get_dtype_value(result["attrs_map"], "FusionOp", "scales") == ["float"]
+
+    @pytest.mark.asyncio
+    async def test_acl_bool_array_empty_dtype(self):
+        """aclBoolArray with no dtype from Level 1/2 → ['bool']."""
+        params = [{"param_name": "flags", "function_name": "FusionOp"}]
+        state = _make_state(params, {"FusionOp::flags": "aclBoolArray"})
+        result = await attrs_build_node(state)
+        assert _get_dtype_value(result["attrs_map"], "FusionOp", "flags") == ["bool"]
+
+    @pytest.mark.asyncio
+    async def test_acl_tensor_empty_dtype_falls_back_to_type_name(self):
+        """aclTensor with no dtype → [] (tensor type name is not a valid dtype)."""
+        params = [{"param_name": "x", "function_name": "FusionOp"}]
+        state = _make_state(params, {"FusionOp::x": "aclTensor"})
+        result = await attrs_build_node(state)
+        assert _get_dtype_value(result["attrs_map"], "FusionOp", "x") == []
+
+    @pytest.mark.asyncio
+    async def test_acl_scalar_empty_dtype_falls_back_to_type_name(self):
+        """aclScalar with no dtype → ['aclScalar'] (default: type name itself)."""
+        params = [{"param_name": "alpha", "function_name": "FusionOp"}]
+        state = _make_state(params, {"FusionOp::alpha": "aclScalar"})
+        result = await attrs_build_node(state)
+        assert _get_dtype_value(result["attrs_map"], "FusionOp", "alpha") == ["aclScalar"]
+
+    @pytest.mark.asyncio
+    async def test_level1_takes_precedence_over_level3(self):
+        """When dtype_desc has a value, Level 3 is not triggered."""
+        params = [{
+            "param_name": "pads",
+            "function_name": "FusionOp",
+            "dtype_desc": '{"*": "INT64"}',
+        }]
+        state = _make_state(params, {"FusionOp::pads": "aclIntArray"})
+        result = await attrs_build_node(state)
+        assert _get_dtype_value(result["attrs_map"], "FusionOp", "pads") == ["INT64"]
+
+    @pytest.mark.asyncio
+    async def test_level2_takes_precedence_over_level3(self):
+        """When dtype_combinations has a value, Level 3 is not triggered."""
+        params = [{"param_name": "pads", "function_name": "FusionOp"}]
+        dtype_by_platform = {"common": {"pads": ["INT32", "INT64"]}}
+        state = _make_state(
+            params, {"FusionOp::pads": "aclIntArray"},
+            dtype_by_platform=dtype_by_platform,
+        )
+        result = await attrs_build_node(state)
+        assert _get_dtype_value(result["attrs_map"], "FusionOp", "pads") == ["INT32", "INT64"]
+
+    @pytest.mark.asyncio
+    async def test_null_pointer_keeps_empty_dtype(self):
+        """Null-pointer-only param keeps dtype=[]; Level 3 skipped."""
+        params = [{
+            "param_name": "reserved",
+            "function_name": "FusionOp",
+            "usage_notes": '{"*": "仅支持空指针"}',
+        }]
+        state = _make_state(params, {"FusionOp::reserved": "aclIntArray"})
+        result = await attrs_build_node(state)
+        assert _get_dtype_value(result["attrs_map"], "FusionOp", "reserved") == []
+
+    @pytest.mark.asyncio
+    async def test_empty_type_keeps_empty_dtype(self):
+        """When ptype itself is empty, Level 3 cannot fill → stays []."""
+        params = [{"param_name": "unknown", "function_name": "FusionOp"}]
+        state = _make_state(params, {})  # no sig_type_map entry, no param_type
+        result = await attrs_build_node(state)
+        assert _get_dtype_value(result["attrs_map"], "FusionOp", "unknown") == []
+
+    @pytest.mark.asyncio
+    async def test_const_pointer_normalized_before_fallback(self):
+        """const aclIntArray* is normalized to aclIntArray, then mapped to 'int'."""
+        params = [{"param_name": "pads", "function_name": "FusionOp"}]
+        state = _make_state(params, {"FusionOp::pads": "const aclIntArray*"})
+        result = await attrs_build_node(state)
+        assert _get_dtype_value(result["attrs_map"], "FusionOp", "pads") == ["int"]
+
+    @pytest.mark.asyncio
+    async def test_multi_platform_independent_fallback(self):
+        """Level 3 applies per-platform: one platform has dtype, another doesn't."""
+        params = [{
+            "param_name": "pads",
+            "function_name": "FusionOp",
+            "dtype_desc": '{"Atlas A2": "INT64"}',  # only A2 has dtype
+        }]
+        state = _make_state(
+            params, {"FusionOp::pads": "aclIntArray"},
+            platforms=["Atlas A2", "Atlas A3"],
+        )
+        result = await attrs_build_node(state)
+        # Atlas A2: Level 1 provides INT64
+        assert _get_dtype_value(result["attrs_map"], "FusionOp", "pads", "Atlas A2") == ["INT64"]
+        # Atlas A3: Level 1 empty, Level 2 empty → Level 3 fills 'int'
+        assert _get_dtype_value(result["attrs_map"], "FusionOp", "pads", "Atlas A3") == ["int"]
+
+    @pytest.mark.asyncio
+    async def test_bu_zhi_chi_not_treated_as_null_pointer(self):
+        """usage_notes containing '不支持' (but not null-pointer) → Level 3 fills dtype.
+
+        Regression test: the broad '不支持' pattern was removed from
+        _NULL_POINTER_RE because it matched non-null-pointer contexts like
+        '暂不支持设为True'.  Such params should still get their dtype via
+        the Level-3 type-name fallback.
+        """
+        params = [{
+            "param_name": "transposeX1",
+            "function_name": "FusionOp",
+            "usage_notes": '{"*": "暂不支持设为True。"}',
+        }]
+        state = _make_state(params, {"FusionOp::transposeX1": "bool"})
+        result = await attrs_build_node(state)
+        assert _get_dtype_value(result["attrs_map"], "FusionOp", "transposeX1") == ["bool"]
+
+    @pytest.mark.asyncio
+    async def test_explicit_null_pointer_still_keeps_empty_dtype(self):
+        """Explicit null-pointer phrases ('只支持传空指针') → dtype stays []."""
+        params = [{
+            "param_name": "bias1Optional",
+            "function_name": "FusionOp",
+            "usage_notes": '{"*": "Atlas 推理系列加速卡产品：只支持传空指针。"}',
+        }]
+        state = _make_state(params, {"FusionOp::bias1Optional": "aclTensor"})
+        result = await attrs_build_node(state)
+        assert _get_dtype_value(result["attrs_map"], "FusionOp", "bias1Optional") == []
+
+
+class TestConstraintBasedDtypeResolution:
+    """Verify _resolve_cross_references uses type_equality constraints.
+
+    Regression test for dead code: consistency_pairs was built from
+    param_relations but never used.  Now constraint-based pairs supplement
+    text-based detection to resolve params whose dtype_desc is empty.
+    """
+
+    def test_dtype_equality_constraint_resolves_empty_dtype(self):
+        """gradOutput.dtype == self.dtype → copy self's dtype to gradOutput."""
+        params = [
+            {
+                "param_name": "self",
+                "function_name": "Op",
+                "dtype_desc": '{"*": "BFLOAT16、FLOAT16、FLOAT32、DOUBLE、COMPLEX64、COMPLEX128"}',
+            },
+            {
+                "param_name": "gradOutput",
+                "function_name": "Op",
+                # dtype_desc is empty — no cross-reference text either
+            },
+        ]
+        relations = [
+            {
+                "function_name": "Op",
+                "relation_object": '{"expr_type": "type_equality", "expr": "gradOutput.dtype == self.dtype", "relation_params": ["gradOutput", "self"], "src_text": ""}',
+            },
+        ]
+        result = _resolve_cross_references(params, relations)
+        index = {p["param_name"]: p for p in result}
+        # gradOutput should now have self's dtype
+        assert index["gradOutput"]["dtype_desc"] == index["self"]["dtype_desc"]
+
+    def test_no_constraints_no_change(self):
+        """Without any relations, params are returned as-is (shallow copy)."""
+        params = [
+            {"param_name": "x", "function_name": "Op", "dtype_desc": '{"*": "FLOAT16"}'},
+            {"param_name": "y", "function_name": "Op"},
+        ]
+        result = _resolve_cross_references(params, [])
+        assert len(result) == 2
+        index = {p["param_name"]: p for p in result}
+        assert index["x"]["dtype_desc"] == '{"*": "FLOAT16"}'
+        assert index["y"].get("dtype_desc", "") == ""
+
+    def test_chain_resolution_a_to_b_to_c(self):
+        """Chained constraints A.dtype == B.dtype == C.dtype → all resolved."""
+        params = [
+            {"param_name": "a", "function_name": "Op", "dtype_desc": '{"*": "FLOAT16"}'},
+            {"param_name": "b", "function_name": "Op"},
+            {"param_name": "c", "function_name": "Op"},
+        ]
+        relations = [
+            {
+                "function_name": "Op",
+                "relation_object": '{"expr": "b.dtype == a.dtype", "relation_params": ["b", "a"]}',
+            },
+            {
+                "function_name": "Op",
+                "relation_object": '{"expr": "c.dtype == b.dtype", "relation_params": ["c", "b"]}',
+            },
+        ]
+        result = _resolve_cross_references(params, relations)
+        index = {p["param_name"]: p for p in result}
+        # All three should have the same dtype
+        assert index["a"]["dtype_desc"] == '{"*": "FLOAT16"}'
+        assert index["b"]["dtype_desc"] == '{"*": "FLOAT16"}'
+        assert index["c"]["dtype_desc"] == '{"*": "FLOAT16"}'

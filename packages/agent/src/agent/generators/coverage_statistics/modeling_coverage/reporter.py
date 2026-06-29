@@ -227,3 +227,119 @@ def format_markdown_report(
 
     lines.append("")
     return "\n".join(lines)
+
+
+def _get_param_names_from_key(key: str):
+    """从 2-pair key 中提取两个参数名."""
+    left = key.split(" × ")[0]
+    right = key.split(" × ")[1]
+    return left.split(".")[0], right.split(".")[0]
+
+
+def format_markdown_report_grouped(
+    result: CoverageResult,
+    domain: OperatorAttributeDomain,
+    case_count: int,
+    title: str = "Coverage Report",
+) -> str:
+    """生成按算子参数/非算子参数分组的 Markdown 覆盖率报告."""
+    lines = []
+    lines.append(f"# {title}")
+    lines.append("")
+    lines.append(f"- **算子**: {domain.operator_name}")
+    lines.append(f"- **用例数**: {case_count}")
+    lines.append("")
+
+    # 按 is_operator_param 分组
+    op_params = {n: p for n, p in domain.params.items() if p.is_operator_param}
+    non_op_params = {n: p for n, p in domain.params.items() if not p.is_operator_param}
+
+    lines.append(f"- **算子参数数**: {len(op_params)}")
+    lines.append(f"- **非算子参数数**: {len(non_op_params)}")
+    lines.append("")
+
+    # ------------------------------------------------
+    # 1-pair: 算子参数
+    # ------------------------------------------------
+    lines.append("## 一、1-pair 覆盖")
+
+    for group_name, param_dict in [("算子参数", op_params), ("非算子参数", non_op_params)]:
+        lines.append(f"### {group_name}")
+        lines.append("")
+
+        rows = []
+        group_rates = []
+        for param_name in sorted(param_dict.keys()):
+            param_result = result.one_pair.get(param_name, {})
+            for attr_name in sorted(param_result.keys()):
+                info = param_result[attr_name]
+                rows.append((param_name, attr_name, info["count"], info["total"], info["rate"]))
+                group_rates.append(info["rate"])
+
+        if rows:
+            lines.append("| 参数 | 属性 | 已覆盖 | 可能取值 | 覆盖率 |")
+            lines.append("|------|------|-------:|--------:|------:|")
+            for p, a, c, t, r in rows:
+                lines.append(f"| {p} | {a} | {c} | {t} | {_pct(r)} |")
+            lines.append("")
+            avg = sum(group_rates) / len(group_rates) if group_rates else 0.0
+            lines.append(f"**{group_name}平均 1-pair 覆盖率**: {_pct(avg)}")
+        else:
+            lines.append("_无可用数据_")
+        lines.append("")
+
+    # ------------------------------------------------
+    # 2-pair: 分组统计
+    # ------------------------------------------------
+    lines.append("## 二、2-pair 覆盖")
+
+    # 定义分组规则
+    def _pair_group(key: str):
+        n1, n2 = _get_param_names_from_key(key)
+        if n1 in op_params and n2 in op_params:
+            return "op_op"
+        if (n1 in op_params and n2 in non_op_params) or (n1 in non_op_params and n2 in op_params):
+            return "op_non"
+        return "non_non"
+
+    pair_groups = {
+        "算子参数 × 算子参数": "op_op",
+        "算子参数 × 非算子参数": "op_non",
+        "非算子参数 × 非算子参数": "non_non",
+    }
+
+    for group_name, group_tag in pair_groups.items():
+        group_keys = sorted(k for k in result.two_pair.keys() if _pair_group(k) == group_tag)
+        if not group_keys:
+            continue
+
+        lines.append(f"### {group_name}")
+        lines.append("")
+
+        rows = []
+        group_rates = []
+        for key in group_keys:
+            info = result.two_pair[key]
+            rows.append((key, info["count"], info["total"], info["rate"]))
+            group_rates.append(info["rate"])
+
+        lines.append("| 属性对 | 已覆盖 | 可能组合 | 覆盖率 |")
+        lines.append("|--------|-------:|--------:|------:|")
+        for k, c, t, r in rows:
+            lines.append(f"| {k} | {c} | {t} | {_pct(r)} |")
+        lines.append("")
+        avg = sum(group_rates) / len(group_rates) if group_rates else 0.0
+        lines.append(f"**{group_name}平均 2-pair 覆盖率**: {_pct(avg)}")
+
+        uncovered = [(k, c, t) for k, c, t, r in rows if r == 0.0]
+        if uncovered:
+            lines.append("")
+            lines.append(f"**未覆盖的组合 (共 {len(uncovered)} 个):**")
+            lines.append("")
+            lines.append("| 属性对 |")
+            lines.append("|--------|")
+            for k, _, _ in uncovered:
+                lines.append(f"| {k} |")
+        lines.append("")
+
+    return "\n".join(lines)

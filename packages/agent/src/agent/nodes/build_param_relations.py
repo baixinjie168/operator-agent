@@ -100,14 +100,21 @@ expr: {expr}
 3. 量词是否正确？（"所有维度" → all(), "任意一维" → any()）
 4. 边界条件是否正确？（开区间 vs 闭区间）
 5. 广播关系的 expr 是否正确？（允许维度为 1）
-6. expr_type 是否与描述的关系类型匹配？
+6. expr_type 是否与描述的关系类型匹配？参照以下对照表：
+   - expr 含 param.range_value in [...] 且仅引用1个参数 → self_value_enum
+   - expr 含 param.shape[i] == ... 且引用条件参数 → shape_value_dependency
+   - expr 含 param.dtype == ... → type_equality
+   - expr 含 (param is not None) == (param is not None) → presence_dependency
+   - expr 含 param % N == 0 → self_alignment
 7. 维度索引是否正确？（对照"参数 shape 信息"，确认 shape[i] 引用的确实是描述中所指的维度；当参数有多种 shape 形式时，应使用负索引 shape[-N]）
+8. 可选参数（名称含 Optional）的属性引用是否有 is not None 守卫？
+   即 expr 应包含 (paramName is not None) 的条件包装
 
 ## 输出
 严格按以下 JSON 返回：
 {{"is_correct": true, "reason": "表达式正确"}}
 或
-{{"is_correct": false, "reason": "错误原因", "corrected_expr": "修正后的表达式"}}
+{{"is_correct": false, "reason": "错误原因", "corrected_expr": "修正后的表达式", "corrected_expr_type": "修正后的expr_type"}}
 """
 
 
@@ -401,8 +408,11 @@ async def _verify_and_fix(
         "BuildParamRelations: corrected expr for relation id=%s: %s",
         rel.get("id", "?"), verify_result.get("reason", ""),
     )
+    # Use corrected_expr_type if provided (Phase 2b can fix expr_type
+    # misclassification, e.g. shape_value_dependency → self_value_enum)
+    corrected_type = verify_result.get("corrected_expr_type", "")
     return {
-        "expr_type": expr_result.get("expr_type", ""),
+        "expr_type": corrected_type if corrected_type else expr_result.get("expr_type", ""),
         "expr": corrected,
         "_corrected": True,
         "_correction_reason": verify_result.get("reason", ""),
@@ -476,10 +486,11 @@ async def _batch_extract_relation_objects(
             if confidence == "low" and result.get("expr"):
                 # Force semantic verification for low confidence
                 result = await _verify_and_fix(llm, rel, result, param_shapes_text, sem)
-            # For medium confidence, verification is optional (disabled by default)
-            # Uncomment below to enable:
-            # elif confidence == "medium" and result.get("expr"):
-        #     result = await _verify_and_fix(llm, rel, result, param_shapes_text, sem)
+            elif confidence == "medium" and result.get("expr"):
+                # Phase 2b verification for medium confidence — enables
+                # expr_type correction and None-guard checks that the
+                # initial single-shot LLM may have missed.
+                result = await _verify_and_fix(llm, rel, result, param_shapes_text, sem)
 
         return result
 
@@ -609,12 +620,46 @@ async def build_param_relations_node(state: PipelineState) -> dict[str, Any]:
         param_shapes_text = _build_param_shapes_text(params or [])
 
         # Step 3: LLM batch extract expr_type + expr
-        llm_results = await _batch_extract_relation_objects(
-            relations, signatures_text, param_shapes_text,
-            implicit_params_text=implicit_params_text,
-            external_constants=external_const_names,
-            implicit_param_names=implicit_param_names,
-        )
+        # Skip relations that already have a non-empty expr (from constraint_extract
+        # Pass 1-4 regex templates or Pass 5 agent).  Only call LLM for relations
+        # with empty expr.
+        needs_llm: list[tuple[int, dict]] = []  # (original_index, relation)
+        llm_results: list[dict[str, str] | None] = [None] * len(relations)
+
+        for i, rel in enumerate(relations):
+            obj = rel.get("relation_object", {})
+            if isinstance(obj, str):
+                try:
+                    obj = json.loads(obj)
+                except (json.JSONDecodeError, TypeError):
+                    obj = {}
+            existing_expr = obj.get("expr", "") if isinstance(obj, dict) else ""
+            if existing_expr:
+                llm_results[i] = {
+                    "expr_type": obj.get("expr_type", ""),
+                    "expr": existing_expr,
+                    "confidence": "high",
+                }
+            else:
+                needs_llm.append((i, rel))
+
+        if needs_llm:
+            llm_needed = [r for _, r in needs_llm]
+            extracted = await _batch_extract_relation_objects(
+                llm_needed, signatures_text, param_shapes_text,
+                implicit_params_text=implicit_params_text,
+                external_constants=external_const_names,
+                implicit_param_names=implicit_param_names,
+            )
+            for (idx, _), result in zip(needs_llm, extracted):
+                llm_results[idx] = result
+            logger.info(
+                "BuildParamRelations: %d/%d relations already have expr, "
+                "LLM generated expr for %d",
+                len(relations) - len(needs_llm), len(relations), len(needs_llm),
+            )
+        else:
+            logger.info("BuildParamRelations: all relations already have expr, skipping LLM")
 
         # Aggregate validation phase results for NODE_PROGRESS (extract_done).
         valid_count = 0

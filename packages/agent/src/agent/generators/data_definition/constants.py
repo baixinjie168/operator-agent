@@ -1,6 +1,5 @@
 import re
 
-import os
 import torch
 
 
@@ -37,16 +36,10 @@ class GlobalConfig:
 
 class ParamModelConfig:
     """参数模型配置"""
-    # shape模型配置文件路径 —— 相对于 ``agent.generators`` 包目录的绝对路径，
-    # 避免上层进程的工作目录不同导致找不到 config。
-    _GENERATORS_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    SHAPE_DEFINITIONS_FILE_PATH = os.path.join(
-        _GENERATORS_DIR, "configs", "shape_definitions.json"
-    )
+    # shape模型配置文件路径
+    SHAPE_DEFINITIONS_FILE_PATH = r"configs/shape_definitions.json"
     # tensor填充值模型配置文件路径
-    GLOBAL_ROLE_DEFINITIONS_PATH = os.path.join(
-        _GENERATORS_DIR, "configs", "global_role_definitions.json"
-    )
+    GLOBAL_ROLE_DEFINITIONS_PATH = r"configs/global_role_definitions.json"
     # tensor shape中的每一维可以取得最大值
     TENSOR_SHAPE_MAX_VALUE = 65535
     # tensor shape中的每一维可以取到的最小值
@@ -94,7 +87,7 @@ class ParamModelConfig:
     # tensor shape每一维取值模型全集
     DIM_VALUE_PROFILE_LIST = ["Has_Large_Size", "Has_Size_1", "Has_Odd_Size", "Typical"]
     # 定义属于float, int, bool等可枚举的数据类型
-    FLOAT_DTYPE = ["fp16", "fp32", "fp64", "bfp16", "bf16", "fp", "double"]
+    FLOAT_DTYPE = ["fp16", "fp32", "fp64", "bf16", "fp", "double"]
     INT_DTYPE = ["int", "int16", "int8", "int32", "int64", "uint8", "uint16", "uint32", "uint64"]
     BOOL_DTYPE = ["bool"]
 
@@ -116,7 +109,7 @@ class ParamModelConfig:
     # 参数format可取值
     FORMAT_VALUE_LIST = ["nchw", "nhwc", "nc", "cn", "fractal_nz", "nchw16", "nchw8", "chwn8", "nhwc8", "nhwc16"]
     # 所有的tensor参数的shape中每一维的值都必须大于等于0，为shape属性的隐藏条件
-    SHAPE_VALUE_MIN_EXPR = "all(d >= 0 for d in {}.shape)"
+    SHAPE_VALUE_MIN_EXPR = "all(d > 0 for d in {}.shape)"
     # 参数模型定义中不涉及的参数value值
     NOT_RELEVANT_PARAM_VALUE = "N/A"
     # 暂不支持的数据类型
@@ -145,8 +138,8 @@ class DataMatchMap:
                                        "DOUBLE": torch.float64}
 
     # 在case_config中只生成数据生成方法字段，不生成实际数据时使用，用于适配ATK框架
-    ACL_DTYPE_TRANSFER_TENSOR_MAP = {"INT4": "int", "INT8": "int8", "INT16": "int16", "INT32": "int32",
-                                     "UINT8": "uint8", "INT": "int",
+    ACL_DTYPE_TRANSFER_TENSOR_MAP = {"INT4": "int4", "INT8": "int8", "INT16": "int16", "INT32": "int32",
+                                     "UINT8": "uint8", "INT": "int64",
                                      "UINT16": "uint16", "UINT32": "uint32", "UINT64": "uint64", "INT64": "int64",
                                      "BFLOAT16": "bf16", "FLOAT16": "fp16", "FLOAT32": "fp32", "FLOAT64": "fp64",
                                      "float32": "fp32", "float16": "fp16", "float64": "fp64", "COMPLEX64": "complex64",
@@ -154,8 +147,8 @@ class DataMatchMap:
                                      "ACL_FLOAT16": "fp16", "float": "fp32",
                                      "ACL_FLOAT32": "fp32", "ACL_FLOAT64": "fp64", "ACL_FLOAT": "fp32",
                                      "ACL_BF16": "bf16", "BOOL": "bool", "STRING": "string", "CHAR": "string",
-                                     "string": "string", "bool": "bool", "double": "double", "int64_t": "int",
-                                     "int64": "int"}
+                                     "string": "string", "bool": "bool", "double": "double", "int64_t": "int64",
+                                     "int64": "int64", "int":"int64"}
 
     # 如果type字段在ACL_TYPE_TRANSFER_ATK_MAP中，则转换为MAP中的值，否则默认为attr
     ACL_TYPE_TRANSFER_ATK_MAP = {"aclTensor": "tensor", "aclScalar": "scalar", "aclIntArray": "attrs",
@@ -169,31 +162,26 @@ class DataMatchMap:
     # 构建参数具体值到模型名称的映射，如果不在此映射表中，则根据role识别名称确定
     PARAM_VALUE_TO_ROLE_MODEL = {0: "Zero", 1: "One"}
     # 表达式中的关键词替换
-    EXPR_KEYWORD_REPLACE = {"'nullptr'": None, }
+    EXPR_KEYWORD_REPLACE = {"'nullptr'": None, 'TRUE': True,
+        'FALSE': False,}
     # 约束类型映射关系表
     CONSTRAINT_TYPE_MAP = {"shape": ["shape_equality", "shape_broadcast", "shape_choice", "shape_dependency"],
                            "dtype": ["type_equality", "type_dependency"],
-                           "range_value": ["presence_dependency", "value_dependency"]}
+                           "range_values": ["presence_dependency", "value_dependency"]}
     # 构建Z3变量的时候，初始化时，需要根据不同的变量类型以及数据类型，将ACL_TYPE_TRANSFER_ATK_MAP中的value值映射到Z3中定义的var_type,
     # 当前Z3的变量类型只支持tensor、scalar、list，对于scalar, list,.数据类型只支持：int、float、bool
     Z3_VAR_TYPE_MAP = {"tensor": "tensor", "tensors": "tensor", "scalar": "scalar", "scalars": "list", "attr": "scalar",
                        "attrs": "list"}
     # 根据参数数据类型设置可取值范围，防止未提供取值范围约束时，求解结果中的取值范围超出可表示上限
     DTYPE_SPECS = {
-        "int": (-128, 127, True), "int8": (-128, 127, True), "uint8": (0, 255, True),"int4": (-7, 8, True),
-        "uint4": (0, 15, True),
+        "int4": (-8, 7, True), "uint4": (0, 15, True), "int": (-32768, 32767, True),
+        "int8": (-128, 127, True), "uint8": (0, 255, True),
         "int16": (-32768, 32767, True), "int32": (-2 ** 31, 2 ** 31 - 1, True),
         "uint32": (0, 2 ** 32 - 1, True), "uint64": (0, 2 ** 64 - 1, True),
-        "uint16": (0, 65535, True), "int64": (-2 ** 63, 2 ** 63 - 1, True), "bfp16": (-3.389e38, 3.389e38, False),
+        "uint16": (0, 65535, True), "int64": (-2 ** 63, 2 ** 63 - 1, True),
         "bf16": (-3.389e38, 3.389e38, False),
         "fp16": (-65504, 65504, False), "float": (-3.4e38, 3.4e38, False),
         "fp32": (-3.4e38, 3.4e38, False), "fp64": (-1.797e308, 1.797e308, False),
         "double": (-1.797e308, 1.797e308, False),
         "bool": (None, None, None), "string": (None, None, None)
-    }
-    # 表达式异常字符替换
-    EXPR_ABNORMAL_KEYWORD_REPLACE = {
-        'nullptr': None,
-        'TRUE': True,
-        'FALSE': False,
     }

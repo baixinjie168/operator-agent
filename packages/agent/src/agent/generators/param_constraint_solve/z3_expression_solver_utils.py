@@ -33,9 +33,9 @@ from typing import List, Dict
 
 import z3
 
-from agent.generators.common_utils.logger_util import LazyLogger
-from agent.generators.data_definition.constants import DataMatchMap
-from agent.generators.param_constraint_solve.expression_preprocess_utils import ASTtoZ3Converter, TensorVar, ScalarVar, ListVar
+from common_utils.logger_util import LazyLogger
+from data_definition.constants import DataMatchMap
+from param_constraint_solve.expression_preprocess_utils import ASTtoZ3Converter, TensorVar, ScalarVar, ListVar
 
 logger = LazyLogger()
 
@@ -104,8 +104,11 @@ class Z3ConstraintBuilder:
                                                 kwargs.get("length"))),
     }
 
-    def __init__(self):
+    def __init__(self, timeout_ms=60000):
         self.solver = z3.Solver()
+        self._timeout_ms = timeout_ms
+        if timeout_ms:
+            self.solver.set('timeout', timeout_ms)
         self.var_map = {}
         self._slice_counter = 0
 
@@ -114,7 +117,7 @@ class Z3ConstraintBuilder:
         return self._slice_counter
 
     def declare_var(self, var_name, type_hint="scalar", dtype=None, allowed_dtypes=None, allowed_formats=None,
-                    range_value=None, length=None):
+                    range_value=None, length=None, is_print_log = False):
         if var_name in self.var_map:
             logger.warning(f"[Warn] var {var_name} already declared")
             return
@@ -139,7 +142,8 @@ class Z3ConstraintBuilder:
         try:
             var_obj = cls(var_name, *param_fn(self, kwargs))
             self.var_map[var_name] = var_obj
-            logger.info(f"[Declare] {var_name} -> {type_hint} (dtype: {dtype}, range_value: {range_value})")
+            if is_print_log:
+                logger.debug(f"[Declare] {var_name} -> {type_hint} (dtype: {dtype}, range_value: {range_value})")
         except Exception as e:
             logger.error(f"[Declare] Failed to create var '{var_name}', err msg : {e}")
 
@@ -154,20 +158,24 @@ class Z3ConstraintBuilder:
             if ExpressionPreprocessor.validate_expression(replace_expr):
                 self.add_constraint(expr_str_name, replace_expr)
 
-    def add_constraint(self, expr_name, expr_str):
+    def add_constraint(self, expr_name, expr_str, is_print_log = False):
         try:
             tree = ast.parse(expr_str, mode='eval')
             converter = ASTtoZ3Converter(self)
             z3_constraint = converter.visit(tree.body)
             if z3_constraint is not None:
                 self.solver.assert_and_track(z3_constraint, expr_name)
-                logger.info(f"[OK] {expr_str}")
+                if is_print_log:
+                    logger.debug(f"[OK] {expr_str}")
             else:
-                logger.debug(f"[SKIP] {expr_str}: converter returned None, ignored")
+                if is_print_log:
+                    logger.debug(f"[SKIP] {expr_str}: converter returned None, ignored")
         except Exception as e:
             logger.error(f"[FAIL] {expr_str}: {e}")
 
     def solve(self):
+        if self._timeout_ms:
+            self.solver.set('timeout', self._timeout_ms)
         check_res = self.solver.check()
         logger.info(f"Solve result: {check_res}")
         results = {}

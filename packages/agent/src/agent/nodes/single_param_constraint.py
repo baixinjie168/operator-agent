@@ -24,6 +24,7 @@ from typing import Any
 from langchain_openai import ChatOpenAI
 
 from agent.mcp_client import MCPClient
+from agent.nodes.build_param_constraint._helpers import _normalize_type
 from agent.nodes.state import PipelineState
 from agent.utils.semantic_rules import get_expr_for_tensor, build_prompt_context
 from agent.utils.platform_utils import expand_common_in_relations
@@ -124,6 +125,23 @@ RULES: list[SingleParamRule] = [
         expr_type="self_shape_upper_bound",
         description_template="{param} 的维度数不能超过{n}",
     ),
+    # --- D. Bool value restriction ---
+    # "暂不支持配为True" / "不支持配为True" → can only be False
+    SingleParamRule(
+        pattern=r"不支持.*(?:配|设|置).*True|暂不支持.*True|不能.*True|仅支持.*False|只支持.*False",
+        expr_template="{param}.range_value == False",
+        expr_type="self_value_dependency",
+        description_template="{param} 暂不支持配为True，只能为False",
+        param_type_filter="bool",
+    ),
+    # "暂不支持配为False" / "不支持配为False" → can only be True
+    SingleParamRule(
+        pattern=r"不支持.*(?:配|设|置).*False|暂不支持.*False|不能.*False|仅支持.*True|只支持.*True",
+        expr_template="{param}.range_value == True",
+        expr_type="self_value_dependency",
+        description_template="{param} 暂不支持配为False，只能为True",
+        param_type_filter="bool",
+    ),
 ]
 
 
@@ -135,7 +153,7 @@ RULES: list[SingleParamRule] = [
 def _get_param_text(param: dict) -> str:
     """Collect all available text for a parameter from DB fields."""
     parts: list[str] = []
-    for field_name in ("param_desc", "llm_description", "src_content"):
+    for field_name in ("param_desc", "llm_description", "src_content", "usage_notes"):
         val = (param.get(field_name) or "").strip()
         if val:
             parts.append(val)
@@ -390,6 +408,25 @@ def _log_coverage(
 # ---------------------------------------------------------------------------
 
 
+def _find_keyword_context(text: str, param_name: str, radius: int = 60) -> str:
+    """Find the context around the first mention of param_name in text.
+
+    Returns a substring of ±radius chars around the first match,
+    or empty string if not found. Used to provide real source citations
+    for YAML-generated constraints instead of the YAML filename.
+    """
+    if not text or not param_name:
+        return ""
+    import re
+    pattern = re.compile(r"(?<![a-zA-Z0-9_])" + re.escape(param_name) + r"(?![a-zA-Z0-9_])")
+    m = pattern.search(text)
+    if not m:
+        return ""
+    start = max(0, m.start() - radius)
+    end = min(len(text), m.end() + radius)
+    return text[start:end].strip()
+
+
 def _match_yaml_rules(
     param: dict,
     existing_relations: list[dict],
@@ -428,6 +465,11 @@ def _match_yaml_rules(
     if result.get("confidence") != "high":
         return []
 
+    # Extract source citation from the original text (the matched keyword's
+    # context), NOT "semantic_value_rules.yaml" — fabricated src_text causes
+    # downstream validation failures.
+    src_citation = _find_keyword_context(combined, pname) or result.get("description", "")
+
     return [
         {
             "function_name": fn,
@@ -436,14 +478,86 @@ def _match_yaml_rules(
             "description": result.get("description", ""),
             "params": [pname],
             "param_optional": {pname: False},
-            "source_citation": "semantic_value_rules.yaml",
+            "source_citation": src_citation,
             "relation_object": {
                 "expr_type": result.get("expr_type", "self_value_range"),
                 "expr": result.get("expr", ""),
                 "relation_params": [pname],
-                "src_text": "semantic_value_rules.yaml",
+                "src_text": src_citation,
             },
             "_source": "yaml_semantic",
+        }
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Layer 1b: String length constraints for char* parameters
+# ---------------------------------------------------------------------------
+
+# Matches: 字符串长度要求(0, 128) / 字符串长度限制(1, 255) / 字符串长度范围(0, 256)
+_STRING_LENGTH_RE = re.compile(
+    r"字符串长度\s*(?:要求|限制|范围)\s*[\(（]\s*(\d+)\s*[,，]\s*(\d+)\s*[\)）]"
+)
+
+
+def _match_string_length_rules(
+    param: dict,
+    existing_relations: list[dict],
+) -> list[dict]:
+    """Extract string length constraints for char*/const char* parameters.
+
+    Matches patterns like "字符串长度要求(0, 128)" in the parameter's
+    usage notes / description text and generates a ``self_string_length``
+    constraint: ``len({param}) > {min} and len({param}) < {max}``.
+
+    Returns a list of relation dicts (empty if no match or not char* type).
+    """
+    ptype = param.get("param_type", "")
+    normalized = _normalize_type(ptype)
+    if normalized not in ("char", "const char"):
+        return []
+
+    pname: str = param["param_name"]
+    fn: str = param.get("function_name", "")
+    combined = _get_param_text(param)
+    if not combined.strip():
+        return []
+
+    # Check if already covered by existing relations
+    for r in existing_relations:
+        if pname not in r.get("params", []):
+            continue
+        obj = r.get("relation_object", {})
+        if obj.get("expr_type") == "self_string_length":
+            return []
+
+    m = _STRING_LENGTH_RE.search(combined)
+    if m is None:
+        return []
+
+    min_val = int(m.group(1))
+    max_val = int(m.group(2))
+    src = m.group(0)
+
+    expr = f"len({pname}) > {min_val} and len({pname}) < {max_val}"
+    desc = f"{pname} 字符串长度要求({min_val}, {max_val})"
+
+    return [
+        {
+            "function_name": fn,
+            "relation_type": "self_constraint",
+            "platform": "",
+            "description": desc,
+            "params": [pname],
+            "param_optional": {pname: False},
+            "source_citation": src,
+            "relation_object": {
+                "expr_type": "self_string_length",
+                "expr": expr,
+                "relation_params": [pname],
+                "src_text": src,
+            },
+            "_source": "deterministic",
         }
     ]
 
@@ -534,11 +648,24 @@ async def build_single_param_constraint_node(
             "layer1_count": len(layer1_results),
         })
 
+        # Step 3b: Layer 1b — String length constraints for char* params
+        layer1b_results: list[dict] = []
+        for param in params:
+            layer1b_results.extend(
+                _match_string_length_rules(param, existing + layer0_results + layer1_results)
+            )
+
+        if layer1b_results:
+            logger.info(
+                "SingleParamConstraint: Layer 1b (string length) matched %d constraints",
+                len(layer1b_results),
+            )
+
         # Step 3: Layer 2 — Agent + skill.md (replaces disabled LLM)
         # Type 3: self-constraints for uncovered params via DeepAgent
         layer2_results: list[dict] = []
         covered_params: set[str] = set()
-        for r in layer0_results + layer1_results:
+        for r in layer0_results + layer1_results + layer1b_results:
             for p in r.get("params", []):
                 covered_params.add(p)
         uncovered = [
@@ -583,10 +710,10 @@ async def build_single_param_constraint_node(
                 layer2_results = []
 
         # Step 5: Merge and deduplicate
-        all_new = _dedup(layer0_results + layer1_results + layer2_results)
+        all_new = _dedup(layer0_results + layer1_results + layer1b_results + layer2_results)
 
         _emit(EventType.NODE_PROGRESS, {
-            "message": f"合并去重: Layer0({len(layer0_results)}) + Layer1({len(layer1_results)}) + Layer2({len(layer2_results)}) → {len(all_new)} 条新约束",
+            "message": f"合并去重: Layer0({len(layer0_results)}) + Layer1({len(layer1_results)}) + Layer1b({len(layer1b_results)}) + Layer2({len(layer2_results)}) → {len(all_new)} 条新约束",
             "phase": "merge_done",
             "layer0_count": len(layer0_results),
             "layer1_count": len(layer1_results),

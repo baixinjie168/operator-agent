@@ -59,6 +59,12 @@ RELATION_OBJECT_BUILD_PROMPT = """\
     不需要将其列入 params 列表。外部常量的取值范围由平台决定，
     在 expr 中不要硬编码具体数值。约束表达式中如需引用外部常量，
     只需将实际涉及的算子参数列入 params，外部常量名不列入
+21. 当 params 中含可选参数（名称含 Optional）且 expr 引用了该参数的
+    .shape/.dtype/.format 属性时，必须用 (expr) if (paramName is not None) else True
+    包装，防止参数为 None 时属性访问异常。
+    示例: "biasDequant2Optional 的 shape[0] 等于 N"
+    输出: (biasDequant2Optional.shape[0] == N.range_value) if biasDequant2Optional is not None else True
+    例外: 如果约束本身就是存在性判断（presence_dependency），无需额外包装
 
 ## 示例
 
