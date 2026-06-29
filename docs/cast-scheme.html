@@ -64,6 +64,7 @@ ul,ol{margin:8px 0 8px 20px}li{margin:4px 0}
 <li><a href="#scenario">多场景处理说明</a></li>
 <li><a href="#verify">验证计划</a></li>
 <li><a href="#files">改动文件汇总</a></li>
+<li><a href="#revision">修订补充（代码结构变更适配）</a></li>
 </ol></div>
 
 <div class="section" id="bg">
@@ -425,6 +426,187 @@ InitDoc <span class="arr">-&gt;</span> [ProductSupport <span class="dim">||</spa
 <h3>总结</h3>
 <p>本方案通过 <b>章节类型分离 -&gt; 函数感知匹配 -&gt; 组装过滤放宽</b> 三层修复，将 aclnnNpuFormatCast 解析为与 aclnnFFNV3 结构一致的约束文件，同时保证常规文档（无 CalculateSizeAndFormat 函数）无回归。所有改动在现有节点内部完成，不新增节点、不调整节点顺序。</p>
 </div>
+</div>
+
+<div class="section" id="revision">
+<h2>14. 修订补充：代码结构变更适配</h2>
+<p class="dim">修订日期：2026-06-29 | 原方案日期：2026-06-27 | 原因：方案编写后代码结构发生三处重大变更，导致 Phase 3.2/3.3/5 的改动锚点失效或冲突</p>
+
+<div class="problem">
+<h3>变更概述</h3>
+<table>
+<tr><th>变更</th><th>影响阶段</th><th>性质</th></tr>
+<tr><td>新增 <code>utils/section_utils.py</code>，集中化 ws/exe 章节获取 + 单函数算子提升</td><td>Phase 3.2, 3.3</td><td>锚点失效</td></tr>
+<tr><td><code>assemble_result.py</code> <code>_build_inputs_outputs</code> 重写，改用 <code>get_primary_function_names</code></td><td>Phase 5</td><td>代码冲突</td></tr>
+<tr><td><code>param_validators.py</code> 新增 <code>is_single_function_mode</code> / <code>get_primary_function_names</code></td><td>Phase 2, 5</td><td>需共存</td></tr>
+</table>
+<p>Phase 1（enums/section_splitter）、Phase 4（table_column_extract）、Phase 6（document_tools）、Phase 3.4/3.5/3.6（return_code/allowed_range/llm_description）不受影响，原方案仍有效。</p>
+</div>
+
+<div class="proposal">
+<h3>R1：Phase 3.2/3.3 — 改为修改 <code>section_utils.py</code>（非 constraint_extract.py / fetch_sections.py）</h3>
+<p><b>原方案问题：</b></p>
+<ul>
+<li>Phase 3.2 说在 <code>constraint_extract.py:1440</code> 新增 <code>calc_section = await get_section(...)</code>。实际 L1440 是 <code>_pass2_conditional_value</code> 的 docstring，章节获取已移至 L2186 的 <code>resolve_ws_exe_content</code> 调用。</li>
+<li>Phase 3.3 说在 <code>param_relation_extract/fetch_sections.py:32</code> 新增获取。实际该文件已重构，不再直接 <code>get_section</code>，而是委托 <code>resolve_ws_exe_content</code>。</li>
+</ul>
+<p><b>修订：在 <code>resolve_ws_exe_content</code> 中统一增加 <code>params_calculate_size</code> 获取</b></p>
+<p>文件：<code>packages/agent/src/agent/utils/section_utils.py</code></p>
+<pre><span class="c"># 现状（L63-82）：只获取 params_get_workspace / params_execute / constraints</span>
+<span class="k">async def</span> resolve_ws_exe_content(mcp_client, doc_id) -&gt; tuple[str, str, str]:
+    ws_section = <span class="k">await</span> mcp_client.get_section(doc_id, <span class="s">"params_get_workspace"</span>)
+    exe_section = <span class="k">await</span> mcp_client.get_section(doc_id, <span class="s">"params_execute"</span>)
+    constraints_section = <span class="k">await</span> mcp_client.get_section(doc_id, <span class="s">"constraints"</span>)
+    ...
+    <span class="k">return</span> ws_content, exe_content, constraints_text
+
+<span class="c"># 修订：增加 params_calculate_size 获取，拼入 ws_content（第一段接口）</span>
+<span class="k">async def</span> resolve_ws_exe_content(mcp_client, doc_id) -&gt; tuple[str, str, str]:
+    ws_section = <span class="k">await</span> mcp_client.get_section(doc_id, <span class="s">"params_get_workspace"</span>)
+    <span class="c"># 新增：CalculateSizeAndFormat 参数表（两段式算子的预处理函数）</span>
+    calc_section = <span class="k">await</span> mcp_client.get_section(doc_id, <span class="s">"params_calculate_size"</span>)
+    exe_section = <span class="k">await</span> mcp_client.get_section(doc_id, <span class="s">"params_execute"</span>)
+    constraints_section = <span class="k">await</span> mcp_client.get_section(doc_id, <span class="s">"constraints"</span>)
+
+    ws_content = ws_section.get(<span class="s">"content"</span>, <span class="s">""</span>) <span class="k">if</span> ws_section <span class="k">else</span> <span class="s">""</span>
+    <span class="c"># 新增：将 calc 参数表拼入 ws_content（CalculateSizeAndFormat 属于第一段接口）</span>
+    calc_content = calc_section.get(<span class="s">"content"</span>, <span class="s">""</span>) <span class="k">if</span> calc_section <span class="k">else</span> <span class="s">""</span>
+    <span class="k">if</span> calc_content.strip():
+        <span class="k">if</span> ws_content.strip():
+            ws_content = calc_content + <span class="s">"\n\n"</span> + ws_content
+        <span class="k">else</span>:
+            ws_content = calc_content  <span class="c"># 仅 calc 有内容时也作为 ws 主内容</span>
+    exe_content = exe_section.get(<span class="s">"content"</span>, <span class="s">""</span>) <span class="k">if</span> exe_section <span class="k">else</span> <span class="s">""</span>
+    constraints_text = (
+        constraints_section.get(<span class="s">"content"</span>, <span class="s">""</span>) <span class="k">if</span> constraints_section <span class="k">else</span> <span class="s">""</span>
+    )
+
+    <span class="c"># 单函数提升（原有逻辑不变）</span>
+    <span class="k">if not</span> ws_content.strip() <span class="k">and</span> exe_content.strip():
+        ws_content = exe_content
+        exe_content = <span class="s">""</span>
+
+    <span class="k">if</span> constraints_text:
+        ws_content += _CONSTRAINTS_PREFIX + constraints_text
+
+    <span class="k">return</span> ws_content, exe_content, constraints_text</pre>
+<p><b>效果：</b>constraint_extract Pass 3 和 param_relation_extract/fetch_sections 都通过 <code>resolve_ws_exe_content</code> 自动获取 calc 参数表内容，无需各自修改。Phase 3.2/3.3 从"改两个文件"简化为"改 <code>section_utils.py</code> 一处"。</p>
+</div>
+
+<div class="proposal">
+<h3>R2：Phase 5 — 改为修改 <code>get_primary_function_names</code>（非 _build_inputs_outputs）</h3>
+<p><b>原方案问题：</b></p>
+<p>Phase 5 说将 <code>_build_inputs_outputs</code> 的过滤从 <code>not fn.endswith("WorkspaceSize")</code> 放宽为 <code>not (fn.endswith("WorkspaceSize") or "CalculateSize" in fn)</code>。但 <code>_build_inputs_outputs</code> 已重写（L470-481），不再用 <code>endswith</code> 过滤，而是用 <code>get_primary_function_names(signatures)</code> 返回的函数名集合做白名单过滤。原方案的修复绕过了新机制。</p>
+<p><b>修订：修改 <code>param_validators.py</code> 的 <code>get_primary_function_names</code></b></p>
+<p>文件：<code>packages/agent/src/agent/utils/param_validators.py</code></p>
+<pre><span class="c"># 现状（L96-115）：只识别 GetWorkspaceSize + 单函数回退</span>
+<span class="k">def</span> get_primary_function_names(signatures: list[dict]) -&gt; set[str] | None:
+    <span class="k">if not</span> signatures:
+        <span class="k">return</span> None
+    ws_fns = {
+        s[<span class="s">"function_name"</span>]
+        <span class="k">for</span> s <span class="k">in</span> signatures
+        <span class="k">if</span> is_ws_function(s.get(<span class="s">"function_name"</span>, <span class="s">""</span>))
+    }
+    <span class="k">if</span> ws_fns:
+        <span class="k">return</span> ws_fns
+    <span class="k">return</span> {s[<span class="s">"function_name"</span>] <span class="k">for</span> s <span class="k">in</span> signatures <span class="k">if</span> s.get(<span class="s">"function_name"</span>)}
+
+<span class="c"># 修订：ws_fns 非空时也纳入 CalculateSizeAndFormat 函数</span>
+<span class="k">def</span> get_primary_function_names(signatures: list[dict]) -&gt; set[str] | None:
+    <span class="k">if not</span> signatures:
+        <span class="k">return</span> None
+    ws_fns = {
+        s[<span class="s">"function_name"</span>]
+        <span class="k">for</span> s <span class="k">in</span> signatures
+        <span class="k">if</span> is_ws_function(s.get(<span class="s">"function_name"</span>, <span class="s">""</span>))
+    }
+    <span class="k">if</span> ws_fns:
+        <span class="c"># 新增：CalculateSizeAndFormat 也是第一段接口，其参数应进入 inputs/outputs</span>
+        calc_fns = {
+            s[<span class="s">"function_name"</span>]
+            <span class="k">for</span> s <span class="k">in</span> signatures
+            <span class="k">if</span> is_calc_function(s.get(<span class="s">"function_name"</span>, <span class="s">""</span>))
+        }
+        <span class="k">return</span> ws_fns | calc_fns
+    <span class="k">return</span> {s[<span class="s">"function_name"</span>] <span class="k">for</span> s <span class="k">in</span> signatures <span class="k">if</span> s.get(<span class="s">"function_name"</span>)}</pre>
+<p><b>效果：</b><code>_build_inputs_outputs</code> 无需修改——它已用 <code>primary_fns</code> 做白名单，修改 <code>get_primary_function_names</code> 后 CalculateSizeAndFormat 参数自动通过过滤。Phase 5 从"改 assemble_result.py"变为"改 param_validators.py"。</p>
+</div>
+
+<div class="proposal">
+<h3>R3：Phase 2 — <code>is_calc_function</code> / <code>is_first_stage_function</code> 与新函数共存</h3>
+<p><b>原方案问题：</b></p>
+<p>Phase 2 只提到新增 <code>is_calc_function</code> / <code>is_first_stage_function</code>。但 <code>param_validators.py</code> 现在已有 <code>is_single_function_mode</code> 和 <code>get_primary_function_names</code>，方案需说明新函数与它们的关系。</p>
+<p><b>概念区分：</b></p>
+<table>
+<tr><th>概念</th><th>判断函数</th><th>含义</th><th>典型算子</th></tr>
+<tr><td>两段式算子</td><td><code>is_ws_function</code> 为 True 的签名存在</td><td>有 GetWorkspaceSize + Execute 两段</td><td>aclnnAdd, aclnnFFNV3</td></tr>
+<tr><td>单函数算子</td><td><code>is_single_function_mode</code> 为 True</td><td>无 GetWorkspaceSize，只有一个函数</td><td>aclnnCalculateMatmulWeightSize</td></tr>
+<tr><td>多函数两段式</td><td>有 GetWorkspaceSize 且有 CalculateSizeAndFormat</td><td>两段式 + 额外预处理函数</td><td>aclnnNpuFormatCast</td></tr>
+</table>
+<p>这三者互斥：单函数算子不会有 GetWorkspaceSize；多函数两段式算子有 GetWorkspaceSize 但额外多了 CalculateSizeAndFormat。</p>
+<p><b>修订：Phase 2 新增函数不变，但补充说明</b></p>
+<pre><span class="c"># param_validators.py — 新增（原方案 Phase 2 不变）</span>
+<span class="k">def</span> is_calc_function(function_name: str) -&gt; bool:
+    <span class="s">"""Return True if function_name is a CalculateSizeAndFormat variant."""</span>
+    <span class="k">return</span> <span class="s">"CalculateSize"</span> <span class="k">in</span> function_name
+
+<span class="k">def</span> is_first_stage_function(function_name: str) -&gt; bool:
+    <span class="s">"""Return True for GetWorkspaceSize or CalculateSizeAndFormat functions
+    (both have parameter tables and are first stage APIs)."""</span>
+    <span class="k">return</span> is_ws_function(function_name) <span class="k">or</span> is_calc_function(function_name)
+
+<span class="c"># 补充说明：is_first_stage_function 与 is_single_function_mode 不冲突：
+# - is_single_function_mode 检查"是否完全没有 GetWorkspaceSize"（签名级别）
+# - is_first_stage_function 检查"单个函数名是否属于第一段"（函数级别）
+# - 单函数算子的唯一函数不含 "GetWorkspaceSize" 也不含 "CalculateSize"，
+#   所以 is_first_stage_function 对它返回 False —— 不影响单函数路径。
+# - get_primary_function_names（R2 修订后）在 ws_fns 非空时也纳入 calc_fns，
+#   在 ws_fns 为空（单函数）时仍返回全部函数名 —— 两条路径互不干扰。</span></pre>
+</div>
+
+<div class="proposal">
+<h3>R4：改动文件汇总更新</h3>
+<p>原方案 Phase 13 的文件汇总表需更新：</p>
+<table>
+<tr><th>文件</th><th>改动类型</th><th>原阶段</th><th>修订后阶段</th></tr>
+<tr><td><code>packages/shared/.../enums.py</code></td><td>新增 3 个 SectionType</td><td>1</td><td>1（不变）</td></tr>
+<tr><td><code>packages/mcp-server/.../section_splitter.py</code></td><td>_classify_h2/h3, pre-H3</td><td>1</td><td>1（不变）</td></tr>
+<tr><td><code>packages/mcp-server/.../document_parser.py</code></td><td>classify_section 同步</td><td>1</td><td>1（不变）</td></tr>
+<tr><td><code>packages/agent/.../utils/param_validators.py</code></td><td>新增 is_calc_function, is_first_stage_function</td><td>2</td><td>2 + R2/R3（同文件改 get_primary_function_names）</td></tr>
+<tr><td><code>packages/agent/.../nodes/context_utils.py</td><td>re-export 新函数</td><td>2</td><td>2（不变）</td></tr>
+<tr><td><code>packages/agent/.../nodes/table_column_extract.py</code></td><td>章节获取 + 函数感知匹配</td><td>3+4</td><td>3+4（不变）</td></tr>
+<tr><td><code style="color:var(--red)">packages/agent/.../nodes/constraint_extract.py</code></td><td style="color:var(--red)">fetch params_calculate_size</td><td style="color:var(--red)">3.2</td><td style="color:var(--red)">删除——由 R1 统一处理</td></tr>
+<tr><td><code style="color:var(--red)">packages/agent/.../nodes/param_relation_extract/fetch_sections.py</code></td><td style="color:var(--red)">fetch params_calculate_size</td><td style="color:var(--red)">3.3</td><td style="color:var(--red)">删除——由 R1 统一处理</td></tr>
+<tr><td><code style="color:var(--green)">packages/agent/.../utils/section_utils.py</code></td><td style="color:var(--green)">resolve_ws_exe_content 增加 params_calculate_size 获取</td><td>—</td><td style="color:var(--green)">R1（新增条目）</td></tr>
+<tr><td><code>packages/agent/.../nodes/return_code_extract.py</code></td><td>fetch return_codes_calculate_size</td><td>3.4</td><td>3.4（不变）</td></tr>
+<tr><td><code>packages/agent/.../nodes/allowed_range_extract.py</code></td><td>分组 + 章节</td><td>3.5</td><td>3.5（不变）</td></tr>
+<tr><td><code>packages/agent/.../nodes/llm_description_extract/fetch_sections.py</code></td><td>分组 + 章节</td><td>3.6</td><td>3.6（不变）</td></tr>
+<tr><td><code style="color:var(--red)">packages/agent/.../nodes/assemble_result.py</code></td><td style="color:var(--red)">_build_inputs_outputs 放宽过滤</td><td style="color:var(--red)">5</td><td style="color:var(--red)">删除——由 R2 统一处理</td></tr>
+<tr><td><code>packages/mcp-server/.../tools/document_tools.py</code></td><td>get_sections_by_type（可选）</td><td>6</td><td>6（不变）</td></tr>
+</table>
+<div class="ok">
+<h3>修订后文件变更净效果</h3>
+<p>原方案改 13 个文件 → 修订后改 <b>12 个文件</b>（删除 constraint_extract.py 和 fetch_sections.py 的独立改动、assemble_result.py 的独立改动，新增 section_utils.py）。实际代码改动量减少，因为 <code>resolve_ws_exe_content</code> 和 <code>get_primary_function_names</code> 的集中化修改覆盖了原来分散在三个文件中的改动。</p>
+</div>
+</div>
+
+<div class="proposal">
+<h3>R5：修订后落地顺序</h3>
+<ol>
+<li><b>Phase 1</b>（不变）：enums.py 新增 3 个 SectionType → section_splitter.py 分类逻辑 → document_parser.py 同步</li>
+<li><b>Phase 2 + R3</b>（不变 + 补充）：param_validators.py 新增 <code>is_calc_function</code> / <code>is_first_stage_function</code> → context_utils.py re-export</li>
+<li><b>R2</b>（新）：修改 <code>param_validators.py</code> 的 <code>get_primary_function_names</code> 纳入 calc_fns</li>
+<li><b>R1</b>（新）：修改 <code>section_utils.py</code> 的 <code>resolve_ws_exe_content</code> 获取 params_calculate_size</li>
+<li><b>Phase 3.4</b>（不变）：return_code_extract.py 增加 calc 返回值章节</li>
+<li><b>Phase 3.5</b>（不变）：allowed_range_extract.py 分组改用 <code>is_first_stage_function</code></li>
+<li><b>Phase 3.6</b>（不变）：llm_description_extract/fetch_sections.py 分组改用 <code>is_first_stage_function</code></li>
+<li><b>Phase 4</b>（不变）：table_column_extract.py 函数感知匹配重构</li>
+<li><b>Phase 6</b>（可选，不变）：document_tools.py 新增 <code>get_sections_by_type</code></li>
+</ol>
+<p><b>关键依赖：</b>R2 必须在 Phase 2 之后（依赖 <code>is_calc_function</code>）；R1 可以与 Phase 1 之后任意时间做（只依赖新的 SectionType）。两者无相互依赖。</p>
+</div>
+
 </div>
 
 </div>

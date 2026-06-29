@@ -44,10 +44,80 @@ from agent.nodes.param_relation_extract.implicit_param_extract import (
     _EXCLUDE_WORDS,
 )
 from agent.nodes.param_relation_extract.state import RelationExtractState
+from agent.utils.param_validators import is_tensor_type
 
 logger = logging.getLogger(__name__)
 
 _mcp_client = MCPClient()
+
+
+def _build_tensor_param_names(param_types: dict[str, str]) -> set[str]:
+    """Return the set of parameter names whose type is ``aclTensor*``.
+
+    Used as the downstream defense line (Item 0): even if upstream
+    ``implicit_param_extract`` misclassifies a non-Tensor parameter
+    (e.g. ``transposeX2(bool)``, ``alltoAllAxesOptional(aclIntArray)``)
+    as a ``tensor_param``, this filter prevents generating a bogus
+    ``{non_tensor}.shape[{dim}] == {expr}`` constraint.
+    """
+    return {n for n, t in param_types.items() if is_tensor_type(t)}
+
+
+# ---------------------------------------------------------------------------
+# Condition guard detection (Item 5)
+# ---------------------------------------------------------------------------
+
+# Condition keywords that indicate a shape is conditional.  Each entry maps
+# a document keyword to a Python condition fragment used as the guard.
+_SHAPE_CONDITION_KEYWORDS: list[tuple[str, str]] = [
+    ("per-channel", "per_channel"),
+    ("per channel", "per_channel"),
+    ("per-group", "per_group"),
+    ("per group", "per_group"),
+    ("per-tensor", "per_tensor"),
+    ("per tensor", "per_tensor"),
+    ("有专家", "expertTokens is not None"),
+    ("无专家", "expertTokens is None"),
+]
+
+
+def _detect_shape_guard(
+    tensor_param: str,
+    shape_text: str,
+    param_desc: str,
+    is_optional: bool = False,
+) -> str:
+    """Detect the condition guard a shape representation needs (Item 5).
+
+    Returns a Python condition fragment (e.g. ``"scaleOptional is not None"``,
+    ``"per_channel"``), or an empty string when no guard is needed.
+
+    Detection order (most reliable first):
+      1. Optional parameter — name contains "Optional" or is_optional=True
+         → ``{tensor} is not None``.
+      2. Condition keywords (per-channel/per-group/有专家/无专家) in
+         shape_text + param_desc.  ``per-tensor`` is the "else" branch of
+         per-channel, so it is skipped here (covered by the per-channel
+         guard).
+    """
+    # 1. Optional-parameter guard (mechanical, most reliable)
+    if (
+        is_optional
+        or "Optional" in tensor_param
+        or "optional" in tensor_param.lower()
+    ):
+        return f"{tensor_param} is not None"
+
+    # 2. Condition-keyword detection in shape_text + param_desc
+    combined = " ".join(filter(None, [shape_text, param_desc])).lower()
+    for keyword, cond in _SHAPE_CONDITION_KEYWORDS:
+        if keyword.lower() in combined:
+            # per-tensor is the "else" branch — skip; per-channel guard
+            # covers it.
+            if cond == "per_tensor":
+                continue
+            return cond
+    return ""
 
 
 def _build_constant_values(mappings: list[dict]) -> dict[str, int]:
@@ -101,6 +171,9 @@ def _slot_expr_to_python(
 
 def _build_tensor_representations(
     mappings: list[dict],
+    tensor_param_names: set[str] | None = None,
+    param_descs: dict[str, str] | None = None,
+    param_optional: dict[str, bool] | None = None,
 ) -> list[dict[str, Any]]:
     """Generate ``parameter_representation`` records for tensor shape dims.
 
@@ -109,14 +182,35 @@ def _build_tensor_representations(
 
         {tensor}.shape[{dim}] == {python_expr}
 
-    where ``python_expr`` is the slot expression rewritten with direct
-    variable names (dimension variables), ``.range_value`` (external
-    constants), and substituted constant values.
+    When a condition guard is detected (Item 5) — the parameter is
+    optional, or its description mentions per-channel/per-group/有专家 —
+    the expression is wrapped::
+
+        ({tensor}.shape[{dim}] == {python_expr}) if {guard} else True
+
+    This eliminates over-broad constraints that trigger WARNs when the
+    condition does not hold (e.g. per-tensor scenario).
+
+    Args:
+        mappings: implicit_params mappings from implicit_param_extract.
+        tensor_param_names: authoritative set of aclTensor* parameter
+            names. When provided (not None), non-Tensor ``tensor_param``
+            values are skipped with a warning — this is the downstream
+            defense against upstream misclassification. When None (type
+            query failed), degrades to the original permissive behavior
+            so the pipeline never breaks.
+        param_descs: ``{param_name: param_desc}`` map from DB, used by
+            condition-guard detection. Defaults to ``{}`` (degrades to
+            name-only optional detection).
+        param_optional: ``{param_name: is_optional}`` map from DB, used
+            by condition-guard detection. Defaults to ``{}``.
     """
     constant_values = _build_constant_values(mappings)
     external_const_names = {
         m["var_name"] for m in mappings if m.get("is_external_constant")
     }
+    desc_map = param_descs or {}
+    opt_map = param_optional or {}
     reps: list[dict[str, Any]] = []
     seen_slots: set[tuple[str, int]] = set()
 
@@ -135,6 +229,18 @@ def _build_tensor_representations(
         if not tensor or dim is None or not slot_expr.strip():
             continue
 
+        # Downstream defense (Item 0): skip non-Tensor parameters to avoid
+        # emitting bogus shape constraints like ``transposeX2.shape[0] == N``
+        # when upstream misclassified a bool / aclIntArray param as a
+        # tensor_param. Degrades to permissive behavior when the type set
+        # is unavailable (None).
+        if tensor_param_names is not None and tensor not in tensor_param_names:
+            logger.warning(
+                "ParameterRepresentationBuild: 跳过非 Tensor 参数 %s "
+                "(类型非 aclTensor*)，避免生成非法 shape 约束", tensor,
+            )
+            continue
+
         slot_key = (tensor, dim)
         if slot_key in seen_slots:
             continue
@@ -148,9 +254,21 @@ def _build_tensor_representations(
         if not var_names:
             continue
 
+        # Item 5: detect condition guard and wrap the expression.
+        guard = _detect_shape_guard(
+            tensor,
+            m.get("shape_text", ""),
+            desc_map.get(tensor, ""),
+            opt_map.get(tensor, False),
+        )
+        base_expr = f"{tensor}.shape[{dim}] == {python_expr}"
+        final_expr = (
+            f"({base_expr}) if {guard} else True" if guard else base_expr
+        )
+
         reps.append({
             "expr_type": "parameter_representation",
-            "expr": f"{tensor}.shape[{dim}] == {python_expr}",
+            "expr": final_expr,
             "relation_params": [tensor, *var_names],
             "src_text": m.get("shape_text", ""),
         })
@@ -222,8 +340,39 @@ async def parameter_representation_build_node(
         )
         return {"error": None}
 
+    # Build the authoritative Tensor parameter-name set (Item 0 downstream
+    # defense). Falls back to None (permissive) when the type query fails so
+    # the pipeline never breaks.
+    tensor_param_names: set[str] | None = None
+    param_descs: dict[str, str] = {}        # Item 5: condition-guard detection
+    param_optional: dict[str, bool] = {}    # Item 5: condition-guard detection
     try:
-        tensor_reps = _build_tensor_representations(mappings)
+        all_params = await _mcp_client.query_params_by_doc_id(doc_id)
+        param_types: dict[str, str] = {}
+        for p in all_params:
+            pn = p.get("param_name", "")
+            if not pn:
+                continue
+            param_types[pn] = p.get("param_type", "")
+            param_descs[pn] = p.get("param_desc", "") or ""
+            param_optional[pn] = bool(p.get("is_optional", False))
+        if param_types:
+            tensor_param_names = _build_tensor_param_names(param_types)
+            logger.debug(
+                "ParameterRepresentationBuild: %d Tensor params for %s: %s",
+                len(tensor_param_names), operator_name,
+                sorted(tensor_param_names),
+            )
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "ParameterRepresentationBuild: 查询参数类型失败，"
+            "Tensor 过滤+条件守卫降级关闭", exc_info=True,
+        )
+
+    try:
+        tensor_reps = _build_tensor_representations(
+            mappings, tensor_param_names, param_descs, param_optional,
+        )
         platform_reps = _build_platform_constant_representations(
             platform_constants,
         )

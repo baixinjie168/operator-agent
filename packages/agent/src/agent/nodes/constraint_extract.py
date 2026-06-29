@@ -1,17 +1,21 @@
-"""ConstraintExtract node: unified constraint extraction (Pass 1-3).
+"""ConstraintExtract node: unified constraint extraction (Pass 1-3b).
 
 Consolidates deterministic regex patterns from 4 existing nodes into a
-single node with 3 Passes:
+single node with multiple Passes:
 
-  Pass 1 - Cross-parameter constraints (dtype/shape equality, length, divisibility)
-           Merges: cross_param_constraint + constraint_validation
+  Pass 1  - Cross-parameter constraints (dtype/shape equality, length, divisibility)
+            Merges: cross_param_constraint + constraint_validation
 
-  Pass 2 - Single-parameter constraints (empty tensor, tensorlist consistency,
-           shape upper bound, bool restriction, string length)
-           Merges: single_param_constraint Layer 1 + Layer 1b
+  Pass 2  - Single-parameter constraints (empty tensor, tensorlist consistency,
+            shape upper bound, bool restriction, string length)
+            Merges: single_param_constraint Layer 1 + Layer 1b
 
-  Pass 3 - Implicit variable value constraints (K1<65536, H=32/64, even)
-           Merges: implicit_value_constraint
+  Pass 3  - Implicit variable value constraints (K1<65536, H=32/64, even)
+            Merges: implicit_value_constraint
+
+  Pass 3b - Implicit variable dimension equalities (K1==N2, N1==2*K2)
+            Captures inter-variable equalities that Pass 1 (param-vs-param)
+            and Pass 3 (var-vs-numeric) both miss.
 
 Each Pass runs independently with try/except - Pass failure does not affect
 other Passes.  All results are deduplicated against existing param_relations
@@ -34,6 +38,8 @@ from typing import Any
 from agent.mcp_client import MCPClient
 from agent.nodes.build_param_constraint._helpers import _normalize_type
 from agent.nodes.state import PipelineState
+from agent.core.config import settings
+from agent.utils.expr_validation import _semantic_expr_key
 from agent.utils.platform_utils import expand_common_in_relations
 from agent.runtime.context import get_context
 from agent.runtime.events import EventType, Span, SpanType
@@ -115,13 +121,17 @@ def _normalize_expr(expr: str) -> str:
     """Normalize a constraint expression for dedup comparison.
 
     Handles commutative equivalence so that A==B and B==A are recognized
-    as the same constraint.  Covers three common patterns:
+    as the same constraint.  Covers five common patterns:
       1. A.attr == B.attr   (e.g. x.dtype == y.dtype)
       2. len(A) == len(B)
       3. A.shape == B.shape
+      4. A % B == 0         (divisibility, e.g. oriHeight % 16 == 0)
+      5. A == N * B         (multiple, e.g. N1 == 2 * K2)
 
-    For each pattern the two operands are sorted alphabetically so that
-    the normalized form is deterministic regardless of source order.
+    For each equality pattern the two operands are sorted alphabetically so
+    that the normalized form is deterministic regardless of source order.
+    This is the string-based fallback; richer AST-level canonicalisation
+    lives in ``agent.utils.expr_validation._semantic_expr_key``.
     """
     if not expr:
         return expr
@@ -151,6 +161,16 @@ def _normalize_expr(expr: str) -> str:
             a, b = b, a
         return f"{a}.shape == {b}.shape"
 
+    # 4. A % B == 0  (divisibility) — non-commutative, keep order
+    m = re.match(r"(\w+)\s*%\s*(\w+)\s*==\s*0\s*$", expr)
+    if m:
+        return f"{m.group(1)} % {m.group(2)} == 0"
+
+    # 5. A == N * B  (multiple equality) — non-commutative, keep order
+    m = re.match(r"(\w+)\s*==\s*(\d+)\s*\*\s*(\w+)\s*$", expr)
+    if m:
+        return f"{m.group(1)} == {m.group(2)} * {m.group(3)}"
+
     return expr
 
 
@@ -173,6 +193,102 @@ def _expr_exists(existing: list[dict], expr: str) -> bool:
             if existing_expr and _normalize_expr(existing_expr) == target:
                 return True
     return False
+
+
+# ---------------------------------------------------------------------------
+# Phase 3 Item 7: cross-source / cross-expr_type semantic dedup
+# ---------------------------------------------------------------------------
+# expr_type specificity priority (lower = more specific = preferred survivor).
+# When the same semantic key appears multiple times, the most specific
+# expr_type wins (e.g. value_dependency beats self_string_length).
+_EXPR_TYPE_PRIORITY: dict[str, int] = {
+    "value_dependency": 1, "self_value_range": 1, "self_value_enum": 1,
+    "type_dependency": 2, "type_equality": 2, "shape_value_dependency": 2,
+    "presence_dependency": 2, "shape_equality": 2, "format_equality": 2,
+    "self_string_length": 3, "cross_param_constraint": 3,
+    "shape_broadcast": 3, "shape_dependency": 3, "self_shape_dim_range": 3,
+    "self_constraint": 4,
+}
+
+
+def _deduplicate_relations(
+    existing: list[dict], new_rels: list[dict],
+) -> tuple[list[dict], list[dict]]:
+    """Platform-aware semantic dedup of ``existing + new_rels``.
+
+    Dedup key = ``_semantic_expr_key(expr) + "::" + platform`` so that
+    relations on different platforms are NEVER merged (compatible with
+    ``expand_common_in_relations`` which expands ``platform="common"`` to
+    per-platform rows — merging across platforms would lose coverage).
+
+    Only ``new_rels`` duplicates are removed; ``existing`` (already in DB)
+    is returned untouched to avoid accidental data loss. Within a group
+    sharing the same key, the "best" (most specific) relation survives:
+    priority = expr_type specificity → has real src_text → has guard →
+    generic platform (``""``/``"common"``) preferred over platform-specific.
+    """
+    all_rels = existing + new_rels
+    groups: dict[str, list[dict]] = {}
+    for rel in all_rels:
+        obj = rel.get("relation_object", {})
+        if isinstance(obj, str):
+            try:
+                obj = json.loads(obj)
+            except (json.JSONDecodeError, TypeError):
+                continue
+        if not isinstance(obj, dict):
+            continue
+        expr = obj.get("expr", "")
+        if not expr:
+            continue
+        key = _semantic_expr_key(expr)
+        if not key:
+            continue
+        plat = str(rel.get("platform", "") or "")
+        groups.setdefault(f"{key}::{plat}", []).append(rel)
+
+    removed: list[dict] = []
+    for _gkey, group in groups.items():
+        if len(group) <= 1:
+            continue
+
+        def _score(rel: dict) -> tuple:
+            obj = rel.get("relation_object", {})
+            if isinstance(obj, str):
+                try:
+                    obj = json.loads(obj)
+                except Exception:  # noqa: BLE001
+                    obj = {}
+            et = obj.get("expr_type", "")
+            src = obj.get("src_text", "") or rel.get("source_citation", "")
+            expr_s = obj.get("expr", "")
+            plat = str(rel.get("platform", "") or "")
+            return (
+                _EXPR_TYPE_PRIORITY.get(et, 5),
+                0 if src and "正则" not in src and "YAML" not in src else 1,
+                0 if "if" in expr_s else 1,
+                0 if plat in ("", "common") else 1,  # generic platform preferred
+            )
+
+        best = min(group, key=_score)
+        for rel in group:
+            if rel is best:
+                continue
+            # Use identity membership to correctly handle the case where
+            # multiple new_rels entries are value-equal dicts (e.g. the same
+            # expr repeated 3 times). Value-based ``rel in new_rels`` would
+            # match ALL equal dicts, and ``r not in removed`` would then
+            # drop the survivor too — identity avoids that.
+            if any(rel is r for r in new_rels):
+                removed.append(rel)
+                logger.info(
+                    "ConstraintDedup: 移除语义重复 expr=%s platform=%s",
+                    str(rel.get("relation_object", ""))[:60],
+                    rel.get("platform", ""),
+                )
+    removed_ids = {id(r) for r in removed}
+    deduped_new = [r for r in new_rels if id(r) not in removed_ids]
+    return existing, deduped_new
 
 
 def _make_cross_rel(
@@ -584,6 +700,27 @@ def _extract_enum_values(raw: str) -> str:
     return ", ".join(p.strip() for p in parts if p.strip().isdigit())
 
 
+def _collect_seen_exprs(existing: list[dict]) -> set[str]:
+    """Collect expr strings from existing relations for dedup.
+
+    Extracted from the inline dedup logic of ``_pass3_implicit_value`` so
+    that Pass 3 and the new Pass 3b (dimension equalities) share one
+    canonical dedup source. Handles ``relation_object`` stored as either a
+    dict or a JSON string.
+    """
+    seen: set[str] = set()
+    for rel in existing:
+        obj = rel.get("relation_object", {})
+        if isinstance(obj, str):
+            try:
+                obj = json.loads(obj)
+            except (json.JSONDecodeError, TypeError):
+                continue
+        if isinstance(obj, dict):
+            seen.add(obj.get("expr", ""))
+    return seen
+
+
 def _pass3_implicit_value(
     sections_text: str,
     implicit_params: list[dict],
@@ -609,18 +746,7 @@ def _pass3_implicit_value(
         return []
 
     constraints: list[dict] = []
-    seen_exprs: set[str] = set()
-
-    # Collect exprs from existing for dedup
-    for rel in existing:
-        obj = rel.get("relation_object", {})
-        if isinstance(obj, str):
-            try:
-                obj = json.loads(obj)
-            except (json.JSONDecodeError, TypeError):
-                continue
-        if isinstance(obj, dict):
-            seen_exprs.add(obj.get("expr", ""))
+    seen_exprs = _collect_seen_exprs(existing)
 
     for pattern, template, expr_type in _P3_VALUE_PATTERNS:
         for m in pattern.finditer(sections_text):
@@ -667,6 +793,148 @@ def _pass3_implicit_value(
 
 
 # ===================================================================
+# Pass 3b: Implicit variable dimension equalities (deterministic regex)
+# Captures inter-variable equalities like K1==N2, N1==2*K2 that Pass 1
+# (param-vs-param) and Pass 3 (var-vs-numeric) both miss.
+# ===================================================================
+
+# Order-sensitive: N*Y must be matched before X=Y so that "N1=2*K2" is not
+# truncated to "N1=2" by the equality pattern.
+_P3B_DIM_NMUL_RE = re.compile(
+    r"([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(\d+)\s*\*\s*([A-Za-z_][A-Za-z0-9_]*)"
+)
+_P3B_DIM_EQ_RE = re.compile(
+    r"([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([A-Za-z_][A-Za-z0-9_]*)"
+)
+# Chinese equality: "X等于Y" / "X与Y相等/一致"
+_P3B_DIM_EQ_CN_RE = re.compile(
+    r"([A-Za-z_][A-Za-z0-9_]*)\s*(?:等于|与)\s*([A-Za-z_][A-Za-z0-9_]*)\s*(?:相等|一致)"
+)
+# Chinese multiple: "X是Y的N倍"
+_P3B_DIM_NMUL_CN_RE = re.compile(
+    r"([A-Za-z_][A-Za-z0-9_]*)\s*是\s*([A-Za-z_][A-Za-z0-9_]*)\s*的\s*(\d+)\s*(?:倍|整数倍)"
+)
+# Condition clause detection: "激活层为X时" / "当X时" / "若X时"
+_P3B_COND_RE = re.compile(
+    r"(?:激活层为|当|若)\s*([^\s，。；,;]{1,40}?)\s*时"
+)
+
+
+def _detect_condition_clause(text: str, pos: int) -> str:
+    """Look back up to 80 chars before *pos* for a ``...时`` condition.
+
+    Returns a Python condition fragment (e.g.
+    ``activation in [geglu, swiglu, reglu]``) or an empty string when no
+    encodable condition is found. Only ``激活层为X时`` clauses are encoded
+    into a Python ``in`` test today; other ``当X时``/``若X时`` clauses are
+    detected but not yet encoded (returns "" so the equality is emitted
+    unconditionally — conservative, never drops the constraint).
+    """
+    window = text[max(0, pos - 80):pos]
+    last = None
+    for m in _P3B_COND_RE.finditer(window):
+        last = m  # take the condition nearest to the equality
+    if not last:
+        return ""
+    parts = [
+        p.strip() for p in re.split(r"[/、，,]", last.group(1)) if p.strip()
+    ]
+    if parts and "激活" in window:
+        return f"activation in [{', '.join(parts)}]"
+    return ""
+
+
+def _pass3b_dim_equalities(
+    sections_text: str,
+    implicit_params: list[dict],
+    existing: list[dict],
+) -> list[dict]:
+    """Pass 3b: Extract equality constraints between implicit dimension vars.
+
+    Captures inter-variable equalities such as ``K1==N2`` and
+    ``N1==2*K2`` that Pass 1 (param-vs-param, scans param descriptions) and
+    Pass 3 (var-vs-numeric, requires a numeric RHS) both miss. These appear
+    in the constraint *section* text where both sides are implicit
+    dimension variables, so this pass reuses the Pass 3 context
+    (``sections_text`` + ``var_names``) and runs alongside it.
+
+    Only generates an equality when **both** sides are known implicit
+    variables, avoiding ``a=b`` descriptive prose. Conditional equalities
+    (``激活层为geglu时，N1=2*K2``) are wrapped in a guard:
+    ``((N1 == 2 * K2) if activation in [geglu] else True)``.
+
+    Uses ``expr_type="cross_variable_equality"`` (descriptive metadata;
+    downstream consumers only branch on ``value_dependency``, so this is
+    safe — see assemble_result._group_constraints_by_platform).
+    """
+    if not sections_text.strip() or not implicit_params:
+        return []
+    var_names = {
+        m["var_name"] for m in implicit_params
+        if m.get("var_name")
+        and not m.get("is_constant")
+        and not m.get("is_external_constant")
+        and not m.get("is_quantization_type")
+    }
+    if not var_names:
+        return []
+
+    seen_exprs = _collect_seen_exprs(existing)
+    constraints: list[dict] = []
+
+    def _emit(expr: str, params: list[str], src: str, m: re.Match) -> None:
+        cond = _detect_condition_clause(sections_text, m.start())
+        full = f"({expr}) if {cond} else True" if cond else expr
+        if full in seen_exprs:
+            return
+        seen_exprs.add(full)
+        s = max(0, m.start() - 50)
+        e = min(len(sections_text), m.end() + 50)
+        src_text = _strip_html(sections_text[s:e].strip())
+        constraints.append({
+            "function_name": "",
+            "relation_type": "cross_param_constraint",
+            "platform": "",
+            "description": full,
+            "params": params,
+            "param_optional": {p: False for p in params},
+            "source_citation": src_text,
+            "relation_object": {
+                "expr_type": "cross_variable_equality",
+                "expr": full,
+                "relation_params": params,
+                "src_text": src_text,
+            },
+        })
+
+    # 1) X = N * Y  (matched first so X=Y does not truncate "N1=2*K2")
+    for m in _P3B_DIM_NMUL_RE.finditer(sections_text):
+        x, n, y = m.group(1), m.group(2), m.group(3)
+        if x in var_names and y in var_names:
+            _emit(f"{x} == {n} * {y}", [x, y], m.group(0), m)
+
+    # 2) X = Y  (both sides implicit vars; skip X=X and numeric RHS)
+    for m in _P3B_DIM_EQ_RE.finditer(sections_text):
+        x, y = m.group(1), m.group(2)
+        if x == y or y.isdigit():
+            continue
+        if x in var_names and y in var_names:
+            _emit(f"{x} == {y}", [x, y], m.group(0), m)
+
+    # 3) Chinese equality / multiple (same var-membership check)
+    for m in _P3B_DIM_EQ_CN_RE.finditer(sections_text):
+        x, y = m.group(1), m.group(2)
+        if x in var_names and y in var_names:
+            _emit(f"{x} == {y}", [x, y], m.group(0), m)
+    for m in _P3B_DIM_NMUL_CN_RE.finditer(sections_text):
+        x, y, n = m.group(1), m.group(2), m.group(3)
+        if x in var_names and y in var_names:
+            _emit(f"{x} == {n} * {y}", [x, y], m.group(0), m)
+
+    return constraints
+
+
+# ===================================================================
 # Pass 4: Value range extraction (deterministic regex + YAML + char* enum)
 # Merges: allowed_range_build Phase 1 + Phase 1b + single_param_constraint Layer 0
 # ===================================================================
@@ -674,10 +942,17 @@ def _pass3_implicit_value(
 # Reuse patterns from allowed_range_build (lazy import to avoid circular deps)
 
 
-def _try_deterministic_range(text: str):
+def _try_deterministic_range(text: str, return_match: bool = False):
     """Try deterministic extraction of range from text.
 
-    Returns (value_list, ar_type) or None.
+    Returns ``(value_list, ar_type)`` or, when *return_match* is True,
+    ``(value_list, ar_type, match)`` where *match* is the ``re.Match``
+    object — letting the caller extract document-original context for
+    ``src_text`` traceability (Item 6).
+
+    *return_match* defaults to ``False`` for backward compatibility.
+    Note: ``allowed_range_build.py`` has its own independent
+    ``_try_deterministic_range``; this change does not affect it.
     """
     from agent.nodes.build_param_constraint.allowed_range_build import (
         _RANGE_PATTERNS,
@@ -690,12 +965,27 @@ def _try_deterministic_range(text: str):
                 if isinstance(result, tuple) and len(result) == 2:
                     value_list, ar_type = result
                     if value_list:
-                        return value_list, ar_type
+                        return (value_list, ar_type, m) if return_match \
+                               else (value_list, ar_type)
                 elif isinstance(result, list) and result:
-                    return result, "range"
+                    return (result, "range", m) if return_match \
+                           else (result, "range")
             except (ValueError, IndexError):
                 continue
     return None
+
+
+def _extract_src_context(text: str, match: re.Match | None, radius: int = 50) -> str:
+    """Extract +-radius chars of document-original context around a match.
+
+    Reuses :func:`_strip_html` to remove residual HTML tags so ``src_text``
+    stays clean and traceable to the source document (Item 6).
+    """
+    if not text or not match:
+        return ""
+    s = max(0, match.start() - radius)
+    e = min(len(text), match.end() + radius)
+    return _strip_html(text[s:e].strip())
 
 
 def _extract_param_sentences(text: str, param_name: str) -> str:
@@ -797,20 +1087,26 @@ async def _pass4_value_range(
             continue
 
         # --- Phase 1: Deterministic regex ---
-        det = _try_deterministic_range(combined_text)
+        # return_match=True so we can extract document-original context (Item 6).
+        det = _try_deterministic_range(combined_text, return_match=True)
+        det_src_text = combined_text
         if det is None:
             param_sentences = _extract_param_sentences(constraints_text, pn)
             if param_sentences:
-                det = _try_deterministic_range(param_sentences)
+                det = _try_deterministic_range(param_sentences, return_match=True)
+                det_src_text = param_sentences
 
         if det is not None:
-            det_value, det_type = det
+            det_value, det_type, det_match = det
             expr = _range_to_expr(pn, det_value, det_type)
             if expr:
+                # Item 6: use document-original context instead of placeholder.
+                src_text = _extract_src_context(det_src_text, det_match) \
+                           or f"正则提取: {det_type}"
                 new_rels.append(_make_self_rel(
                     fn, pn, expr,
                     f"{pn} 取值范围({det_type}): {det_value}",
-                    f"正则提取: {det_type}",
+                    src_text,
                     "self_value_enum" if det_type == "enum" else "self_value_range",
                 ))
                 continue
@@ -829,10 +1125,13 @@ async def _pass4_value_range(
         if yaml_ar:
             expr = _range_to_expr(pn, yaml_ar, "range")
             if expr:
+                # Item 6: use sentences mentioning param_name as src_text.
+                yaml_src = _extract_param_sentences(combined_text, pn)
+                yaml_src = _strip_html(yaml_src[:200]) if yaml_src else ""
                 new_rels.append(_make_self_rel(
                     fn, pn, expr,
                     f"{pn} 取值范围(YAML): {yaml_ar}",
-                    "YAML语义规则",
+                    yaml_src or f"YAML语义规则: {pn}",
                     "self_value_range",
                 ))
                 continue
@@ -844,9 +1143,12 @@ async def _pass4_value_range(
                 expr = result.get("expr", "")
                 if expr:
                     desc = result.get("description", "")
+                    # Item 6: use sentences mentioning param_name as src_text.
+                    tensor_src = _extract_param_sentences(combined_text, pn)
+                    tensor_src = _strip_html(tensor_src[:200]) if tensor_src else ""
                     new_rels.append(_make_self_rel(
                         fn, pn, expr, desc,
-                        desc or "YAML Tensor规则",
+                        tensor_src or desc or f"YAML Tensor规则: {pn}",
                         result.get("expr_type", "self_value_range"),
                     ))
 
@@ -854,6 +1156,16 @@ async def _pass4_value_range(
     if char_params and sections_text.strip():
         try:
             from agent.nodes.allowed_range_agent import _extract_batch_via_agent
+
+            # Item 6: helper to find document-original context for enum values.
+            def _find_char_src(vals: list[str]) -> str:
+                for v in vals[:3]:
+                    idx = sections_text.find(v)
+                    if idx >= 0:
+                        s = max(0, idx - 30)
+                        e = min(len(sections_text), idx + len(v) + 30)
+                        return _strip_html(sections_text[s:e].strip())
+                return ""
 
             batch_result = await _extract_batch_via_agent(char_params, sections_text)
             for param in char_params:
@@ -882,11 +1194,13 @@ async def _pass4_value_range(
                     enum_vals = sorted(set(enum_vals))
                     if enum_vals:
                         expr = f"{pn}.range_value in [{', '.join(repr(v) for v in enum_vals)}]"
-                        src = f"char*枚举值: {', '.join(enum_vals)}"
+                        # Item 6: use document context instead of placeholder.
+                        char_src = _find_char_src(enum_vals)
                         new_rels.append(_make_self_rel(
                             fn, pn, expr,
                             f"{pn} 取值范围: {', '.join(enum_vals)}",
-                            src, "self_value_enum",
+                            char_src or f"char*枚举值: {', '.join(enum_vals)}",
+                            "self_value_enum",
                         ))
                 else:
                     # Multiple platforms — create one relation per platform
@@ -901,11 +1215,13 @@ async def _pass4_value_range(
                         if not vals:
                             continue
                         expr = f"{pn}.range_value in [{', '.join(repr(v) for v in vals)}]"
-                        src = f"char*枚举值: {', '.join(vals)}"
+                        # Item 6: use document context instead of placeholder.
+                        char_src = _find_char_src(vals)
                         new_rels.append(_make_self_rel(
                             fn, pn, expr,
                             f"{pn} 取值范围: {', '.join(vals)}",
-                            src, "self_value_enum",
+                            char_src or f"char*枚举值: {', '.join(vals)}",
+                            "self_value_enum",
                             platform=platform,
                         ))
         except Exception:
@@ -1644,6 +1960,92 @@ async def _pass7_dtype_constraints(
 
 
 # ===================================================================
+# Pass 7b: Conditional dtype constraints (type_dependency)
+# Generates conditional dtype constraints from structured dtype JSON
+# (e.g. {"量化": "INT8", "*": "FLOAT16"}) written by dtype_extract_node.
+# ===================================================================
+
+def _pass7b_conditional_dtype(
+    params: list[dict],
+    existing: list[dict],
+) -> list[dict]:
+    """Pass 7b: Generate ``type_dependency`` constraints from conditional dtype.
+
+    Reads each parameter's dtype field (the MCP server
+    ``query_params_by_doc_id`` returns it as ``data_type``, mapped from the
+    DB ``dtype_desc`` column; ``dtype_desc`` is also accepted for the
+    agent's own ``db.py`` fallback). When the value is a structured JSON
+    dict with a ``"*"`` default branch plus one or more condition branches
+    (e.g. ``{"量化": "INT8", "*": "FLOAT16"}``), emit a conditional dtype
+    constraint::
+
+        (param.dtype == 'INT8') if quantization else (param.dtype == 'FLOAT16')
+
+    Silently skips params with empty / non-JSON / non-conditional dtype so
+    the pipeline never breaks.
+    """
+    new_rels: list[dict] = []
+    for param in params:
+        pn = param.get("param_name", "")
+        fn = param.get("function_name", "")
+        # MCP server returns "data_type"; agent db.py returns "dtype_desc".
+        dtype_desc = (
+            param.get("data_type", "")
+            or param.get("dtype_desc", "")
+            or ""
+        )
+        if not pn or not dtype_desc:
+            continue
+
+        try:
+            dt_map = (
+                json.loads(dtype_desc) if dtype_desc.startswith("{") else None
+            )
+        except (json.JSONDecodeError, TypeError):
+            dt_map = None
+        if not isinstance(dt_map, dict) or "*" not in dt_map:
+            continue  # not a conditional dtype
+
+        cond_branches = {k: v for k, v in dt_map.items() if k != "*"}
+        if not cond_branches:
+            continue
+
+        default_dtype = dt_map["*"]
+        # Skip if an existing type_equality / type_dependency already covers
+        # this param — Pass 7 may have emitted a fixed-dtype constraint.
+        already_has = False
+        for r in existing + new_rels:
+            if pn in r.get("params", []):
+                obj = r.get("relation_object", {})
+                if isinstance(obj, dict) and obj.get("expr_type", "") in (
+                    "type_equality", "type_dependency"
+                ) and obj.get("expr", ""):
+                    already_has = True
+                    break
+        if already_has:
+            continue
+
+        cond_clauses: list[str] = []
+        for cond, dt in cond_branches.items():
+            cond_var = "quantization" if "量化" in cond else cond
+            cond_clauses.append(
+                f"({pn}.dtype == '{dt}') if {cond_var} "
+                f"else ({pn}.dtype == '{default_dtype}')"
+            )
+        expr = " and ".join(cond_clauses) if cond_clauses else ""
+        if not expr or _expr_exists(existing + new_rels, expr):
+            continue
+
+        new_rels.append(_make_self_rel(
+            fn, pn, expr,
+            f"{pn} 的数据类型依赖量化场景",
+            f"data_type条件分析: {dtype_desc}",
+            "type_dependency",
+        ))
+    return new_rels
+
+
+# ===================================================================
 # Node entry point
 # ===================================================================
 
@@ -1655,12 +2057,14 @@ async def constraint_extract_node(state: PipelineState) -> dict[str, Any]:
       Pass 1: cross-parameter (dtype/shape equality, length, divisibility)
       Pass 2: single-parameter (empty tensor, tensorlist, shape bound, bool, string length)
       Pass 3: implicit variable value (K1<65536, H=32/64)
+      Pass 3b: implicit variable dimension equalities (K1==N2, N1==2*K2)
       Pass 4: value range (deterministic regex + YAML + char* enum)
       Pass 4b: per-platform scalar enum (只支持传1 / 可以配置为0或者1)
       Pass 5: LLM fallback (agent-based relation discovery + expr generation)
       Pass 6: conditional constraints from constraints text (量化/非量化场景)
       Pass 6b: conditional shapes from param descriptions (有/无专家, per-channel/tensor)
       Pass 7: dtype constraints from dtype_combinations table
+      Pass 7b: conditional dtype (type_dependency) from structured dtype JSON
 
     Each Pass is wrapped in try/except - failure in one Pass does not affect
     others.  Results are deduplicated against existing param_relations and
@@ -1732,12 +2136,14 @@ async def constraint_extract_node(state: PipelineState) -> dict[str, Any]:
         pass1_count = 0
         pass2_count = 0
         pass3_count = 0
+        pass3b_count = 0
         pass4_count = 0
         pass4b_count = 0
         pass5_count = 0
         pass6_count = 0
         pass6b_count = 0
         pass7_count = 0
+        pass7b_count = 0
 
         # --- Pass 1: Cross-parameter constraints ---
         try:
@@ -1795,6 +2201,27 @@ async def constraint_extract_node(state: PipelineState) -> dict[str, Any]:
         except Exception:
             logger.exception("ConstraintExtract Pass 3 failed")
             sections_text = ""
+
+        # --- Pass 3b: Implicit variable dimension equalities ---
+        # Captures inter-variable equalities (K1==N2, N1==2*K2) that Pass 1
+        # (param-vs-param) and Pass 3 (var-vs-numeric) both miss. Runs in an
+        # independent try/except so Pass 3 failure (which blanks
+        # sections_text) does not block it — in that case Pass 3b naturally
+        # returns [] without breaking the pipeline. implicit_params is
+        # re-read from state in case Pass 3 set it.
+        try:
+            implicit_params = state.get("implicit_params", [])
+            pass3b_results = _pass3b_dim_equalities(
+                sections_text, implicit_params, existing + all_new,
+            )
+            all_new.extend(pass3b_results)
+            pass3b_count = len(pass3b_results)
+            logger.info(
+                "ConstraintExtract Pass 3b (dim-equality): %d new constraints",
+                pass3b_count,
+            )
+        except Exception:
+            logger.exception("ConstraintExtract Pass 3b failed")
 
         # --- Pass 4: Value range (deterministic regex + YAML + char* enum) ---
         try:
@@ -1894,23 +2321,63 @@ async def constraint_extract_node(state: PipelineState) -> dict[str, Any]:
         except Exception:
             logger.exception("ConstraintExtract Pass 7 failed")
 
+        # --- Pass 7b: Conditional dtype (type_dependency) ---
+        # Reads structured dtype JSON ({"量化": "INT8", "*": "FLOAT16"})
+        # written by dtype_extract_node and generates type_dependency
+        # constraints. Silently skips non-conditional dtypes.
+        try:
+            pass7b_results = _pass7b_conditional_dtype(
+                params, existing + all_new,
+            )
+            all_new.extend(pass7b_results)
+            pass7b_count = len(pass7b_results)
+            logger.info(
+                "ConstraintExtract Pass 7b (conditional-dtype): %d new constraints",
+                pass7b_count,
+            )
+        except Exception:
+            logger.exception("ConstraintExtract Pass 7b failed")
+
+        # --- Phase 3 Item 7: cross-source semantic dedup ---
+        # Runs after ALL Passes have extended ``all_new``, BEFORE the
+        # ``_emit`` progress event so ``new_count`` reflects the post-dedup
+        # net increment (pass_count = raw extract count, new_count = net).
+        # Platform-aware: dedup key includes platform so common/A2/A3 rows
+        # are never merged across platforms. Only ``all_new`` (this run's
+        # additions) can be removed; ``existing`` is untouched.
+        if settings.constraint_semantic_dedup:
+            try:
+                _pre_dedup = len(all_new)
+                _, all_new = _deduplicate_relations(existing, all_new)
+                if len(all_new) != _pre_dedup:
+                    logger.info(
+                        "ConstraintExtract dedup: %d -> %d new after semantic dedup",
+                        _pre_dedup, len(all_new),
+                    )
+            except Exception:
+                logger.exception("ConstraintExtract dedup failed (non-blocking)")
+
         _emit(EventType.NODE_PROGRESS, {
             "message": (
                 f"P1:{pass1_count} P2:{pass2_count} P3:{pass3_count} "
+                f"P3b:{pass3b_count} "
                 f"P4:{pass4_count} P4b:{pass4b_count} P5:{pass5_count} "
                 f"P6:{pass6_count} P6b:{pass6b_count} P7:{pass7_count} "
+                f"P7b:{pass7b_count} "
                 f"合计新增 {len(all_new)} 条"
             ),
             "phase": "extract_done",
             "pass1_count": pass1_count,
             "pass2_count": pass2_count,
             "pass3_count": pass3_count,
+            "pass3b_count": pass3b_count,
             "pass4_count": pass4_count,
             "pass4b_count": pass4b_count,
             "pass5_count": pass5_count,
             "pass6_count": pass6_count,
             "pass6b_count": pass6b_count,
             "pass7_count": pass7_count,
+            "pass7b_count": pass7b_count,
             "new_count": len(all_new),
         })
 
@@ -1924,13 +2391,13 @@ async def constraint_extract_node(state: PipelineState) -> dict[str, Any]:
             logger.info(
                 "ConstraintExtract: saved %d total relations "
                 "(%d existing + %d new [P1=%d, P2=%d, P3=%d, P4=%d, P4b=%d, "
-                "P5=%d, P6=%d, P6b=%d, P7=%d])",
+                "P5=%d, P6=%d, P6b=%d, P7=%d, P7b=%d])",
                 result.get("saved", 0),
                 len(existing),
                 len(all_new),
                 pass1_count, pass2_count, pass3_count,
                 pass4_count, pass4b_count, pass5_count,
-                pass6_count, pass6b_count, pass7_count,
+                pass6_count, pass6b_count, pass7_count, pass7b_count,
             )
         else:
             logger.info(
