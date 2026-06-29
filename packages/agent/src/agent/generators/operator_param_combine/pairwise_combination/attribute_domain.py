@@ -3,11 +3,11 @@ from __future__ import annotations
 import copy
 from typing import Any, Dict, List, Set, Tuple
 
-from agent.generators.common_utils.data_handle_utils import DataHandleUtil
-from agent.generators.common_utils.logger_util import LazyLogger
-from agent.generators.data_definition.constants import DataMatchMap, ParamModelConfig
-from agent.generators.data_definition.param_models_def import ParamShapeRoleRules
-from agent.generators.common_model_definition import OperatorRule, ParamAttributes, ValueWithSrcText
+from common_utils.data_handle_utils import DataHandleUtil
+from common_utils.logger_util import LazyLogger
+from data_definition.constants import DataMatchMap, ParamModelConfig
+from data_definition.param_models_def import ParamShapeRoleRules
+from common_model_definition import OperatorRule, ParamAttributes, ValueWithSrcText
 
 logger = LazyLogger()
 
@@ -73,7 +73,9 @@ class AttributeDomain:
 
     @staticmethod
     def _get_value(param_name: str, attr: ValueWithSrcText | str, attr_name: str):
-        raw, _ = DataHandleUtil.get_relevant_attribute_value(param_name, attr, attr_name)
+        raw = DataHandleUtil.get_relevant_attribute_value(param_name, attr, attr_name)
+        if isinstance(raw, tuple):
+            return raw[0]
         return raw
 
     def _extract_type_domain(self, param_name: str, param_attr: ParamAttributes) -> List[str]:
@@ -114,10 +116,14 @@ class AttributeDomain:
             ))
         if isinstance(raw, int):
             return [raw]
-        if isinstance(raw, list) and len(raw) == 2 and all(isinstance(v, int) for v in raw):
-            return list(range(raw[0], raw[1] + 1))
         if isinstance(raw, list):
-            return [int(v) for v in raw if isinstance(v, int)]
+            vals = []
+            for item in raw:
+                if isinstance(item, int):
+                    vals.append(item)
+                elif isinstance(item, list) and len(item) == 2 and all(isinstance(v, int) for v in item):
+                    vals.extend(range(item[0], item[1] + 1))
+            return sorted(set(vals)) if vals else [ParamModelConfig.DEFAULT_TENSOR_SHAPE_DIM]
         return [ParamModelConfig.DEFAULT_TENSOR_SHAPE_DIM]
 
     def _extract_array_length_domain(self, param_name: str, param_attr: ParamAttributes) -> List[int]:
@@ -126,10 +132,14 @@ class AttributeDomain:
             return [ParamModelConfig.DEFAULT_LIST_LENGTH]
         if isinstance(raw, int):
             return [raw]
-        if isinstance(raw, list) and len(raw) == 2 and all(isinstance(v, int) for v in raw):
-            return list(range(raw[0], raw[1] + 1))
         if isinstance(raw, list):
-            return [int(v) for v in raw if isinstance(v, int)]
+            vals = []
+            for item in raw:
+                if isinstance(item, int):
+                    vals.append(item)
+                elif isinstance(item, list) and len(item) == 2 and all(isinstance(v, int) for v in item):
+                    vals.extend(range(item[0], item[1] + 1))
+            return sorted(set(vals)) if vals else [ParamModelConfig.DEFAULT_LIST_LENGTH]
         return [ParamModelConfig.DEFAULT_LIST_LENGTH]
 
     def _extract_range_value_domain(self, param_name: str, param_attr: ParamAttributes) -> List[Any]:

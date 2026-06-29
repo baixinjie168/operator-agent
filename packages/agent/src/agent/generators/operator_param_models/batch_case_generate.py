@@ -10,17 +10,17 @@ import os.path
 import time
 from typing import Dict, List
 
-from agent.generators.atk_common_utils.case_config import CaseConfig
-from agent.generators.common_utils.data_handle_utils import DataHandleUtil
-from agent.generators.common_utils.logger_util import LazyLogger
-from agent.generators.data_definition.constants import GlobalConfig
-from agent.generators.data_definition.param_models_def import OperatorParameterCombination, RunPlatform, ParameterPropertyData
+from atk_common_utils.case_config import CaseConfig
+from common_utils.data_handle_utils import DataHandleUtil
+from common_utils.logger_util import LazyLogger
+from data_definition.constants import GlobalConfig
+from data_definition.param_models_def import OperatorParameterCombination, RunPlatform, ParameterPropertyData
 # [PAIRWISE] 替换旧随机生成器为 Pairwise 策略生成器
-from agent.generators.operator_param_combine.param_combination_generate import ParamCombinationGenerator
-# from operator_param_combine.pairwise_combination import PairwiseParamCombinationGenerator
-from agent.generators.operator_param_models.case_generate import CaseGenerate
-from agent.generators.param_constraint_solve.param_constraint_utils import ParamConstraintUtils
-from agent.generators.common_model_definition import OperatorRule, InterParamConstraint
+# from operator_param_combine.param_combination_generate import ParamCombinationGenerator
+from operator_param_combine.pairwise_combination import PairwiseParamCombinationGenerator
+from operator_param_models.case_generate import CaseGenerate
+from param_constraint_solve.param_constraint_utils import ParamConstraintUtils
+from scripts.common_model_definition import OperatorRule, InterParamConstraint
 
 logger = LazyLogger()
 
@@ -189,7 +189,7 @@ class OperatorCaseGenerator:
             operator_rule_data = data_handle_util.handle_operator_rule_data(operator_rule_data_path)
             effective_operator_constraint_data = DataHandleUtil.select_effective_parameters(operator_rule_data)
             operator_name, _ = os.path.splitext(file)
-            param_combination_generator = ParamCombinationGenerator(operator_rule_data=operator_rule_data,
+            param_combination_generator = PairwiseParamCombinationGenerator(operator_rule_data=operator_rule_data,
                                                                             case_num=case_num)
             # param_combination_generator = PairwiseParamCombinationGenerator(operator_rule_data=operator_rule_data,
             #                                                                 case_num=case_num)
