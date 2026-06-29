@@ -12,9 +12,9 @@ import random
 import z3
 from z3 import FPSort
 
-from agent.generators.common_utils.data_handle_utils import DataHandleUtil
-from agent.generators.common_utils.logger_util import LazyLogger
-from agent.generators.data_definition.constants import DataMatchMap
+from common_utils.data_handle_utils import DataHandleUtil
+from common_utils.logger_util import LazyLogger
+from data_definition.constants import DataMatchMap
 
 logger = LazyLogger()
 
@@ -89,7 +89,15 @@ TYPE_CONFIG = {
         'sort_fn': z3.IntSort,
         'parse_fn': _parse_int_value
     },
+    'int4': {
+        'sort_fn': z3.IntSort,
+        'parse_fn': _parse_int_value
+    },
     'int8': {
+        'sort_fn': z3.IntSort,
+        'parse_fn': _parse_int_value
+    },
+    'uint4': {
         'sort_fn': z3.IntSort,
         'parse_fn': _parse_int_value
     },
@@ -122,10 +130,6 @@ TYPE_CONFIG = {
         'parse_fn': _parse_int_value
     },
     'float': {
-        'sort_fn': z3.RealSort,
-        'parse_fn': _parse_float_value
-    },
-    'bfp16': {
         'sort_fn': z3.RealSort,
         'parse_fn': _parse_float_value
     },
@@ -445,7 +449,6 @@ class BaseVar:
 
     @staticmethod
     def _extract_values_from_array_expr(expr):
-        logger.info(f"_extract_values_from_array_expr, input expr : {expr}")
         values = set()
         if not z3.is_expr(expr):
             logger.info("expr is not expr")
@@ -455,7 +458,6 @@ class BaseVar:
         if z3.is_K(expr):
             logger.info("expr is K")
             values.add(expr.arg(0))
-            logger.info(f"expr is K , value is {values}")
             return values
         # 情况 2: Store - 修改某个索引的值
         # Z3 AST 中，Store 有 3 个参数：arg(0)=原数组, arg(1)=索引, arg(2)=新值
@@ -466,7 +468,6 @@ class BaseVar:
             # 递归处理基础数组
             base_array = expr.arg(0)
             values.update(BaseVar._extract_values_from_array_expr(base_array))
-            logger.info(f"expr is store, values : {values}")
             return values
         # 情况 3: As_Array - 由未解释函数表示的数组 (通常无法静态提取)
         if z3.is_as_array(expr):
@@ -512,28 +513,8 @@ class BaseVar:
         1. 如果 actual_val 在 input_spec 范围内，返回 input_spec (保留用户建议)。
         2. 如果 actual_val 越界，返回 actual_val (反映真实求解结果)。
         """
-        in_min, in_max = BaseVar._parse_input_spec(input_spec)
-
-        # 如果没有输入建议，直接返回实际值
-        if in_min is None or in_max is None:
-            actual_val = DataHandleUtil.abnormal_float_transfer(actual_val)
-            return actual_val
-
-        # 检查 actual_val 是否在 [in_min, in_max] 内
-        # 兼容 actual_val 为单值或元组的情况
-        if isinstance(actual_val, (tuple, list)):
-            v_min, v_max = actual_val[0], actual_val[-1]
-        else:
-            v_min, v_max = actual_val, actual_val
-
-        if all(isinstance(v, (int, float)) for v in (v_min, v_max, in_min, in_max)) and v_min >= in_min and v_max <= in_max:
-            # 情况 A: 实际解在建议范围内 -> 返回建议范围
-            input_spec = DataHandleUtil.abnormal_float_transfer(input_spec)
-            return input_spec
-        else:
-            # 情况 B: 实际解越界 -> 返回实际解
-            actual_val = DataHandleUtil.abnormal_float_transfer(actual_val)
-            return actual_val
+        actual_val = DataHandleUtil.abnormal_float_transfer(actual_val)
+        return actual_val
 
     @staticmethod
     def _resolve_range_from_set_fast(values_set, input_spec):
@@ -555,12 +536,16 @@ class BaseVar:
 
         # 2. 检查是否与输入范围一致
         in_min, in_max = BaseVar._parse_input_spec(input_spec)
-        if in_min is not None and in_max is not None:
-            # 仅当所有值均为数值类型时才进行算术比较，避免 int - str 报错
-            if all(isinstance(v, (int, float)) for v in (actual_min, actual_max, in_min, in_max)):
-                if abs(actual_min - in_min) < 1e-9 and abs(actual_max - in_max) < 1e-9:
-                    input_spec = DataHandleUtil.abnormal_float_transfer(input_spec)
-                    return input_spec
+        if in_min is not None and in_max is not None \
+                and all(isinstance(v, (int, float)) for v in (actual_min, actual_max, in_min, in_max)) \
+                and abs(actual_min - in_min) < 1e-9 and abs(actual_max - in_max) < 1e-9:
+            if len(sorted_vals) <= 2:
+                return DataHandleUtil.abnormal_float_transfer(input_spec)
+            is_consecutive = all(isinstance(v, int) for v in sorted_vals) and all(
+                sorted_vals[i + 1] == sorted_vals[i] + 1 for i in range(len(sorted_vals) - 1))
+            if is_consecutive:
+                return DataHandleUtil.abnormal_float_transfer((actual_min, actual_max))
+            return DataHandleUtil.abnormal_float_transfer(random.choice(sorted_vals))
 
         # 3. 否则返回实际值范围 (元组)
         resolve_range = (actual_min, actual_max)
@@ -611,11 +596,29 @@ class TensorVar(BaseVar):
         self.range_value = z3.Array(f"{name}.range_value", z3.IntSort(), self._element_sort)
         self.solver.add(z3.Length(self.shape) >= 0)
 
+        # 每个维度值必须 >= 0
+        idx = z3.Int('idx')
+        self.solver.add(
+            z3.ForAll([idx],
+                      z3.Implies(z3.And(idx >= 0, idx < z3.Length(self.shape)),
+                                 z3.And(self.shape[idx] > 0, self.shape[idx] < 65535)))
+        )
+
         # 3. 添加约束
         self._add_dtype_constraints(dtype, allowed_dtypes)
         self._add_format_constraints(allowed_formats)
         # 不再添加 range_value 约束，仅作为建议保存
         # self._add_initial_range_constraints(range_value)
+        if self._dtype_arg and self._dtype_arg in DataMatchMap.DTYPE_SPECS:
+            min_val, max_val, _ = DataMatchMap.DTYPE_SPECS[self._dtype_arg]
+            if min_val is not None:
+                idx = z3.Int('idx')
+                self.solver.add(z3.ForAll([idx],
+                                          z3.Implies(
+                                              idx >= 0,
+                                              z3.And(
+                                                  z3.Select(self.range_value, idx) >= min_val,
+                                                  z3.Select(self.range_value, idx) <= max_val))))
 
     def _add_dtype_constraints(self, dtype, allowed_dtypes):
         # A. 定义域约束
@@ -709,7 +712,6 @@ class ListVar(BaseVar):
         self._element_sort = BaseVar._infer_element_sort(dtype, range_value, z3.RealSort())
         self.z3_var = z3.Const(name, z3.SeqSort(self._element_sort))
         self.dtype = z3.Const(f"{name}.dtype", DType)
-        self.range_value = z3.Array(f"{name}.range_value", z3.IntSort(), self._element_sort)
         if length is not None:
             if isinstance(length, int):
                 self.solver.add(z3.Length(self.z3_var) == length)
@@ -718,6 +720,16 @@ class ListVar(BaseVar):
                 self.solver.add(z3.Length(self.z3_var) <= length[1])
         # 不再添加约束，仅作为建议保存
         # self._add_initial_range_constraints(range_value)
+        if self.dtype_arg and self.dtype_arg in DataMatchMap.DTYPE_SPECS:
+            min_val, max_val, _ = DataMatchMap.DTYPE_SPECS[self.dtype_arg]
+            if min_val is not None:
+                idx = z3.Int('idx')
+                self.solver.add(z3.ForAll([idx],
+                                          z3.Implies(
+                                              z3.And(idx >= 0, idx < z3.Length(self.z3_var)),
+                                              z3.And(
+                                                  self.z3_var[idx] >= min_val,
+                                                  self.z3_var[idx] <= max_val))))
 
     def get_z3_expr(self):
         return self.z3_var

@@ -10,8 +10,8 @@ import operator
 
 import z3
 
-from agent.generators.common_utils.logger_util import LazyLogger
-from agent.generators.param_constraint_solve.param_var_definition import TensorVar, ListVar, ScalarVar, DTYPE_MAP
+from common_utils.logger_util import LazyLogger
+from param_constraint_solve.param_var_definition import TensorVar, ListVar, ScalarVar, DTYPE_MAP
 
 logger = LazyLogger()
 
@@ -37,7 +37,7 @@ class ASTtoZ3Converter(ast.NodeVisitor):
     # --- 二元运算 ---
     _BIN_OP_MAP = {
         ast.Add: operator.add, ast.Sub: operator.sub, ast.Mult: operator.mul,
-        ast.Div: operator.truediv, ast.FloorDiv: operator.floordiv, ast.Mod: operator.mod,
+        ast.Div: operator.truediv, ast.Mod: operator.mod,
     }
     # --- 函数调用 ---
     _CALL_DISPATCH_TABLE = {
@@ -106,7 +106,7 @@ class ASTtoZ3Converter(ast.NodeVisitor):
             if node.attr == 'dtype':
                 return t_var.dtype
             elif node.attr == 'range_value':
-                return t_var.range_value
+                return t_var.z3_var
         elif isinstance(t_var, ScalarVar):
             if node.attr == 'dtype':
                 return t_var.dtype
@@ -301,12 +301,14 @@ class ASTtoZ3Converter(ast.NodeVisitor):
         # 常量折叠
         if not z3.is_expr(left) and not z3.is_expr(right):
             if isinstance(node.op, ast.Pow): return left ** right
+            if isinstance(node.op, ast.FloorDiv): return left // right
             op_func = self._BIN_OP_MAP.get(type(node.op))
             if op_func: return op_func(left, right)
             raise NotImplementedError(f"Unsupported constant op: {type(node.op).__name__}")
 
         left, right = self._promote_numeric_types(left, right)
         if isinstance(node.op, ast.Pow): return self._handle_pow(left, right)
+        if isinstance(node.op, ast.FloorDiv): return self._handle_floor_div(left, right)
 
         op_func = self._BIN_OP_MAP.get(type(node.op))
         if op_func: return op_func(left, right)
@@ -323,6 +325,17 @@ class ASTtoZ3Converter(ast.NodeVisitor):
             for _ in range(exp_val - 1): res = res * left
             return res
         raise NotImplementedError("Only small integer constant exponents supported")
+
+    def _handle_floor_div(self, left, right):
+        if not z3.is_expr(left):
+            left = z3.IntVal(left)
+        if not z3.is_expr(right):
+            right = z3.IntVal(right)
+        if z3.is_int(left) and z3.is_int(right):
+            return z3.ToInt(z3.ToReal(left) / z3.ToReal(right))
+        if z3.is_real(left) or z3.is_real(right):
+            return z3.ToInt(left / right)
+        raise TypeError(f"Floor division not supported for types: {type(left)}, {type(right)}")
 
     # --- 下标与切片 ---
     def visit_Subscript(self, node):

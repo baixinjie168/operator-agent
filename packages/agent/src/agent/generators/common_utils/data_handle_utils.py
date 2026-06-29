@@ -13,11 +13,11 @@ from typing import List, Dict
 
 from pydantic import ValidationError
 
-from agent.generators.atk_common_utils.case_config import CaseConfig
-from agent.generators.common_utils.logger_util import LazyLogger
-from agent.generators.data_definition.constants import DataMatchMap, GlobalConfig
-from agent.generators.data_definition.param_models_def import RunPlatform
-from agent.generators.common_model_definition import OperatorRule, ParamAttributes, ValueWithSrcText
+from atk_common_utils.case_config import CaseConfig
+from common_utils.logger_util import LazyLogger
+from data_definition.constants import DataMatchMap, GlobalConfig
+from data_definition.param_models_def import RunPlatform
+from common_model_definition import OperatorRule, ParamAttributes, ValueWithSrcText
 
 logger = LazyLogger()
 
@@ -109,7 +109,9 @@ class DataHandleUtil:
         common_dtype_support_data = operator_constraint_data.dtype_support_description.get(GlobalConfig.COMMON_PLATFORM,
                                                                                            [])
         target_platform_dtype_support_data.extend(common_dtype_support_data)
-        operator_constraint_data.dtype_support_description = target_platform_constraint_data
+        # [BUGFIX] 原代码误赋值为 target_platform_constraint_data（约束列表），
+        # 导致 dtype_support_description 变成 InterParamConstraint 对象列表
+        operator_constraint_data.dtype_support_description = target_platform_dtype_support_data
         if (target_platform not in operator_constraint_data.format_support_description and
                 GlobalConfig.COMMON_PLATFORM not in operator_constraint_data.format_support_description):
             logger.warning(
