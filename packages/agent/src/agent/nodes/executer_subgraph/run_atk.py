@@ -12,9 +12,14 @@ The flow:
    - ``/home/operator_atk/atk_executor/{operator_name}_executor.py``
 
 3. Run the ``atk node --backend cpu task`` command via
-   ``source <env_init> && ...`` so the CANN environment is loaded before
-   atk starts.  The command's exit code decides ``status``
-   (``success`` / ``failed`` / ``timeout``).
+   ``source <env_init> && source <conda_init> && conda activate atk_env && ...``
+   so both the CANN environment and conda are loaded before atk starts.
+   The explicit ``source`` calls are required because asyncssh runs the
+   command in a non-interactive, non-login remote shell that does NOT
+   read ``~/.bashrc`` — meaning conda's initialize hook never fires and
+   ``conda`` is not on PATH unless we source ``conda.sh`` ourselves.
+   The command's exit code decides ``status`` (``success`` / ``failed`` /
+   ``timeout``).
 
 4. Find the latest ``<operator_name>_*`` output directory under
    ``/home/operator_atk/atk_output``, download the ``report/`` xlsx and
@@ -64,7 +69,7 @@ _REMOTE_OUTPUT_ROOT = f"{_REMOTE_HOME}/atk_output"
 
 # Default CANN env init script on Ascend hosts.  Operators may override
 # per-server via ``state["server_info"]["env_init_script"]``.
-_DEFAULT_ENV_INIT = "/usr/local/Ascend/ascend-toolkit/set_env.sh"
+_DEFAULT_ENV_INIT = "source /home/marine/miniconda3/etc/profile.d/conda.sh && conda activate atk_env"
 
 # Cap on the remote ``atk node --backend cpu task`` invocation.  ATK
 # runs can be slow on large case sets; 30 minutes is the existing default
@@ -102,6 +107,7 @@ def _build_atk_command(
     executor_remote = _remote_executor_path(operator_name)
     return (
         f"cd {_REMOTE_HOME} && "
+        f"{env_init} && "
         f"atk node --backend cpu task "
         f"-c {cases_remote} "
         f"-p {executor_remote} "
@@ -181,8 +187,29 @@ async def exec_run_atk_node(state: PipelineState) -> dict[str, Any]:
 
     try:
         # ── 2. SFTP upload cases + executor ────────────────────────────────
+        # generator.py produces an ATK-friendly "expanded" JSON alongside the
+        # original cases file (see generator.py: base + "_expanded.json").
+        # ATK requires the nested-list format and does not understand the
+        # ``length`` shorthand in the original cases, so always upload the
+        # expanded variant rather than the raw cases_path.
+        cases_path_p = Path(cases_path)
+        expanded_local_path = cases_path_p.with_name(
+            cases_path_p.stem + "_expanded.json"
+        )
+        if not expanded_local_path.is_file():
+            result.status = "error"
+            result.error_message = (
+                f"expanded cases 不存在: {expanded_local_path} — "
+                f"exec_generate_atk 未生成 expanded JSON"
+            )
+            result.duration = time.monotonic() - overall_start
+            return {
+                "exec_result": result.model_dump(),
+                "error": result.error_message,
+            }
+
         try:
-            await sftp_upload(conn, cases_path, _remote_cases_path(operator_name))
+            await sftp_upload(conn, str(expanded_local_path), _remote_cases_path(operator_name))
             await sftp_upload(conn, executor_path, _remote_executor_path(operator_name))
         except SSHEngineError as e:
             logger.exception("exec_run_atk: SFTP upload failed for %s", operator_name)
@@ -283,7 +310,7 @@ async def exec_run_atk_node(state: PipelineState) -> dict[str, Any]:
 
     # ── Persist the structured ExecutionResult alongside the raw artifacts ──
     # Sibling to atk.log + report/*.xlsx so the local cache dir
-    # (``executtion_results/<operator_name>/<run_id>/``) carries everything
+    # (``execution_results/<operator_name>/<run_id>/``) carries everything
     # an operator needs to inspect / replay without re-running ATK.
     # Best-effort: never abort the main flow on a write failure.
     try:

@@ -1,6 +1,6 @@
 ---
 name: aclnn-cpu-golden-derivation
-description: Derive PyTorch CPU computation from ACLNN C++ operator signatures for ATK test scripts. Use when asked to replace dummy CPU output with real PyTorch computation in an ATK-generated test file, or when converting aclnn operator signatures to torch calls.
+description: Derive PyTorch CPU computation from ACLNN C++ operator signatures for ATK test scripts. Use when asked to replace dummy CPU output with real PyTorch computation in an ATK-generated test file, or when converting aclnn operator signatures to torch calls. The operator parameter constraints (shapes, dtypes, attr value ranges, broadcast relationships) documented throughout are REFERENCE knowledge for writing correct CPU golden code — they tell you what values the operator accepts so your code can handle them properly (defaults, None checks, clamping, dtype casting, broadcast handling). This skill does NOT instruct modifying the case JSON test data file.
 metadata:
   type: skill
 ---
@@ -29,24 +29,23 @@ This is the single most important step — it prevents runtime errors that would
 
 For each parameter, read the **"使用说明"** (Usage Notes) column. This is the most critical column — it contains:
 
-| What to look for | Example from doc | How to apply |
+| What to look for | Example from doc | How to apply in CPU code |
 |---|---|---|
-| **Integer attr valid values** | `reduction: 支持0(none)\|1(mean)\|2(sum)` | Code must clamp to `[0, 2]`; JSON `range_values` must be int 0/1/2 |
-| **Broadcast constraints** | `weightOptional: shape需要能够broadcast到target` | JSON weight/posWeight shape must broadcast to self/target; or use `[1]` |
-| **Shape relationships** | `target: 与self保持一致` | JSON self/target shapes must be identical |
+| **Integer attr valid values** | `reduction: 支持0(none)\|1(mean)\|2(sum)` | Code must clamp/round to `[0, 2]`; treat attr as int 0/1/2 |
+| **Broadcast constraints** | `weightOptional: shape需要能够broadcast到target` | Code must handle weight/posWeight broadcasting to self/target (or None) |
+| **Shape relationships** | `target: 与self保持一致` | Code assumes self/target shapes are identical |
 | **Output shape rules** | `out: 如果reduction=0，shape与self一致，其他情况shape为[1]` | CPU golden must return correct shape; ATK output inference depends on it |
-| **Data type constraints** | `epsilon: 取值仅支持1e-5` | JSON must use exactly that value; code should default to it |
-| **Data type relationships** | `target: 与self保持一致` | JSON self/target dtype must match |
-| **Supported data types** | `self: FLOAT16、FLOAT、BFLOAT16` | Verify JSON dtypes are in the supported set |
+| **Data type constraints** | `epsilon: 取值仅支持1e-5` | Code should default to that exact value |
+| **Data type relationships** | `target: 与self保持一致` | Code assumes self/target dtype match |
+| **Supported data types** | `self: FLOAT16、FLOAT、BFLOAT16` | Code must cast outputs to a supported dtype |
 
 **Also read the "返回值" table (Error Codes):**
 - `ACLNN_ERR_PARAM_INVALID (161002)` entries list exactly which conditions cause errors
 - Example: `weightOptional、posWeightOptional不能扩展成self/target形状` — this tells you the broadcast direction
 
-**Apply findings in TWO places:**
+**Apply findings when writing CPU golden code:**
 
-1. **JSON test data:** Ensure shapes, dtypes, and attr values satisfy all documented constraints. Fix BEFORE running the test.
-2. **Python CPU golden code:** Add appropriate defaults, None checks, and clamping based on the doc's value ranges.
+The documented constraints (shapes, dtypes, attr value ranges, broadcast relationships) are **reference knowledge** for generating correct CPU execution logic — they tell you what values the operator accepts, so your code can handle them properly (defaults, None checks, clamping, dtype casting, broadcast handling). You are NOT modifying the JSON test data file; you are using these constraints to write robust CPU code that matches the operator's expected behavior.
 
 **If the doc is not found:** Proceed with signature-only derivation, but be aware that runtime errors are more likely and will need iterative fixes.
 
@@ -627,7 +626,7 @@ Result:
 - **Normalization axis is last axis only (dim=-1)**: For `aclnnAddLayerNorm` and similar operators, the mean/var computation is over the LAST axis only, not over the last N axes as `torch.layer_norm` would do with a multi-dimensional `normalized_shape`. Always use manual `mean(dim=-1)` / `var(dim=-1)` computation for these operators.
 - **`additionalOutput` flag controls return count**: Some operators have a boolean flag controlling how many outputs to return. The return count must match what the NPU expects, otherwise ATK output comparison will fail.
 - **Output dtype casting is mandatory**: Always compute in fp32 (`residual.float()`), then explicitly cast each output to its NPU-expected dtype. PyTorch's `mean()` on fp16 returns fp16, but NPU always expects fp32 for statistics. Similarly, `fp32 * fp16` promotes to fp32, but NPU may expect fp16 for the main output. Without explicit `.to(input_dtype)` and `.float()` casts, error 161002 will occur.
-- **NPU dtype combinations are all-or-nothing**: The NPU `SupportInfo` requires ALL input AND output dtypes to match a pre-defined combination. You can't mix and match — if gamma is fp32, beta must also be fp32 (SupportInfo[4/5]). If all inputs are fp16, match SupportInfo[6/7]. The JSON input dtypes must be consistent with one SupportInfo entry.
+- **NPU dtype combinations are all-or-nothing**: The NPU `SupportInfo` requires ALL input AND output dtypes to match a pre-defined combination. You can't mix and match — if gamma is fp32, beta must also be fp32 (SupportInfo[4/5]). If all inputs are fp16, match SupportInfo[6/7]. Assume the JSON input dtypes are consistent with one SupportInfo entry, and cast your CPU outputs accordingly.
 
 ## Example: aclnnLayerNormWithImplMode
 
@@ -706,9 +705,9 @@ if _raw_type in _INT_TYPES and isinstance(data, list) and len(data) == 1:
 
 - [ ] **Read the ACLNN operator doc from `CANN-aclnn-api-reference` (Step 0)**
 - [ ] Extracted all parameter constraints from the doc's "使用说明" column
-- [ ] JSON shapes satisfy all documented broadcast/shape relationships
-- [ ] JSON attr values are within documented valid ranges (integers are integers, not floats)
-- [ ] JSON dtypes match documented SupportInfo combinations
+- [ ] CPU code accounts for all documented broadcast/shape relationships
+- [ ] CPU code clamps/rounds attr values to documented valid ranges (integers are integers, not floats)
+- [ ] CPU code handles dtypes per documented SupportInfo combinations
 - [ ] Read the `_SIG_STR` or `# C++ signature:` comment
 - [ ] Identified all input params, output params, and NPU-specific params to ignore
 - [ ] Derived the correct `torch.*` function name
@@ -720,10 +719,10 @@ if _raw_type in _INT_TYPES and isinstance(data, list) and len(data) == 1:
 - [ ] Computed intermediate values in fp32 (`residual.float()` / `x.float()`)
 - [ ] Each output tensor is explicitly cast to its NPU-expected dtype (main output → input dtype; statistics → fp32)
 - [ ] CPU golden return shape matches the ACLNN `out` tensor shape (no dummy `_dummy_output` fallback remaining)
-- [ ] JSON input dtypes are consistent with one NPU `SupportInfo` combination (e.g. gamma/beta same dtype)
-- [ ] For `aclTensorList*` output params: JSON has `"outputs": "out"` (or correct name) so `_SIG_ORDER` has `kind: 'output'` not `'tensorList'`
+- [ ] CPU code assumes input dtypes are consistent with one NPU `SupportInfo` combination (e.g. gamma/beta same dtype)
+- [ ] For `aclTensorList*` output params: assume the JSON defines `"outputs": "out"` (or correct name) so `_SIG_ORDER` has `kind: 'output'` not `'tensorList'`
 - [ ] For `aclTensorList*` output params: CPU golden returns `List[torch.Tensor]` directly (not wrapped in another list)
-- [ ] For `aclScalarList*` input params: JSON `inputs` has `type='scalars'` with `length` field — generator.py handles the expansion; CPU golden uses `zip(x, scalars)` pattern
+- [ ] For `aclScalarList*` input params: the JSON `inputs` has `type='scalars'` with `length` field (generator.py handles expansion) — CPU golden uses `zip(x, scalars)` pattern
 - [ ] Verified Python syntax
 - [ ] No NPU-specific imports or parameters in the CPU code
 - [ ] Existing imports are preserved (no removal/modification); new imports are added only when necessary
@@ -934,6 +933,16 @@ atk node --backend pyaclnn --devices 0,1 --is_dist true --dist_backend hccl \
 | `aclnnSendRecv` | point-to-point | `dist.send()` / `dist.recv()` |
 | `aclnnEmbeddingShard` | all-gather + embedding | `dist.all_gather()` + `F.embedding()` |
 
+### aclnnAlltoAllMatmul — `alltoAllAxesOptional` Parameter
+
+The `alltoAllAxesOptional` parameter (`aclIntArray*`) controls the AlltoAll and Permute data exchange direction. Per the CANN doc:
+- Supports **null** (empty) or `[-2, -1]`
+- When **null** is passed, the operator defaults to `[-2, -1]`, which transforms input from `(BS, H)` to `(BS/rankSize, rankSize*H)`
+
+**On the NPU side**, this parameter is always set to NULL by the generated `init_by_input_data` (the generator detects `alltoAllAxesOptional` in the signature and forces it to NULL via `_get_null_for_param`, regardless of the JSON value). This triggers the default `[-2, -1]` behavior.
+
+**On the CPU side**, this parameter is **NOT needed** — the `[-2, -1]` permutation behavior is already encoded in the manual all-to-all implementation (split `x` along dim=0 into `world_size` chunks, all-to-all, then concat along dim=1). Do not extract or use `alltoAllAxesOptional` in the CPU golden code. |
+
 ## Checklist for Distributed CPU Golden
 
 - [ ] Override `__init__` to extract `rank` and `world_size` from `self.task_result.dist_task_info`
@@ -1069,8 +1078,9 @@ posWeightOptional = _get_param("posWeightOptional", None)
 
 This lets PyTorch handle the param as "not provided" when ATK passes `None`.
 
-**However:** The real root cause is usually the **JSON test data** having incompatible shapes.
-The fix for that is in the JSON (see next section).
+**However:** The underlying cause is the **JSON test data** having incompatible shapes — your CPU
+code should defensively handle this (e.g., guard with `if weightOptional is not None`, or fall back
+to `None`) rather than assuming shapes always broadcast.
 
 ## Rule 6: Tensor Param Extraction — Use `_get_tensor()`, Not Raw `_get_param()`
 
@@ -1103,17 +1113,27 @@ preventing the `'int' object has no attribute 'float'` class of errors.
   and uses it for tensor params — when writing CPU golden code, follow this pattern
 
 **Note:** If `_get_tensor` returns `None` for a required tensor, the underlying issue is
-corrupt JSON test data — fix the JSON `dtype` and `shape` fields, then re-run.
+corrupt JSON test data (non-standard `dtype` or bad `shape`). Your CPU code should handle this
+gracefully — report it to the user so they can fix the JSON test data, but do not modify the
+JSON file yourself.
 
 ---
 
-# ATK JSON Test Data Validation & Repair
+# Operator Parameter Constraint Reference (for CPU Golden Code)
 
-When ATK test cases fail with shape/dtype errors, the root cause is often the JSON test data itself
-(ATK's random data generator doesn't enforce operator-specific constraints). Use these rules to
-diagnose and fix.
+The constraints below describe what shapes, dtypes, and attr values each operator expects.
+When generating CPU golden code, use these as reference so your code handles the parameters
+correctly (e.g., broadcasting weight to self's shape, clamping reduction to [0,2], casting
+outputs to match NPU SupportInfo). These are NOT instructions to edit the JSON test data file —
+they are the parameter rules your CPU logic must account for. The "Fix" notes describe how the
+CPU golden code should behave, not edits to make in JSON.
 
-## Problem Patterns & Fixes
+## Problem Patterns & CPU Code Handling
+
+The patterns below describe runtime errors that occur when the JSON test data violates operator
+constraints. For each, the "CPU code should" note describes how your CPU golden code must defend
+against the situation — you are NOT editing the JSON file; you are writing code that handles these
+cases gracefully and matches the operator's expected behavior.
 
 ### Pattern 1: Optional Weight/posWeight Shape Cannot Broadcast
 
@@ -1123,9 +1143,10 @@ RuntimeError: The size of tensor a (16) must match the size of tensor b (7) at n
 
 **Cause:** `weightOptional`/`posWeightOptional` shape doesn't broadcast with `self`/`target`.
 
-**Fix:** Set the weight/posWeight shape to either:
-- `[1]` (scalar, broadcasts to any shape)
-- Same shape as `self`/`target` broadcast result
+**CPU code should:** Treat weight/posWeight as optional (`None` default in `_get_param`) so PyTorch
+skips them when not applicable. If a non-`None` weight is passed with an incompatible shape, guard
+the computation or report the shape mismatch to the user (the JSON test data needs correcting by
+the user, not by this skill).
 
 ### Pattern 2: Output Shape Mismatch from Broadcast
 
@@ -1136,23 +1157,24 @@ RuntimeError: output with shape [1] doesn't match the broadcast shape [65534]
 **Cause:** ATK computes the expected output shape from the broadcast of ALL inputs including
 weight/posWeight, but `self`/`target` are too small, so PyTorch's output shape doesn't match.
 
-**Fix:** Set `self` and `target` shape to match the broadcast result of all input tensors.
-When `posWeightOptional` is large (e.g. `[65534]`), `self`/`target` should also be `[65534]`.
+**CPU code should:** Ensure the returned tensor shape matches the ACLNN `out` tensor's expected
+shape (the broadcast result of all participating inputs). The shape mismatch originates from the
+JSON test data — report to the user if the inputs are inconsistent.
 
 ### Pattern 3: Integer Attr Has Float Values
 
 **Cause:** ATK random generator produces `0.99`, `1.01`, `-0.01` for integer attrs.
 
-**Fix in JSON:** Change `range_values` to an integer within valid range.
-**Fix in Python:** Add `round()` + `clamp()` (see Rule 2 above).
+**CPU code should:** Add `round()` + `clamp()` to the valid integer range (see Rule 2 above) —
+do NOT pass raw float values to enum-like or index args.
 
 ### Pattern 4: Integer Attr Is `null` / `None`
 
 **Cause:** JSON has `"range_values": null` for an integer attr, or ATK generates `None`.
 
-**Fix in Python:** Always check `is None` before using (see Rule 1 above).
+**CPU code should:** Always check `is None` before using, and fall back to the doc's default (see Rule 1 above).
 
-## General JSON Shape Validation Rules for Loss / Reduction Operators
+## Parameter Shape Constraints for Loss / Reduction Operators (CPU Code Reference)
 
 For operators like `BCELoss`, `NLLLoss`, `CrossEntropyLoss`, `MSELoss`, `L1Loss`, etc.:
 
@@ -1163,7 +1185,7 @@ For operators like `BCELoss`, `NLLLoss`, `CrossEntropyLoss`, `MSELoss`, `L1Loss`
 5. When `reduction=0` (none), output shape = broadcast of `self`+`target`
 6. When `reduction=1/2` (mean/sum), output is a scalar — ATK should expect shape `[]` or `[1]`
 
-## General JSON Shape Validation Rules for MoE/FFN Operators
+## Parameter Shape Constraints for MoE/FFN Operators (CPU Code Reference)
 
 For operators like `aclnnFFNV3`, `aclnnMOE`, or any MoE (Mixture of Experts) operator:
 
@@ -1178,15 +1200,14 @@ For operators like `aclnnFFNV3`, `aclnnMOE`, or any MoE (Mixture of Experts) ope
 
 ### Quantization Constraint Rules
 
-7. **Quant and antiquant params MUST NOT coexist** — if the case has `antiquantScale*Optional` / `antiquantOffset*Optional`,
-   remove `scaleOptional`/`deqScaleOptional`/`scale`/`offset` params (and vice versa)
-8. Pseudo-quantized input `x` must be `fp16` or `fp32` — NOT integer dtypes (the de-quant + compute happens internally)
-9. Antiquant scale/offset shapes are per-expert: `[E, N1]` and `[E, N2]` — NOT flat `[N1]`/`[N2]`
+7. **Quant and antiquant params MUST NOT coexist** — if the case has `antiquantScale*Optional` / `antiquantOffset*Optional`, the quant params (`scaleOptional`/`deqScaleOptional`/`scale`/`offset`) should be absent (and vice versa). CPU code should check which set is present and use only that set; ignore the other.
+8. Pseudo-quantized input `x` is `fp16` or `fp32` — NOT integer dtypes (the de-quant + compute happens internally). CPU code should treat `x` as floating-point.
+9. Antiquant scale/offset shapes are per-expert: `[E, N1]` and `[E, N2]` — NOT flat `[N1]`/`[N2]`. CPU code must slice per-expert inside the dispatch loop (see CPU Golden Derivation below).
 
 ### Activation Attr Rules
 
-10. `activation.range_values` must be a valid enum string (`"gelu"`, `"relu"`, `"silu"`, `"geglu"`, `"swiglu"`, `"reglu"`) — NOT `null`
-11. `innerPrecise.range_values` must be `0` or `1` — NOT a float like `-0.01`
+10. `activation` is a valid enum string (`"gelu"`, `"relu"`, `"silu"`, `"geglu"`, `"swiglu"`, `"reglu"`) — NOT `null`. CPU code should map it to the corresponding activation function; fall back to a safe default if missing.
+11. `innerPrecise` is `0` or `1` — NOT a float like `-0.01`. CPU code should treat it as an int and ignore it for computation (NPU-specific).
 
 ### CPU Golden Derivation for MoE FFN
 
@@ -1212,12 +1233,13 @@ When reading the operator doc (Step 0), check the mat2 parameter's **"数据格�
 - The doc specifies the shape relationship: `ceil(k / k0) = k1`, `ceil(n / n0) = n1`
 
 **This determines TWO things:**
-1. **JSON**: mat2 must be defined with the **NZ shape** (5D for batch, 4D for non-batch), `format: "NZ"`
-2. **Python**: Both `AclnnFunction` (NPU side) and `Function` (CPU side) need NZ-specific handling
+1. The JSON test data defines mat2 with the **NZ shape** (5D for batch, 4D for non-batch), `format: "NZ"` — your CPU code must expect and handle this layout
+2. Both `AclnnFunction` (NPU side) and `Function` (CPU side) need NZ-specific handling
 
-## Step 0 Addition: NZ Format JSON Constraints
+## Step 0 Addition: NZ Format Parameter Constraints (CPU Code Reference)
 
-When writing the JSON test data for a WeightNZ operator, enforce ALL of the following from the doc:
+The JSON test data for a WeightNZ operator is expected to satisfy ALL of the following from the doc.
+Your CPU code must account for these constraints when decompressing NZ→dense:
 
 | Constraint | Rule | Example |
 |---|---|---|
@@ -1322,6 +1344,15 @@ The **inverse** (NZ → dense) for CPU golden:
 **CPU golden code pattern:**
 
 ```python
+# Extract input tensors and transposed flag
+self_t = _get_tensor("self")   # 3D [b, m, k] (non-transposed) or [b, k, m] (transposed)
+mat2_t = _get_tensor("mat2")   # 5D NZ format
+self_transposed = bool(_get_param("self_transposed", False))
+
+# Handle self transposed: JSON shape is (b, k, m), transpose to (b, m, k) for bmm
+if self_transposed and self_t is not None:
+    self_t = self_t.transpose(1, 2)
+
 k0, n0 = 16, 16
 
 if mat2_t.dim() == 5:
@@ -1330,7 +1361,7 @@ if mat2_t.dim() == 5:
     b = nz.shape[0]
     k_actual = self_t.shape[-1]
     k1_expected = (k_actual + k0 - 1) // k0  # ceil(k/16)
-    
+
     if nz.shape[2] == k1_expected and nz.shape[3] == k0 and nz.shape[4] == n0:
         # Non-transposed: [b, n1, k1, k0, n0]
         n1 = nz.shape[1]
@@ -1365,12 +1396,12 @@ return result
 ## Checklist for WeightNZ Operators
 
 - [ ] **Read doc** — confirmed mat2 format is NZ, extracted k0=16, n0=16
-- [ ] **JSON mat2 shape** — 5D `[b, n1, k1, 16, 16]` with correct k1=ceil(k/16), n1=ceil(n/16)
-- [ ] **JSON mat2 format** — `"format": "NZ"`
-- [ ] **JSON mat2 dtype** — **same** as self dtype (no fp16/bf16 mixing)
-- [ ] **JSON self shape** — 3D `[b, m, k]` where `ceil(k/16) = k1` matches mat2
-- [ ] **JSON cubeMathType** — integer `0` or `2`, NOT float
-- [ ] **JSON k ≥ 2, n ≥ 2** — no k=1 or n=1
+- [ ] **CPU code expects mat2 NZ shape** — 5D `[b, n1, k1, 16, 16]` with correct k1=ceil(k/16), n1=ceil(n/16)
+- [ ] **CPU code handles mat2 NZ format** — decompresses via permute+reshape+slice
+- [ ] **CPU code assumes mat2 dtype** — **same** as self dtype (no fp16/bf16 mixing)
+- [ ] **CPU code derives k from self shape** — 3D `[b, m, k]` where `ceil(k/16) = k1` matches mat2
+- [ ] **CPU code treats cubeMathType as integer** — `0` or `2`, NOT float
+- [ ] **CPU code assumes k ≥ 2, n ≥ 2** — no k=1 or n=1
 - [ ] **Python AclnnFunction** — added `get_format` returning `ACL_FORMAT_FRACTAL_NZ` for mat2
 - [ ] **Python AclnnFunction** — added `get_storage_shape` for mat2
 - [ ] **Python AclnnFunction** — `init_by_input_data` converts ND→FRACTAL_NZ via `nnopbase.create_acl_tensor`
@@ -1380,3 +1411,4 @@ return result
 - [ ] **Python imports** — added `math`, `torch.nn.functional as F`, `AclFormat`, `nnopbase`
 - [ ] **NPU error 161002** — if you see "Expected X dimension input, but got otherTensor with sizes [...]", the mat2 format is wrong (ND instead of NZ) → check `get_format` and `init_by_input_data`
 - [ ] **CPU error "batch2 must be a 3D tensor"** — mat2 is 5D NZ on CPU → need NZ→dense decompression
+- [ ] **CPU code handles self_transposed** — reads `self_transposed` from `_get_param` and transposes self before matmul: `if self_transposed: self_t = self_t.transpose(1, 2)`

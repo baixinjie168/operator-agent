@@ -6,13 +6,14 @@ the generated ``{operator_name}_atk_executor.py`` with CPU reference implementat
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
 from pathlib import Path
 from typing import Any
 
-from langchain_openai import ChatOpenAI
-
 from agent.core.config import settings
+from agent.core.llm import create_llm
 from agent.nodes.state import PipelineState
 
 logger = logging.getLogger(__name__)
@@ -52,12 +53,7 @@ async def exec_cpu_derivation_node(state: PipelineState) -> dict[str, Any]:
     try:
         skill_content = _CPU_DERIVATION_SKILL.read_text(encoding="utf-8")
 
-        llm = ChatOpenAI(
-            api_key=settings.active_api_key.get_secret_value(),
-            base_url=settings.active_base_url,
-            model=settings.active_model,
-            temperature=0.3,
-        )
+        llm = create_llm(temperature=0.3)
 
         doc_section = ""
         if operator_doc:
@@ -72,11 +68,37 @@ async def exec_cpu_derivation_node(state: PipelineState) -> dict[str, Any]:
             f"请输出修改后的完整 Python 代码。"
         )
 
-        response = await llm.ainvoke([
-            {"role": "system", "content": _SYSTEM_PROMPT},
-            {"role": "user", "content": user_prompt},
-        ])
+        system_len = len(_SYSTEM_PROMPT)
+        user_len = len(user_prompt)
+        total_prompt_chars = system_len + user_len
+        logger.info(
+            "exec_cpu_derivation: calling LLM — model=%s base_url=%s system_len=%d user_len=%d total=%d",
+            settings.active_model, settings.active_base_url, system_len, user_len, total_prompt_chars,
+        )
 
+        t_start = time.monotonic()
+        try:
+            response = await asyncio.wait_for(
+                llm.ainvoke([
+                    {"role": "system", "content": _SYSTEM_PROMPT},
+                    {"role": "user", "content": user_prompt},
+                ]),
+                timeout=300.0,
+            )
+        except asyncio.TimeoutError:
+            elapsed = time.monotonic() - t_start
+            logger.error(
+                "exec_cpu_derivation: LLM call timed out after %.1fs (300s limit) — "
+                "model=%s base_url=%s prompt_chars=%d",
+                elapsed, settings.active_model, settings.active_base_url, total_prompt_chars,
+            )
+            raise
+
+        elapsed = time.monotonic() - t_start
+        logger.info(
+            "exec_cpu_derivation: LLM response received in %.1fs — response_len=%d",
+            elapsed, len(response.content),
+        )
         logger.debug("exec_cpu_derivation: LLM raw response:\n%s", response.content)
 
         updated_code = response.content.strip()

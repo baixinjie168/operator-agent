@@ -1,5 +1,6 @@
 import re
 
+import os
 import torch
 
 
@@ -36,10 +37,16 @@ class GlobalConfig:
 
 class ParamModelConfig:
     """参数模型配置"""
-    # shape模型配置文件路径
-    SHAPE_DEFINITIONS_FILE_PATH = r"configs/shape_definitions.json"
+    # shape模型配置文件路径 —— 相对于 ``agent.generators`` 包目录的绝对路径，
+    # 避免上层进程的工作目录不同导致找不到 config。
+    _GENERATORS_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    SHAPE_DEFINITIONS_FILE_PATH = os.path.join(
+        _GENERATORS_DIR, "configs", "shape_definitions.json"
+    )
     # tensor填充值模型配置文件路径
-    GLOBAL_ROLE_DEFINITIONS_PATH = r"configs/global_role_definitions.json"
+    GLOBAL_ROLE_DEFINITIONS_PATH = os.path.join(
+        _GENERATORS_DIR, "configs", "global_role_definitions.json"
+    )
     # tensor shape中的每一维可以取得最大值
     TENSOR_SHAPE_MAX_VALUE = 65535
     # tensor shape中的每一维可以取到的最小值
@@ -174,7 +181,7 @@ class DataMatchMap:
                        "attrs": "list"}
     # 根据参数数据类型设置可取值范围，防止未提供取值范围约束时，求解结果中的取值范围超出可表示上限
     DTYPE_SPECS = {
-        "int4": (-8, 7, True), "uint4": (0, 15, True),"int":(-32768, 32767, True),
+        "int4": (-8, 7, True), "uint4": (0, 15, True), "int": (-32768, 32767, True),
         "int8": (-128, 127, True), "uint8": (0, 255, True),
         "int16": (-32768, 32767, True), "int32": (-2 ** 31, 2 ** 31 - 1, True),
         "uint32": (0, 2 ** 32 - 1, True), "uint64": (0, 2 ** 64 - 1, True),

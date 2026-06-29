@@ -8,8 +8,11 @@
 import argparse
 import os.path
 import time
-from typing import List
+from typing import List, Mapping, Union
 
+from pydantic import ValidationError
+
+from agent.generators.common_model_definition import OperatorRule
 from agent.generators.common_utils.data_handle_utils import DataHandleUtil
 from agent.generators.common_utils.logger_util import LazyLogger, init_logger, DocumentLogContext
 from agent.generators.data_definition.constants import GlobalConfig
@@ -22,20 +25,93 @@ from agent.generators.operator_param_models.batch_case_generate import OperatorC
 logger = LazyLogger()
 
 
-def single_operator_handle(operator_constraint_path, platform=RunPlatform.ATLAS_A3_TRAIN_AND_INFER_SERIES.value,
+def _build_constraint_data(operator_constraint: Union[str, os.PathLike, Mapping]) -> Union[OperatorRule, None]:
+    """根据入参类型构造 ``OperatorRule`` 约束对象。
+
+    Args:
+        operator_constraint: 支持以下两种类型：
+            * **str / os.PathLike** — 算子约束 JSON 文件路径
+            * **Mapping (dict)** — 已解析的算子约束 JSON 字典
+
+    Returns:
+        构造好的 ``OperatorRule`` 对象；若读取或校验失败则返回 ``None``。
+    """
+    if isinstance(operator_constraint, (str, os.PathLike)):
+        return DataHandleUtil.handle_operator_rule_data(operator_constraint)
+    if isinstance(operator_constraint, Mapping):
+        try:
+            return OperatorRule(**dict(operator_constraint))
+        except ValidationError as e:
+            logger.error(
+                f"Operator constraint data validation failed, err msg : {str(e)}")
+            return None
+    logger.error(
+        f"Unsupported operator_constraint type : {type(operator_constraint).__name__}, "
+        f"expected str / os.PathLike / Mapping")
+    return None
+
+
+def _resolve_operator_name(operator_constraint: Union[str, os.PathLike, Mapping],
+                           operator_rule: OperatorRule) -> str:
+    """从入参与已构造的 ``OperatorRule`` 中提取算子名。
+
+    优先使用规则对象上的 ``operator_name`` 字段；若不存在则从文件路径 / 字典名中尝试推断。
+    """
+    if operator_rule is not None and getattr(operator_rule, "operator_name", ""):
+        return operator_rule.operator_name
+    if isinstance(operator_constraint, (str, os.PathLike)):
+        return os.path.splitext(os.path.basename(os.fspath(operator_constraint)))[0]
+    return ""
+
+
+def single_operator_handle(operator_constraint, platform=RunPlatform.ATLAS_A3_TRAIN_AND_INFER_SERIES.value,
                            case_num=1) -> List:
     """
-    算子说明文档路径，若需要从网页抓取，需实现网页抓取模块。并将抓取内容保存至参数所在路径
-    :param operator_constraint_path: 算子结构化规则json文件路径
-    :param platform: 执行机对应的平台，”Atlas 推理系列产品“ -> Platform_G2, "Atlas A3 训练系列产品" -> Platform_G1
+    算子用例生成的主入口。
+
+    支持两种入参形式：
+
+    1. **约束文件路径（兼容旧用法）**
+
+       .. code-block:: python
+
+           single_operator_handle("/path/to/aclnnFoo_constraints.json",
+                                  platform="Atlas A3 训练系列产品/Atlas A3 推理系列产品",
+                                  case_num=10)
+
+    2. **约束 JSON 字典（推荐用法）**
+
+       上层（节点 / 路由 / MCP）通常已经从 ``document_versions.json_constraints`` 字段读到
+       Python 字典对象，此时可以直接传入而无需在调用方做额外的 IO：
+
+       .. code-block:: python
+
+           cases = single_operator_handle(constraints_dict, case_num=10)
+
+    :param operator_constraint: 算子约束文件路径 *或* 约束 JSON 字典
+    :param platform: 执行机对应的平台
+        - "Atlas 推理系列产品" -> Platform_G2
+        - "Atlas A3 训练系列产品" -> Platform_G1
     :param case_num: 生成用例个数
-    :return: case数据json文件
+    :return: ``List[CaseConfig]``，已通过 inter-parameter 约束求解与修正
     """
+    # 正式生成代码依赖 ``init_logger`` 初始化文件 logger，这里做一次惰性兜底。
+    try:
+        from agent.generators.common_utils.logger_util import init_logger as _init_logger, get_logger as _get_logger
+        try:
+            _get_logger()
+        except RuntimeError:
+            _init_logger(log_name="operator_generator", log_dir="./logs/generator")
+    except Exception:  # pragma: no cover - 防呆
+        pass
+
     operator_case_generate = OperatorCaseGenerator()
-    operator_name = os.path.splitext(os.path.basename(operator_constraint_path))[0]
+    operator_constraint_data = _build_constraint_data(operator_constraint)
+    if operator_constraint_data is None:
+        logger.error("Failed to build operator constraint data, abort generation")
+        return []
+    operator_name = _resolve_operator_name(operator_constraint, operator_constraint_data)
     logger.info(f"Start handle operator, operator name : {operator_name}")
-    constraint_data_path = operator_constraint_path
-    operator_constraint_data = DataHandleUtil.handle_operator_rule_data(constraint_data_path)
     effective_operator_constraint_data = DataHandleUtil.select_effective_parameters(operator_constraint_data,
                                                                                     target_platform=platform)
     if effective_operator_constraint_data is None:
@@ -130,7 +206,7 @@ def main():
         operator_name, _ = os.path.splitext(os.path.basename(args.operator_constraint_path))
         time_str = time.strftime("%Y%m%d%H%M%S", time.localtime())
         init_logger(log_name=operator_name + "_" + time_str)
-        case_list = single_operator_handle(operator_constraint_path=args.operator_constraint_path,
+        case_list = single_operator_handle(operator_constraint=args.operator_constraint_path,
                                            platform=args.platform, case_num=args.case_num)
         DataHandleUtil.save_cases_to_json(api_name=operator_name, generate_case_list=case_list,
                                           json_save_path=args.case_save_path)

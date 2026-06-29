@@ -16,7 +16,7 @@ from agent.generators.common_utils.logger_util import LazyLogger
 from agent.generators.data_definition.constants import GlobalConfig
 from agent.generators.data_definition.param_models_def import OperatorParameterCombination, RunPlatform, ParameterPropertyData
 # [PAIRWISE] 替换旧随机生成器为 Pairwise 策略生成器
-# from agent.generators.operator_param_combine.param_combination_generate import ParamCombinationGenerator
+# from operator_param_combine.param_combination_generate import ParamCombinationGenerator
 from agent.generators.operator_param_combine.pairwise_combination import PairwiseParamCombinationGenerator
 from agent.generators.operator_param_models.case_generate import CaseGenerate
 from agent.generators.param_constraint_solve.param_constraint_utils import ParamConstraintUtils
