@@ -3,11 +3,11 @@ from __future__ import annotations
 import copy
 from typing import Any, Dict, List, Set, Tuple
 
-from common_utils.data_handle_utils import DataHandleUtil
-from common_utils.logger_util import LazyLogger
-from data_definition.constants import DataMatchMap, ParamModelConfig
-from data_definition.param_models_def import ParamShapeRoleRules
-from common_model_definition import OperatorRule, ParamAttributes, ValueWithSrcText
+from agent.generators.common_utils.data_handle_utils import DataHandleUtil
+from agent.generators.common_utils.logger_util import LazyLogger
+from agent.generators.data_definition.constants import DataMatchMap, ParamModelConfig
+from agent.generators.data_definition.param_models_def import ParamShapeRoleRules
+from agent.generators.common_model_definition import OperatorRule, ParamAttributes, ValueWithSrcText
 
 logger = LazyLogger()
 

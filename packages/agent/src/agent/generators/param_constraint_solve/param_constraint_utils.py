@@ -13,16 +13,16 @@ from typing import List, Dict
 import z3
 from pydantic import BaseModel
 
-from atk_common_utils.case_config import CaseConfig
-from operator_param_models.case_generate import CaseGenerate
-from param_constraint_solve.customize_expression_solver_utils import CustomizeConstraintPatch
-from param_constraint_solve.z3_expression_solver_utils import Z3ConstraintBuilder, ExpressionPreprocessor, ASTtoZ3Converter
-from scripts.common_model_definition import InterParamConstraint, InterConstraintsRuleType, OperatorRule
-from common_utils.common_dispatcher import CommonDispatcher
-from common_utils.data_handle_utils import DataHandleUtil
-from common_utils.logger_util import LazyLogger
-from data_definition.constants import ParamModelConfig, DataMatchMap
-from data_definition.param_models_def import ParameterPropertyData, ParamRangeValueType
+from agent.generators.atk_common_utils.case_config import CaseConfig
+from agent.generators.operator_param_models.case_generate import CaseGenerate
+from agent.generators.param_constraint_solve.customize_expression_solver_utils import CustomizeConstraintPatch
+from agent.generators.param_constraint_solve.z3_expression_solver_utils import Z3ConstraintBuilder, ExpressionPreprocessor, ASTtoZ3Converter
+from agent.generators.common_model_definition import InterParamConstraint, InterConstraintsRuleType, OperatorRule
+from agent.generators.common_utils.common_dispatcher import CommonDispatcher
+from agent.generators.common_utils.data_handle_utils import DataHandleUtil
+from agent.generators.common_utils.logger_util import LazyLogger
+from agent.generators.data_definition.constants import ParamModelConfig, DataMatchMap
+from agent.generators.data_definition.param_models_def import ParameterPropertyData, ParamRangeValueType
 
 logger = LazyLogger()
 

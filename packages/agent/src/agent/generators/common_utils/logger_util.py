@@ -138,6 +138,9 @@ class ThreadSafeLogger:
         # 创建logger
         self.logger = logging.getLogger(log_name)
         self.logger.setLevel(log_level)
+        # 阻断向 root logger 传播：console_output=False 时确保控制台真正安静，
+        # 也避免与 root handler 叠加产生重复输出。
+        self.logger.propagate = False
 
         # 清除已有的handlers
         self.logger.handlers.clear()
@@ -347,7 +350,7 @@ class DocumentLogContext:
         self.doc_logger = ThreadSafeLogger(
             log_name=self.doc_name,
             log_dir=self.log_dir,
-            # 这里可以根据需要添加 rotation 等参数
+            console_output=False,
         )
 
         # 3. 将全局指针指向新的 doc logger
