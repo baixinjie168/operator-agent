@@ -13,7 +13,7 @@ from typing import List, Dict
 import z3
 from pydantic import BaseModel
 
-from atk_common_utils.case_config import CaseConfig
+from agent.generators.atk_common_utils.case_config import CaseConfig
 from operator_param_models.case_generate import CaseGenerate
 from param_constraint_solve.customize_expression_solver_utils import CustomizeConstraintPatch
 from param_constraint_solve.z3_expression_solver_utils import Z3ConstraintBuilder, ExpressionPreprocessor, ASTtoZ3Converter

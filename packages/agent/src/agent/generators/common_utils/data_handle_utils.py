@@ -13,7 +13,7 @@ from typing import List, Dict
 
 from pydantic import ValidationError
 
-from atk_common_utils.case_config import CaseConfig
+from agent.generators.atk_common_utils.case_config import CaseConfig
 from common_utils.logger_util import LazyLogger
 from data_definition.constants import DataMatchMap, GlobalConfig
 from data_definition.param_models_def import RunPlatform

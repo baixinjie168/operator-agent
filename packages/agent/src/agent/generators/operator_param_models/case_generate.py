@@ -12,7 +12,7 @@ from typing import Dict, List
 
 import numpy
 
-from atk_common_utils.case_config import CaseConfig, InputCaseConfig
+from agent.generators.atk_common_utils.case_config import CaseConfig, InputCaseConfig
 from common_utils.common_dispatcher import CommonDispatcher
 from common_utils.logger_util import LazyLogger
 from data_definition.constants import ParamModelConfig, GlobalConfig

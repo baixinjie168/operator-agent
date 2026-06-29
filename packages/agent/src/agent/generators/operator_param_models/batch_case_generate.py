@@ -10,7 +10,7 @@ import os.path
 import time
 from typing import Dict, List
 
-from atk_common_utils.case_config import CaseConfig
+from agent.generators.atk_common_utils.case_config import CaseConfig
 from common_utils.data_handle_utils import DataHandleUtil
 from common_utils.logger_util import LazyLogger
 from data_definition.constants import GlobalConfig

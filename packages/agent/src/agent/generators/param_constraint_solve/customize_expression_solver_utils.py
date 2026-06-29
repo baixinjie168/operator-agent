@@ -12,7 +12,7 @@ from typing import List, Dict, Optional
 
 import torch
 
-from atk_common_utils.case_config import CaseConfig
+from agent.generators.atk_common_utils.case_config import CaseConfig
 from common_utils.common_dispatcher import CommonDispatcher
 from common_utils.logger_util import LazyLogger
 from data_definition.common_models import DispatcherTargetType
