@@ -40,7 +40,7 @@ def _synthetic_content_hash(operator_name: str, run_id: str) -> str:
 
 def _cases_dir() -> Path:
     """Resolve the on-disk cases directory."""
-    return Path(__file__).resolve().parents[6] / "cases"
+    return Path(__file__).resolve().parents[5] / "execute_cases"
 
 
 @router.post("/execute/run", response_model=ExecuteRunResponse)
