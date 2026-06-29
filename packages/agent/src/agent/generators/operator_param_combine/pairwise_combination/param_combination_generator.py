@@ -3,20 +3,20 @@ from __future__ import annotations
 import random
 from typing import Any, Dict, List
 
-from agent.generators.common_utils.logger_util import LazyLogger
-from agent.generators.data_definition.constants import DataMatchMap, ParamModelConfig
-from agent.generators.data_definition.param_models_def import (
+from common_utils.logger_util import LazyLogger
+from data_definition.constants import DataMatchMap, ParamModelConfig
+from data_definition.param_models_def import (
     OperatorParameterCombination,
     ParameterPropertyData,
     ParameterShapeProperty,
 )
-from agent.generators.operator_param_combine.pairwise_combination.attribute_domain import (
+from operator_param_combine.pairwise_combination.attribute_domain import (
     AttributeDomain, ATTR_DTYPE, ATTR_FORMAT, ATTR_DIMENSIONS,
     ATTR_RANGE_VALUE, ATTR_ARRAY_LENGTH, ATTR_IS_OPTIONAL, ATTR_IS_OPERATOR_PARAM,
 )
-from agent.generators.operator_param_combine.pairwise_combination.constraint_filter import ConstraintProcessor
-from agent.generators.operator_param_combine.pairwise_combination.pairwise_generator import PairwiseCombinationGenerator
-from agent.generators.common_model_definition import OperatorRule
+from operator_param_combine.pairwise_combination.constraint_filter import ConstraintProcessor
+from operator_param_combine.pairwise_combination.pairwise_generator import PairwiseCombinationGenerator
+from common_model_definition import OperatorRule
 
 logger = LazyLogger()
 
@@ -142,12 +142,24 @@ class PairwiseParamCombinationGenerator:
         lv = raw_case.get(param_name, {}).get(ATTR_ARRAY_LENGTH)
         if lv is not None:
             return int(lv)
-        length_value, _ = DataHandleUtil.get_relevant_attribute_value(
+        length_raw = DataHandleUtil.get_relevant_attribute_value(
             param_name, param_attr.array_length, "array_length"
         )
+        if isinstance(length_raw, tuple):
+            length_value = length_raw[0]
+        else:
+            length_value = length_raw
         if length_value is None:
             return ParamModelConfig.DEFAULT_LIST_LENGTH
-        return random.choice(length_value) if isinstance(length_value, list) else length_value
+        if isinstance(length_value, list):
+            if not length_value:
+                return ParamModelConfig.DEFAULT_LIST_LENGTH
+            picked = random.choice(length_value)
+            if isinstance(picked, list) and len(picked) == 2:
+                return random.randint(picked[0], picked[1])
+            if isinstance(picked, int):
+                return picked
+        return int(length_value) if length_value else ParamModelConfig.DEFAULT_LIST_LENGTH
 
     def _get_range_value(self, raw_case: Dict[str, Dict[str, Any]],
                           param_name: str, param_attr, dtype: str) -> str | int | float | bool | None:

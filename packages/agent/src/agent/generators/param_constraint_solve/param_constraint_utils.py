@@ -5,6 +5,7 @@
 修改记录：2026/1/5 19:44
 功能：参数约束关系实现
 """
+import ast
 import re
 from collections import defaultdict
 from typing import List, Dict
@@ -12,16 +13,16 @@ from typing import List, Dict
 import z3
 from pydantic import BaseModel
 
-from agent.generators.atk_common_utils.case_config import CaseConfig
-from agent.generators.operator_param_models.case_generate import CaseGenerate
-from agent.generators.param_constraint_solve.customize_expression_solver_utils import CustomizeConstraintPatch
-from agent.generators.param_constraint_solve.z3_expression_solver_utils import Z3ConstraintBuilder, ExpressionPreprocessor
-from agent.generators.common_model_definition import InterParamConstraint, InterConstraintsRuleType, OperatorRule
-from agent.generators.common_utils.common_dispatcher import CommonDispatcher
-from agent.generators.common_utils.data_handle_utils import DataHandleUtil
-from agent.generators.common_utils.logger_util import LazyLogger
-from agent.generators.data_definition.constants import ParamModelConfig, DataMatchMap
-from agent.generators.data_definition.param_models_def import ParameterPropertyData
+from atk_common_utils.case_config import CaseConfig
+from operator_param_models.case_generate import CaseGenerate
+from param_constraint_solve.customize_expression_solver_utils import CustomizeConstraintPatch
+from param_constraint_solve.z3_expression_solver_utils import Z3ConstraintBuilder, ExpressionPreprocessor, ASTtoZ3Converter
+from scripts.common_model_definition import InterParamConstraint, InterConstraintsRuleType, OperatorRule
+from common_utils.common_dispatcher import CommonDispatcher
+from common_utils.data_handle_utils import DataHandleUtil
+from common_utils.logger_util import LazyLogger
+from data_definition.constants import ParamModelConfig, DataMatchMap
+from data_definition.param_models_def import ParameterPropertyData, ParamRangeValueType
 
 logger = LazyLogger()
 
@@ -29,7 +30,7 @@ logger = LazyLogger()
 class ParamSetValueFlag(BaseModel):
     dtype: bool = False
     shape: bool = False
-    range_value: bool = False
+    range_values: bool = False
     format: bool = False
     length: bool = False
 
@@ -56,11 +57,11 @@ class ParamConstraintUtils(CommonDispatcher):
         self.has_set_value_param = defaultdict(ParamSetValueFlag)
         self.relation_params = list(operator_rule_data.inputs.keys())
         self.customize_constraint_patch = CustomizeConstraintPatch(case=case,
-                                                                   case_generate_instance=case_generate_instance,
-                                                                   inter_param_constraints=inter_param_constraints,
-                                                                   operator_rule_data=operator_rule_data,
-                                                                   param_combinations=param_combinations,
-                                                                   is_generate_real_data=is_generate_real_data)
+                                                                    case_generate_instance=case_generate_instance,
+                                                                    inter_param_constraints=inter_param_constraints,
+                                                                    operator_rule_data=operator_rule_data,
+                                                                    param_combinations=param_combinations,
+                                                                    is_generate_real_data=is_generate_real_data)
         self.dtype_domain_data, self.format_domain_data = self.get_param_domain_value()
 
     def get_param_domain_value(self) -> tuple[Dict[str, List], Dict[str, List]]:
@@ -134,7 +135,7 @@ class ParamConstraintUtils(CommonDispatcher):
             relation_type = customize_constraint.expr_type
             logger.debug(f"Relation type : {relation_type}, use strict constraint logical")
             strict_check_result, relation_params = self.customize_constraint_patch.dispatch(relation_type,
-                                                                                            customize_constraint)
+                                                                                             customize_constraint)
             if not strict_check_result:
                 logger.debug(
                     f"Relation type : {relation_type}, use strict constraint logical failed, "
@@ -162,13 +163,14 @@ class ParamConstraintUtils(CommonDispatcher):
         if dtype_domain is None:
             logger.error(f"Param : {param_name}, dtype domain is not relevant")
             return []
+        dtype_domain = [DataMatchMap.ACL_DTYPE_TRANSFER_TENSOR_MAP.get(dtype) for dtype in dtype_domain]
         return dtype_domain
 
     def generate_format_string_domain(self, param_name: str) -> List[str]:
         """
         获取数据格式format的可取值，用列表表示
         :param param_name: 参数名称
-        :return : List[format]
+        :return: List[format]
         """
         param_attribute = self.operator_rule_data.inputs.get(param_name)
         if param_attribute is None:
@@ -198,117 +200,151 @@ class ParamConstraintUtils(CommonDispatcher):
                 expr = re.sub(rf"\b{re.escape(key)}\b", value, expr)
         return expr
 
-    def check_expr_conflicts(self, expr_list: List[str], param_attr="") -> bool:
+    def choice_no_conflicts_expr(self, builder: Z3ConstraintBuilder, param_union_expr: List[str],
+                                 param_static_expr_list: List[str]) -> None:
         """
-        判断列表中的表达式是否冲突
-        :param expr_list: 表达式列表
-        :param param_attr: 参数属性名称，日志记录
-        :return: True(不冲突)/False(冲突)
-        """
-        try:
-            builder = Z3ConstraintBuilder()
-            self.declare_param_in_z3(builder=builder)
-            expr_dict = {f"expr : {expr}": expr for index, expr in enumerate(expr_list)}
-            builder.add_constraints(expr_dict)
-            check_status = builder.solver.check()
-            if check_status == z3.sat:
-                return True
-            logger.debug("Check param value expr, result : conflicts, conflicting expression : ")
-            unsat_cores = builder.solver.unsat_core()
-            for core in unsat_cores:
-                logger.error(f"   {core}   ")
-            return False
-        except Exception as e:
-            logger.error(f"Expr check conflicts, param attr : {param_attr}, err msg : {str(e)}")
-            return False
+        筛选和参数静态表达式不冲突的初始值表达式。
+        使用 Z3 push/pop 增量检测，避免重复创建求解器。同时将确认不冲突的表达式永久添加至 builder。
 
-    def choice_no_conflicts_expr(self, param_union_expr: List[str], param_static_expr_list: List[str]) -> List[str]:
+        :param builder: 已声明变量并添加了 JSON 约束的 Z3ConstraintBuilder 实例
+        :param param_union_expr: 关联表达式列表（会被原地修改）
+        :param param_static_expr_list: 参数静态表达式列表
         """
-        筛选和参数静态表达式(每个参数的静态表达式，parameters_constraint)
-        以及关联表达式(多个参数间的约束表达式，inter_parameter_constraints)不冲突的初始值表达式，避免因为参数初始值设置不合理导致约束求解失败
-        :param param_union_expr: 关联表达式(多个参数间的约束表达式，inter_parameter_constraints)
-        :param param_static_expr_list: 参数静态表达式(每个参数的静态表达式，parameters_constraint)
-        :return: 所有不发生冲突的表达式
-        """
-        no_conflicts_expr_list = param_union_expr
+        if not param_static_expr_list:
+            return
+
+        # 快速路径：一次添加全部，若 SAT 直接返回
+        builder.solver.push()
         for static_expr in param_static_expr_list:
-            logger.debug(f"Check param value expr : {static_expr}")
-            no_conflicts_expr_list.append(static_expr)
-            if not self.check_expr_conflicts(no_conflicts_expr_list, param_attr="shape"):
-                no_conflicts_expr_list.remove(static_expr)
-            else:
-                logger.debug("Check param value expr, result : no conflicts")
-        logger.debug(f"No conflicts expr list : {no_conflicts_expr_list}")
-        return no_conflicts_expr_list
+            replace_expr = ExpressionPreprocessor.apply_keyword_replace(static_expr)
+            if ExpressionPreprocessor.validate_expression(replace_expr):
+                tree = ast.parse(replace_expr, mode='eval')
+                converter = ASTtoZ3Converter(builder)
+                z3_constraint = converter.visit(tree.body)
+                if z3_constraint is not None:
+                    builder.solver.assert_and_track(z3_constraint, f"batch_chk:{static_expr[:50]}")
+        if builder.solver.check() == z3.sat:
+            builder.solver.pop()
+            # 永久添加所有静态表达式
+            for static_expr in param_static_expr_list:
+                param_union_expr.append(static_expr)
+                replace_expr = ExpressionPreprocessor.apply_keyword_replace(static_expr)
+                if ExpressionPreprocessor.validate_expression(replace_expr):
+                    tree = ast.parse(replace_expr, mode='eval')
+                    converter = ASTtoZ3Converter(builder)
+                    z3_constraint = converter.visit(tree.body)
+                    if z3_constraint is not None:
+                        builder.solver.assert_and_track(z3_constraint, f"perm:{static_expr[:50]}")
+            logger.debug(f"Batch check SAT, all {len(param_static_expr_list)} exprs kept")
+            return
+        builder.solver.pop()
 
-    def build_param_dtype_constraint(self, constraint_exprs: List[str]) -> \
-            List[str]:
+        # 回退路径：逐个 push/pop 增量检测
+        for static_expr in param_static_expr_list:
+            builder.solver.push()
+            try:
+                replace_expr = ExpressionPreprocessor.apply_keyword_replace(static_expr)
+                is_sat = False
+                if ExpressionPreprocessor.validate_expression(replace_expr):
+                    tree = ast.parse(replace_expr, mode='eval')
+                    converter = ASTtoZ3Converter(builder)
+                    z3_constraint = converter.visit(tree.body)
+                    if z3_constraint is not None:
+                        builder.solver.assert_and_track(z3_constraint, f"chk:{static_expr[:50]}")
+                        if builder.solver.check() == z3.sat:
+                            is_sat = True
+            finally:
+                builder.solver.pop()
+
+            if is_sat:
+                logger.debug(f"Check param value expr, result : no conflicts, expr : {static_expr}")
+                param_union_expr.append(static_expr)
+                # 永久添加
+                replace_expr = ExpressionPreprocessor.apply_keyword_replace(static_expr)
+                if ExpressionPreprocessor.validate_expression(replace_expr):
+                    tree = ast.parse(replace_expr, mode='eval')
+                    converter = ASTtoZ3Converter(builder)
+                    z3_constraint = converter.visit(tree.body)
+                    if z3_constraint is not None:
+                        builder.solver.assert_and_track(z3_constraint, f"perm:{static_expr[:50]}")
+
+    def build_param_dtype_constraint(self, constraint_exprs: List[str],
+                                     builder: Z3ConstraintBuilder, check: bool = True) -> None:
         """
         查找是否有参数的dtype属性取值已确定，如果有，是否和已有的规则冲突，如不冲突，则添加为求解条件，避免每次求解结构都相同，如冲突，则不添加
-        :param constraint_exprs: 约束表达式对象
-        :return: dtype的约束表达式列表
+        :param constraint_exprs: 约束表达式对象（会被原地修改）
+        :param builder: Z3求解器构建器
+        :param check: 是否立即执行冲突检测
         """
-        logger.debug("Start build param dtype constraint")
         static_value_exprs = []
         relation_param = list(self.case_input_map.keys())
         for param in relation_param:
             static_value_exprs.append(f"{param}.dtype == '{self.case_input_map.get(param).dtype}'")
-        no_conflicts_dtype_expr = self.choice_no_conflicts_expr(param_union_expr=constraint_exprs,
-                                                                param_static_expr_list=static_value_exprs)
-        logger.debug("End build param dtype constraint")
-        return no_conflicts_dtype_expr
+        if check:
+            self.choice_no_conflicts_expr(builder=builder, param_union_expr=constraint_exprs,
+                                          param_static_expr_list=static_value_exprs)
+        else:
+            constraint_exprs.extend(static_value_exprs)
 
-    def build_param_range_value_constraint(self, constraint_exprs: List[str]) -> List[str]:
+    def build_param_range_value_constraint(self, constraint_exprs: List[str],
+                                            builder: Z3ConstraintBuilder, check: bool = True) -> None:
         """
         对于range_value，如果range_value是浮点数或整数，则直接加入求解条件表达式，否则不加入求解表达式
-        :param constraint_exprs: 约束条件数据
-        :return: range的约束表达式列表
+        :param constraint_exprs: 约束条件数据（会被原地修改）
+        :param builder: Z3求解器构建器
+        :param check: 是否立即执行冲突检测
         """
-        logger.debug("Start build param range value constraint")
         static_range_value_expr_list = []
         relation_params = list(self.case_input_map.keys())
         for param_name in relation_params:
             param_attr = self.operator_rule_data.inputs.get(param_name)
             if param_attr is None:
                 param_attr = self.operator_rule_data.outputs.get(param_name)
-            param_range_value_constraint, _ = DataHandleUtil.get_relevant_attribute_value(
-                param_name, param_attr.allowed_range_value if param_attr else None, "allowed_range_value")
+            if param_attr is None:
+                continue
+            param_range_value_constraint, value_type = DataHandleUtil.get_relevant_attribute_value(
+                param_name, param_attr.allowed_range_value, "allowed_range_value")
             if param_range_value_constraint is None:
                 continue
+            param_range_value_expr_list = []
             for value_rule in param_range_value_constraint:
-                param_range_value_expr_list = []
-                if isinstance(value_rule, list) and len(value_rule) >= 2:
-                    param_range_value_expr_list.append(
-                        f"({param_name}.range_value > {value_rule[0]} and {param_name}.range_value < {value_rule[1]})")
-                elif isinstance(value_rule, (int, float, bool)):
-                    param_range_value_expr_list.append(f"{param_name}.range_value == {value_rule}")
-                elif isinstance(value_rule, str):
-                    if value_rule.strip() in ("None", ""):
-                        logger.warning(f"Skip invalid range value expression: '{value_rule}'")
-                        continue
-                    value_rule = ParamConstraintUtils.adapter_dtype_in_expr(value_rule)
-                    if ExpressionPreprocessor.validate_expression(value_rule):
-                        param_range_value_expr_list.append(value_rule)
+                if value_type == ParamRangeValueType.ENUM.value:
+                    if value_rule is None:
+                        param_range_value_expr_list.append(f"{param_name} is {value_rule}")
+                    elif isinstance(value_rule, str):
+                        param_range_value_expr_list.append(f"{param_name}.range_value == '{value_rule}'")
+                    elif isinstance(value_rule, list):
+                        value_rule_expr_list = []
+                        for val_index, val in enumerate(value_rule):
+                            value_rule_expr_list.append(f"{param_name}[{val_index}] == {val}")
+                        value_rule_expr_str = " and ".join(value_rule_expr_list)
+                        value_rule_expr_str = f"({value_rule_expr_str})"
+                        param_range_value_expr_list.append(value_rule_expr_str)
                     else:
                         param_range_value_expr_list.append(f"{param_name}.range_value == {value_rule}")
                 else:
-                    logger.warning(f"Can't match range value expression : '{value_rule}'")
-                param_range_value_expr = " or ".join(param_range_value_expr_list)
-                static_range_value_expr_list.append(param_range_value_expr)
-        no_conflicts_range_value_expr = self.choice_no_conflicts_expr(param_union_expr=constraint_exprs,
-                                                                      param_static_expr_list=static_range_value_expr_list)
-        logger.debug("End build param range value constraint")
-        return no_conflicts_range_value_expr
+                    if len(value_rule) >= 2:
+                        param_range_value_expr_list.append(
+                            f"({param_name}.range_value > {value_rule[0]} and {param_name}.range_value < {value_rule[1]})")
+                    else:
+                        logger.error(f"Param name : {param_name}, allowed range value is invalid, type : 'range', value : '{value_rule}'")
+            param_range_value_expr = " or ".join(param_range_value_expr_list)
+            static_range_value_expr_list.append(param_range_value_expr)
+        if check:
+            self.choice_no_conflicts_expr(builder=builder, param_union_expr=constraint_exprs,
+                                          param_static_expr_list=static_range_value_expr_list)
+        else:
+            constraint_exprs.extend(static_range_value_expr_list)
 
-    def build_param_shape_constraint(self, constraint_exprs: List[str]) -> \
-            List[str]:
+    def build_param_shape_constraint(self, constraint_exprs: List[str],
+                                     builder: Z3ConstraintBuilder, check: bool = True) -> None:
         """
-        对于shape,如果该参数的parameter_constraints中shape约束乜有axis_value的约束表达式，则不添加确定值的约束，避免约束冲突，
+        对于shape,如果该参数的parameter_constraints中shape约束没有axis_value的约束表达式，则不添加确定值的约束，避免约束冲突，
         此时将axis_value中的约束表达式添加至列表中，如果没有axis_value的约束表达式，则将shape当前取值添加至表达式列表
-        :param constraint_exprs: 约束表达式对象
-        :return: shape的约束表达式列表
+        :param constraint_exprs: 约束表达式对象（会被原地修改）
+        :param builder: Z3求解器构建器
+        :param check: 是否立即执行冲突检测
         """
-        logger.debug("Start build param shape constraint")
         shape_static_value_expr_list = []
         relation_params = list(self.case_input_map.keys())
         for param_name in relation_params:
@@ -320,46 +356,51 @@ class ParamConstraintUtils(CommonDispatcher):
                 continue
             shape_static_value_expr_list.append(f"{param_name}.shape == {case_param_shape}")
 
-        no_conflicts_shape_expr = self.choice_no_conflicts_expr(param_union_expr=constraint_exprs,
-                                                                param_static_expr_list=shape_static_value_expr_list)
-        logger.debug("End build param shape constraint")
-        return no_conflicts_shape_expr
+        if check:
+            self.choice_no_conflicts_expr(builder=builder, param_union_expr=constraint_exprs,
+                                          param_static_expr_list=shape_static_value_expr_list)
+        else:
+            constraint_exprs.extend(shape_static_value_expr_list)
 
-    def build_param_format_constraint(self, constraint_exprs: List[str]) -> List[str]:
+    def build_param_format_constraint(self, constraint_exprs: List[str],
+                                      builder: Z3ConstraintBuilder, check: bool = True) -> None:
         """
         查找是否有参数的format属性取值已确定，如果有，是否和已有的规则冲突，如不冲突，则添加为求解条件，避免每次求解结构都相同，如冲突，则不添加
-        :param constraint_exprs: 约束表达式对象
-        :return: format的约束表达式列表
+        :param constraint_exprs: 约束表达式对象（会被原地修改）
+        :param builder: Z3求解器构建器
+        :param check: 是否立即执行冲突检测
         """
-        logger.debug("Start build param format constraint")
         format_static_value_expr_list = []
         relation_param = list(self.case_input_map.keys())
         for param in relation_param:
             if self.case_input_map.get(param).format is not None:
                 format_static_value_expr_list.append(f"{param}.format == '{self.case_input_map.get(param).format}'")
-        no_conflicts_format_expr = self.choice_no_conflicts_expr(param_union_expr=constraint_exprs,
-                                                                 param_static_expr_list=format_static_value_expr_list)
-        logger.debug("End build param format constraint")
-        return no_conflicts_format_expr
+        if check:
+            self.choice_no_conflicts_expr(builder=builder, param_union_expr=constraint_exprs,
+                                          param_static_expr_list=format_static_value_expr_list)
+        else:
+            constraint_exprs.extend(format_static_value_expr_list)
 
-    def build_param_length_constraint(self, constraint_exprs: List[str]) -> List[str]:
-        logger.debug("Start build param length constraint")
+    def build_param_length_constraint(self, constraint_exprs: List[str],
+                                      builder: Z3ConstraintBuilder, check: bool = True) -> None:
         length_static_value_expr_list = []
         relation_param = list(self.case_input_map.keys())
         for param in relation_param:
             if self.case_input_map.get(param).type in ParamModelConfig.LIST_ATK_TYPE and self.case_input_map.get(
                     param).length is not None:
                 length_static_value_expr_list.append(f"len({param}) == {self.case_input_map.get(param).length}")
-        no_conflicts_length_expr = self.choice_no_conflicts_expr(param_union_expr=constraint_exprs,
-                                                                 param_static_expr_list=length_static_value_expr_list)
-        logger.debug("End build param length constraint")
-        return no_conflicts_length_expr
+        if check:
+            self.choice_no_conflicts_expr(builder=builder, param_union_expr=constraint_exprs,
+                                          param_static_expr_list=length_static_value_expr_list)
+        else:
+            constraint_exprs.extend(length_static_value_expr_list)
 
-    def declare_param_in_z3(self, builder: Z3ConstraintBuilder):
+    def declare_param_in_z3(self, builder: Z3ConstraintBuilder, is_print_log = False):
         """
         声明每个变量，指定变量的type(Tensor, scalar，list)，以及数据类型(float, int, string, bool)
-        :param relation_parameters: 约束相关的参数名称
+        :param is_print_log: 日志中是否打印详细信息
         :param builder: z3求解器实例
+
         :return: None
         """
         for param_name in self.case_input_map.keys():
@@ -375,10 +416,10 @@ class ParamConstraintUtils(CommonDispatcher):
                 dtype_domain = self.dtype_domain_data.get(param_name)
                 format_domain = self.format_domain_data.get(param_name)
                 builder.declare_var(param_name, type_hint=z3_param_type, dtype=param_dtype, allowed_dtypes=dtype_domain,
-                                    allowed_formats=format_domain, range_value=range_values)
+                                    allowed_formats=format_domain, range_value=range_values, is_print_log=is_print_log)
             else:
                 builder.declare_var(param_name, z3_param_type, dtype=param_dtype, range_value=range_values,
-                                    length=param_length)
+                                    length=param_length, is_print_log=is_print_log)
 
     def solve_z3_constraints(self, z3_constraints: List[InterParamConstraint]):
         """
@@ -389,19 +430,24 @@ class ParamConstraintUtils(CommonDispatcher):
                      constraint_expr.expr is not None and constraint_expr.expr]
         logger.info(f"Start solving solution of constraints by Z3, operator name : {self.operator_name}")
         builder = Z3ConstraintBuilder()
-        self.declare_param_in_z3(builder=builder)
-        dtype_expr_list = self.build_param_dtype_constraint(expr_list)
-        format_expr_list = self.build_param_format_constraint(expr_list)
-        shape_expr_list = self.build_param_shape_constraint(expr_list)
-        range_value_expr_list = self.build_param_range_value_constraint(expr_list)
-        length_value_expr_list = self.build_param_length_constraint(expr_list)
-        expr_list.extend(dtype_expr_list)
-        expr_list.extend(format_expr_list)
-        expr_list.extend(shape_expr_list)
-        expr_list.extend(range_value_expr_list)
-        expr_list.extend(length_value_expr_list)
-        expr_dict = {f"expr : {expr}": expr for index, expr in enumerate(expr_list)}
-        builder.add_constraints(expr_str_dict=expr_dict)
+        self.declare_param_in_z3(builder=builder, is_print_log=True)
+
+        # 先添加 JSON 约束到求解器
+        json_expr_dict = {f"json:{expr[:50]}": expr for expr in expr_list}
+        builder.add_constraints(expr_str_dict=json_expr_dict)
+
+        # 收集所有静态表达式，一次性批量冲突检测（5 次 choice_no_conflicts_expr → 1 次）
+        all_static = []
+        self.build_param_dtype_constraint(all_static, builder, check=False)
+        self.build_param_format_constraint(all_static, builder, check=False)
+        self.build_param_shape_constraint(all_static, builder, check=False)
+        self.build_param_range_value_constraint(all_static, builder, check=False)
+        self.build_param_length_constraint(all_static, builder, check=False)
+
+        if all_static:
+            self.choice_no_conflicts_expr(builder=builder, param_union_expr=expr_list,
+                                          param_static_expr_list=all_static)
+
         logger.info("Start whole expr solve")
         solver_result = builder.solve()
         if not solver_result:

@@ -139,12 +139,6 @@ class ThreadSafeLogger:
         self.logger = logging.getLogger(log_name)
         self.logger.setLevel(log_level)
 
-        # 阻止日志冒泡到 root logger:
-        # 默认 propagate=True 时, 消息会沿父 logger 链传递, 命中 root
-        # logger 上由 logging.basicConfig() 或其他代码添加的 StreamHandler,
-        # 即便本 logger 的 console_output=False 也会打印到控制台.
-        self.logger.propagate = False
-
         # 清除已有的handlers
         self.logger.handlers.clear()
 
@@ -241,14 +235,14 @@ _global_logger: Optional[ThreadSafeLogger] = None
 def init_logger(
     log_name: Optional[str] = None,
     log_dir: str = "./logs",
-    log_level: int = logging.ERROR,
+    log_level: int = logging.DEBUG,
     rotation_type: str = "time",
     rotation_interval: int = 1,
     rotation_when: str = "midnight",
     rotation_backup_count: int = 7,
     max_bytes: int = 10 * 1024 * 1024,
     size_backup_count: int = 5,
-    console_output: bool = False
+    console_output: bool = True
 ) -> ThreadSafeLogger:
     """
     初始化全局日志实例
