@@ -14,7 +14,7 @@ from z3 import FPSort
 
 from common_utils.data_handle_utils import DataHandleUtil
 from common_utils.logger_util import LazyLogger
-from data_definition.constants import DataMatchMap
+from data_definition.constants import DataMatchMap, ParamModelConfig
 
 logger = LazyLogger()
 
@@ -596,13 +596,25 @@ class TensorVar(BaseVar):
         self.range_value = z3.Array(f"{name}.range_value", z3.IntSort(), self._element_sort)
         self.solver.add(z3.Length(self.shape) >= 0)
 
-        # 每个维度值必须 >= 0
+        # 每个维度值必须 > 0
         idx = z3.Int('idx')
         self.solver.add(
             z3.ForAll([idx],
                       z3.Implies(z3.And(idx >= 0, idx < z3.Length(self.shape)),
-                                 z3.And(self.shape[idx] > 0, self.shape[idx] < 65535)))
+                                 self.shape[idx] > 0))
         )
+
+        # 约束 tensor 元素总数上限：shape 各维度乘积 < TENSOR_TENSOR_ELEMENT_LIMIT
+        prod_func_name = f"__prod_shape_{self.name}"
+        SeqIntSort = z3.SeqSort(z3.IntSort())
+        ProdShape = z3.RecFunction(prod_func_name, SeqIntSort, z3.IntSort())
+        s_var = z3.Const(f"{prod_func_name}_arg", SeqIntSort)
+        z3.RecAddDefinition(ProdShape, [s_var],
+            z3.If(z3.Length(s_var) == 0,
+                   z3.IntVal(1),
+                   s_var[0] * ProdShape(
+                       z3.SubSeq(s_var, 1, z3.Length(s_var) - 1))))
+        self.solver.add(ProdShape(self.shape) < ParamModelConfig.TENSOR_TENSOR_ELEMENT_LIMIT)
 
         # 3. 添加约束
         self._add_dtype_constraints(dtype, allowed_dtypes)
