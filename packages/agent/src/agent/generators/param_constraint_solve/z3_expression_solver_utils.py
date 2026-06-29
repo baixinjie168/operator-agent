@@ -33,9 +33,9 @@ from typing import List, Dict
 
 import z3
 
-from common_utils.logger_util import LazyLogger
-from data_definition.constants import DataMatchMap
-from param_constraint_solve.expression_preprocess_utils import ASTtoZ3Converter, TensorVar, ScalarVar, ListVar
+from agent.generators.common_utils.logger_util import LazyLogger
+from agent.generators.data_definition.constants import DataMatchMap
+from agent.generators.param_constraint_solve.expression_preprocess_utils import ASTtoZ3Converter, TensorVar, ScalarVar, ListVar
 
 logger = LazyLogger()
 

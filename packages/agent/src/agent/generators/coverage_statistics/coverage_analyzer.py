@@ -41,11 +41,11 @@ PROJECT_SCRIPTS_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__))
 if PROJECT_SCRIPTS_DIR not in sys.path:
     sys.path.insert(0, PROJECT_SCRIPTS_DIR)
 
-from common_utils.logger_util import LazyLogger, init_logger
-from modeling_coverage.attribute_defs import build_domain_from_constraint
-from modeling_coverage.case_parser import parse_case_file
-from modeling_coverage.coverage_calculator import compute_coverage
-from modeling_coverage.reporter import format_report, format_markdown_report_grouped
+from agent.generators.common_utils.logger_util import LazyLogger, init_logger
+from agent.generators.coverage_statistics.modeling_coverage.attribute_defs import build_domain_from_constraint
+from agent.generators.coverage_statistics.modeling_coverage.case_parser import parse_case_file
+from agent.generators.coverage_statistics.modeling_coverage.coverage_calculator import compute_coverage
+from agent.generators.coverage_statistics.modeling_coverage.reporter import format_report, format_markdown_report_grouped
 
 logger = LazyLogger()
 

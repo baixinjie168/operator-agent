@@ -13,14 +13,14 @@ from typing import Dict, List
 import numpy
 
 from agent.generators.atk_common_utils.case_config import CaseConfig, InputCaseConfig
-from common_utils.common_dispatcher import CommonDispatcher
-from common_utils.logger_util import LazyLogger
-from data_definition.constants import ParamModelConfig, GlobalConfig
-from data_definition.param_models_def import BaseRuleModel, \
+from agent.generators.common_utils.common_dispatcher import CommonDispatcher
+from agent.generators.common_utils.logger_util import LazyLogger
+from agent.generators.data_definition.constants import ParamModelConfig, GlobalConfig
+from agent.generators.data_definition.param_models_def import BaseRuleModel, \
     ParamShapeRoleRules, ParamRangeRoleRules, DispatcherTargetType, ParameterPropertyData
-from operator_param_models.param_dtype_models import ParamDtypeModel
-from operator_param_models.param_range_models import ParamRangeValueModelStatic
-from operator_param_models.param_shape_models import ParamShapeModel
+from agent.generators.operator_param_models.param_dtype_models import ParamDtypeModel
+from agent.generators.operator_param_models.param_range_models import ParamRangeValueModelStatic
+from agent.generators.operator_param_models.param_shape_models import ParamShapeModel
 
 logger = LazyLogger()
 
