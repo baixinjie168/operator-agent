@@ -24,6 +24,7 @@ dependencies = [
     "numpy>=1.26",
     "scipy>=1.12",
     "z3-solver>=4.12",
+    "torch>=2.7",
     "pyyaml>=6.0",
     "packaging>=23.0",
 ]
