@@ -64,12 +64,12 @@ def complete_run(run_id: str, result: dict, error: str | None = None, doc_id: in
     db = get_db()
     if error:
         db.conn.execute(
-            "UPDATE pipeline_runs SET status = 'failed', error = ?, completed_at = datetime('now') WHERE run_id = ?",
+            "UPDATE pipeline_runs SET status = 'failed', error = ?, completed_at = datetime('now', 'localtime') WHERE run_id = ?",
             (error, run_id),
         )
     else:
         db.conn.execute(
-            "UPDATE pipeline_runs SET status = 'completed', result_json = ?, doc_id = ?, completed_at = datetime('now') WHERE run_id = ?",
+            "UPDATE pipeline_runs SET status = 'completed', result_json = ?, doc_id = ?, completed_at = datetime('now', 'localtime') WHERE run_id = ?",
             (json.dumps(result, ensure_ascii=False), doc_id, run_id),
         )
     db.conn.commit()
@@ -497,7 +497,7 @@ def update_server(server_id: int, **fields) -> bool:
     if not updates:
         return False
     set_clause = ", ".join(f"{k} = ?" for k in updates)
-    set_clause += ", updated_at = datetime('now')"
+    set_clause += ", updated_at = datetime('now', 'localtime')"
     values = list(updates.values()) + [server_id]
     db = get_db()
     db.conn.execute(f"UPDATE servers SET {set_clause} WHERE id = ?", values)

@@ -119,7 +119,7 @@ class Database:
                     params          TEXT NOT NULL,
                     param_optional  TEXT NOT NULL DEFAULT '{}',
                     source_citation TEXT NOT NULL,
-                    created_at      TEXT DEFAULT (datetime('now'))
+                    created_at      TEXT DEFAULT (datetime('now', 'localtime'))
                 );
                 CREATE INDEX IF NOT EXISTS idx_param_relations_doc_id
                     ON param_relations(doc_id);
@@ -139,7 +139,7 @@ class Database:
                     parameters       TEXT NOT NULL DEFAULT '[]',
                     full_signature   TEXT NOT NULL DEFAULT '',
                     raw_code         TEXT NOT NULL DEFAULT '',
-                    created_at       TEXT DEFAULT (datetime('now')),
+                    created_at       TEXT DEFAULT (datetime('now', 'localtime')),
                     UNIQUE(doc_id, function_name)
                 );
                 CREATE INDEX IF NOT EXISTS idx_function_signatures_doc_id
@@ -157,7 +157,7 @@ class Database:
                     doc_id          INTEGER NOT NULL REFERENCES document_versions(id),
                     platform_name   TEXT NOT NULL,
                     is_supported    INTEGER NOT NULL DEFAULT 0,
-                    created_at      TEXT DEFAULT (datetime('now')),
+                    created_at      TEXT DEFAULT (datetime('now', 'localtime')),
                     UNIQUE(doc_id, platform_name)
                 );
                 CREATE INDEX IF NOT EXISTS idx_platform_support_doc_id
@@ -210,7 +210,7 @@ class Database:
                     error_code      INTEGER NOT NULL,
                     descriptions    TEXT NOT NULL DEFAULT '[]',
                     source_citation TEXT NOT NULL DEFAULT '',
-                    created_at      TEXT DEFAULT (datetime('now')),
+                    created_at      TEXT DEFAULT (datetime('now', 'localtime')),
                     UNIQUE(doc_id, function_name, return_value, error_code)
                 );
                 CREATE INDEX IF NOT EXISTS idx_return_codes_doc_id
@@ -229,7 +229,7 @@ class Database:
                     function_name   TEXT NOT NULL DEFAULT '',
                     platform        TEXT NOT NULL DEFAULT 'common',
                     combo           TEXT NOT NULL DEFAULT '{}',
-                    created_at      TEXT DEFAULT (datetime('now'))
+                    created_at      TEXT DEFAULT (datetime('now', 'localtime'))
                 );
                 CREATE INDEX IF NOT EXISTS idx_dtype_combos_doc_id
                     ON dtype_combinations(doc_id);
@@ -278,7 +278,7 @@ class Database:
                     operator_name        TEXT NOT NULL,
                     product_support      TEXT NOT NULL DEFAULT '[]',
                     function_explanation TEXT NOT NULL DEFAULT '{}',
-                    created_at           TEXT DEFAULT (datetime('now'))
+                    created_at           TEXT DEFAULT (datetime('now', 'localtime'))
                 );
                 CREATE INDEX IF NOT EXISTS idx_constraints_result_doc_id
                     ON constraints_result(doc_id);
@@ -473,8 +473,8 @@ class Database:
                     completed_count INTEGER NOT NULL DEFAULT 0,
                     failed_count    INTEGER NOT NULL DEFAULT 0,
                     upload_dir      TEXT NOT NULL,
-                    created_at      TEXT DEFAULT (datetime('now')),
-                    updated_at      TEXT DEFAULT (datetime('now'))
+                    created_at      TEXT DEFAULT (datetime('now', 'localtime')),
+                    updated_at      TEXT DEFAULT (datetime('now', 'localtime'))
                 );
 
                 CREATE TABLE IF NOT EXISTS task_items (
@@ -488,7 +488,7 @@ class Database:
                     error           TEXT,
                     started_at      TEXT,
                     finished_at     TEXT,
-                    created_at      TEXT DEFAULT (datetime('now'))
+                    created_at      TEXT DEFAULT (datetime('now', 'localtime'))
                 );
 
                 CREATE INDEX IF NOT EXISTS idx_task_items_task_id
@@ -514,7 +514,7 @@ class Database:
                     case_name         TEXT NOT NULL,
                     case_data         TEXT NOT NULL,
                     constraint_doc_id INTEGER REFERENCES document_versions(id),
-                    created_at        TEXT DEFAULT (datetime('now'))
+                    created_at        TEXT DEFAULT (datetime('now', 'localtime'))
                 );
                 CREATE INDEX IF NOT EXISTS idx_test_cases_task ON test_cases(task_id);
                 CREATE INDEX IF NOT EXISTS idx_test_cases_operator ON test_cases(operator_name);
@@ -536,7 +536,7 @@ class Database:
                     error_message       TEXT,
                     cpu_reference_code  TEXT,
                     duration_ms         INTEGER,
-                    created_at          TEXT DEFAULT (datetime('now'))
+                    created_at          TEXT DEFAULT (datetime('now', 'localtime'))
                 );
                 CREATE INDEX IF NOT EXISTS idx_exec_results_task ON exec_results(task_id);
                 CREATE INDEX IF NOT EXISTS idx_exec_results_case ON exec_results(case_id);
@@ -563,8 +563,8 @@ class Database:
                     username    TEXT NOT NULL,
                     password    TEXT NOT NULL,
                     status      TEXT NOT NULL DEFAULT 'active',
-                    created_at  TEXT DEFAULT (datetime('now')),
-                    updated_at  TEXT DEFAULT (datetime('now'))
+                    created_at  TEXT DEFAULT (datetime('now', 'localtime')),
+                    updated_at  TEXT DEFAULT (datetime('now', 'localtime'))
                 );
             """)
         except sqlite3.OperationalError:
@@ -649,7 +649,7 @@ class Database:
                     description     TEXT NOT NULL DEFAULT '',
                     platform_values TEXT NOT NULL DEFAULT '[]',
                     source_citation TEXT NOT NULL DEFAULT '',
-                    created_at      TEXT DEFAULT (datetime('now'))
+                    created_at      TEXT DEFAULT (datetime('now', 'localtime'))
                 );
                 CREATE INDEX IF NOT EXISTS idx_platform_constants_doc_id
                     ON platform_constants(doc_id);
@@ -690,7 +690,7 @@ class Database:
                     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
                     doc_id              INTEGER NOT NULL REFERENCES document_versions(id),
                     representations     TEXT NOT NULL DEFAULT '{}',
-                    created_at          TEXT DEFAULT (datetime('now')),
+                    created_at          TEXT DEFAULT (datetime('now', 'localtime')),
                     UNIQUE(doc_id)
                 );
                 CREATE INDEX IF NOT EXISTS idx_parameter_representations_doc_id
