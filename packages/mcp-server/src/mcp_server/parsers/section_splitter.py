@@ -125,6 +125,33 @@ def _strip_footer(lines: list[str]) -> list[str]:
     return lines[:cut]
 
 
+def _clean_section_content(content: str) -> str:
+    """FIX-15 (R9): Clean section content, filtering noise OUTSIDE code blocks.
+
+    - Markdown headers (``## ...``) are removed (they are structural noise
+      that pollutes ``src_text`` when consumed downstream).
+    - JSON-like ``{"key": value}`` snippets are removed (metadata noise).
+    - Content INSIDE fenced code blocks (```` ```...``` ````) is preserved
+      intact, including any headers or JSON that are legitimate code.
+
+    R19: This function is applied ONLY to ``CONSTRAINTS`` type sections
+    in ``split_sections``, so other section types are unaffected.
+    """
+    # Split on fenced code blocks — odd-indexed parts are inside code blocks
+    parts = re.split(r"(```.*?```)", content, flags=re.DOTALL)
+    result: list[str] = []
+    for i, part in enumerate(parts):
+        if i % 2 == 1:
+            # Inside a code block: keep verbatim
+            result.append(part)
+            continue
+        # Outside code blocks: strip Markdown headers and JSON snippets
+        part = re.sub(r"^#{1,6}\s+.*$", "", part, flags=re.MULTILINE)
+        part = re.sub(r'\{"[^"]*"\s*:.*?\}', "", part, flags=re.DOTALL)
+        result.append(part)
+    return "\n".join(result).strip()
+
+
 def _resolve_detached_h2(lines: list[str]) -> list[str]:
     """Merge detached H2 headings: '##' followed by text on the next line → '## text'."""
     result: list[str] = []
@@ -366,6 +393,13 @@ def split_sections(markdown_content: str) -> tuple[DocumentHeader, list[RawSecti
                     level=2,
                 )
             )
+
+    # FIX-15 (R19): Apply content cleaning ONLY to CONSTRAINTS sections,
+    # so other section types (function prototype, params, etc.) are unaffected.
+    for section in sections:
+        if section.section_type == SectionType.CONSTRAINTS:
+            cleaned = _clean_section_content(section.body_text)
+            section.body_lines = cleaned.split("\n") if cleaned else []
 
     logger.info(
         "Split document '%s' into %d sections",

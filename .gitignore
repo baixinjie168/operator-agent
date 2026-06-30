@@ -32,3 +32,4 @@ execution_results
 /data/operator_agent_backup_*.db
 /docs/res/
 /operators/checklist/
+/operators-90/

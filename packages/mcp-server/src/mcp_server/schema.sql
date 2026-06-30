@@ -2,7 +2,7 @@ CREATE TABLE IF NOT EXISTS operators (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     name        TEXT NOT NULL UNIQUE,
     source_url  TEXT,
-    created_at  TEXT DEFAULT (datetime('now'))
+    created_at  TEXT DEFAULT (datetime('now', 'localtime'))
 );
 
 CREATE TABLE IF NOT EXISTS document_versions (
@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS document_versions (
     function_explanation_summary TEXT NOT NULL DEFAULT '{}',
     json_constraints TEXT NOT NULL DEFAULT '{}',
     constraint_check_report TEXT,
-    created_at      TEXT DEFAULT (datetime('now')),
+    created_at      TEXT DEFAULT (datetime('now', 'localtime')),
     UNIQUE(operator_id, version)
 );
 
@@ -38,7 +38,7 @@ CREATE TABLE IF NOT EXISTS parameters (
     allowed_range_value TEXT NOT NULL DEFAULT '[]',
     param_constraint    TEXT NOT NULL DEFAULT '{}',
     llm_description     TEXT NOT NULL DEFAULT '',
-    created_at      TEXT DEFAULT (datetime('now')),
+    created_at      TEXT DEFAULT (datetime('now', 'localtime')),
     UNIQUE(doc_id, function_name, param_name)
 );
 
@@ -58,7 +58,7 @@ CREATE TABLE IF NOT EXISTS pipeline_runs (
     task_type       TEXT,
     task_name       TEXT,
     parent_task_id  TEXT REFERENCES pipeline_runs(run_id),
-    created_at      TEXT DEFAULT (datetime('now')),
+    created_at      TEXT DEFAULT (datetime('now', 'localtime')),
     completed_at    TEXT
 );
 
@@ -68,7 +68,7 @@ CREATE TABLE IF NOT EXISTS pipeline_events (
     seq         INTEGER NOT NULL,
     event_type  TEXT NOT NULL,
     data_json   TEXT NOT NULL,
-    created_at  TEXT DEFAULT (datetime('now'))
+    created_at  TEXT DEFAULT (datetime('now', 'localtime'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_pipeline_runs_operator
@@ -89,7 +89,7 @@ CREATE TABLE IF NOT EXISTS param_relations (
     param_optional  TEXT NOT NULL DEFAULT '{}',
     source_citation TEXT NOT NULL,
     relation_object TEXT NOT NULL DEFAULT '{}',
-    created_at      TEXT DEFAULT (datetime('now'))
+    created_at      TEXT DEFAULT (datetime('now', 'localtime'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_param_relations_doc_id
@@ -103,7 +103,7 @@ CREATE TABLE IF NOT EXISTS function_signatures (
     parameters       TEXT NOT NULL DEFAULT '[]',
     full_signature   TEXT NOT NULL DEFAULT '',
     raw_code         TEXT NOT NULL DEFAULT '',
-    created_at       TEXT DEFAULT (datetime('now')),
+    created_at       TEXT DEFAULT (datetime('now', 'localtime')),
     UNIQUE(doc_id, function_name)
 );
 
@@ -116,7 +116,7 @@ CREATE TABLE IF NOT EXISTS platform_support (
     platform_name            TEXT NOT NULL,
     is_supported             INTEGER NOT NULL DEFAULT 0,
     deterministic_computing  TEXT NOT NULL DEFAULT '{"value":"","src_text":""}',
-    created_at               TEXT DEFAULT (datetime('now')),
+    created_at               TEXT DEFAULT (datetime('now', 'localtime')),
     UNIQUE(doc_id, platform_name)
 );
 
@@ -131,7 +131,7 @@ CREATE TABLE IF NOT EXISTS return_codes (
     error_code      INTEGER NOT NULL,
     descriptions    TEXT NOT NULL DEFAULT '[]',
     source_citation TEXT NOT NULL DEFAULT '',
-    created_at      TEXT DEFAULT (datetime('now')),
+    created_at      TEXT DEFAULT (datetime('now', 'localtime')),
     UNIQUE(doc_id, function_name, return_value, error_code)
 );
 
@@ -144,7 +144,7 @@ CREATE TABLE IF NOT EXISTS dtype_combinations (
     function_name   TEXT NOT NULL DEFAULT '',
     platform        TEXT NOT NULL DEFAULT '通用',
     combo           TEXT NOT NULL DEFAULT '{}',
-    created_at      TEXT DEFAULT (datetime('now'))
+    created_at      TEXT DEFAULT (datetime('now', 'localtime'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_dtype_combos_doc_id
@@ -165,7 +165,7 @@ CREATE TABLE IF NOT EXISTS constraints_result (
     outputs                    TEXT NOT NULL DEFAULT '{}',
     constraints_in_parameters  TEXT NOT NULL DEFAULT '{}',
     dtype_support_description  TEXT NOT NULL DEFAULT '{}',
-    created_at                 TEXT DEFAULT (datetime('now'))
+    created_at                 TEXT DEFAULT (datetime('now', 'localtime'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_constraints_result_doc_id
@@ -179,7 +179,7 @@ CREATE TABLE IF NOT EXISTS test_cases (
     case_name         TEXT NOT NULL,
     case_data         TEXT NOT NULL,
     constraint_doc_id INTEGER REFERENCES document_versions(id),
-    created_at        TEXT DEFAULT (datetime('now'))
+    created_at        TEXT DEFAULT (datetime('now', 'localtime'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_test_cases_task ON test_cases(task_id);
@@ -198,7 +198,7 @@ CREATE TABLE IF NOT EXISTS exec_results (
     error_message       TEXT,
     cpu_reference_code  TEXT,
     duration_ms         INTEGER,
-    created_at          TEXT DEFAULT (datetime('now'))
+    created_at          TEXT DEFAULT (datetime('now', 'localtime'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_exec_results_task ON exec_results(task_id);
@@ -213,8 +213,8 @@ CREATE TABLE IF NOT EXISTS tasks (
     completed_count INTEGER NOT NULL DEFAULT 0,
     failed_count    INTEGER NOT NULL DEFAULT 0,
     upload_dir      TEXT NOT NULL,
-    created_at      TEXT DEFAULT (datetime('now')),
-    updated_at      TEXT DEFAULT (datetime('now'))
+    created_at      TEXT DEFAULT (datetime('now', 'localtime')),
+    updated_at      TEXT DEFAULT (datetime('now', 'localtime'))
 );
 
 CREATE TABLE IF NOT EXISTS task_items (
@@ -228,7 +228,7 @@ CREATE TABLE IF NOT EXISTS task_items (
     error           TEXT,
     started_at      TEXT,
     finished_at     TEXT,
-    created_at      TEXT DEFAULT (datetime('now'))
+    created_at      TEXT DEFAULT (datetime('now', 'localtime'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_task_items_task_id
@@ -239,7 +239,7 @@ CREATE TABLE IF NOT EXISTS shape_dim_mappings (
     doc_id          INTEGER NOT NULL REFERENCES document_versions(id),
     mappings_json   TEXT NOT NULL DEFAULT '[]',
     rendered_text   TEXT NOT NULL DEFAULT '',
-    created_at      TEXT DEFAULT (datetime('now'))
+    created_at      TEXT DEFAULT (datetime('now', 'localtime'))
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_shape_dim_mappings_doc_id
@@ -250,7 +250,7 @@ CREATE TABLE IF NOT EXISTS implicit_params (
     doc_id          INTEGER NOT NULL REFERENCES document_versions(id),
     mappings_json   TEXT NOT NULL DEFAULT '[]',
     rendered_text   TEXT NOT NULL DEFAULT '',
-    created_at      TEXT DEFAULT (datetime('now')),
+    created_at      TEXT DEFAULT (datetime('now', 'localtime')),
     UNIQUE(doc_id)
 );
 
@@ -258,7 +258,7 @@ CREATE TABLE IF NOT EXISTS parameter_representations (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
     doc_id              INTEGER NOT NULL REFERENCES document_versions(id),
     representations     TEXT NOT NULL DEFAULT '{}',
-    created_at          TEXT DEFAULT (datetime('now')),
+    created_at          TEXT DEFAULT (datetime('now', 'localtime')),
     UNIQUE(doc_id)
 );
 

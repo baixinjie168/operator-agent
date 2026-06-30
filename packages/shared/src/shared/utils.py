@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
 
 
 def now_iso() -> str:
-    """Return current UTC time as ISO 8601 string."""
-    return datetime.now(timezone.utc).isoformat()
+    """Return current local time (UTC+8) as ISO 8601 string."""
+    return datetime.now().astimezone().isoformat()

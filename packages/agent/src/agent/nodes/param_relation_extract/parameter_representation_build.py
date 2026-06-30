@@ -33,6 +33,7 @@ Zero LLM calls. Position in subgraph::
 
 from __future__ import annotations
 
+import ast
 import json
 import logging
 import re
@@ -44,6 +45,7 @@ from agent.nodes.param_relation_extract.implicit_param_extract import (
     _EXCLUDE_WORDS,
 )
 from agent.nodes.param_relation_extract.state import RelationExtractState
+from agent.utils.expr_validation import validate_expr_syntax
 from agent.utils.param_validators import is_tensor_type
 
 logger = logging.getLogger(__name__)
@@ -169,6 +171,31 @@ def _slot_expr_to_python(
     return python_expr, var_names
 
 
+def _split_top_level_commas(slot_expr: str) -> list[str]:
+    """Split a shape slot expression on top-level commas only.
+
+    FIX-3: Chinese commas (，) and colons (：) are normalized first.
+    Nested commas inside function calls like ``func(a, b)`` are NOT split,
+    because only the top-level Tuple/List elements are separated.
+
+    Examples:
+        "m, k"       → ["m", "k"]        (two dim variables)
+        "func(a, b)" → ["func(a, b)"]   (single expr, nested comma preserved)
+        "[m, k]"     → ["m", "k"]        (list literal → elements)
+    """
+    normalized = slot_expr.replace("，", ",").replace("：", ":")
+    normalized = normalized.replace("　", " ")  # full-width space
+    try:
+        tree = ast.parse(normalized, mode="eval")
+        body = tree.body
+        if isinstance(body, (ast.Tuple, ast.List)):
+            parts = [ast.unparse(elt) for elt in body.elts]
+            return [p.strip() for p in parts if p.strip()]
+    except SyntaxError:
+        pass
+    return [normalized.strip()]
+
+
 def _build_tensor_representations(
     mappings: list[dict],
     tensor_param_names: set[str] | None = None,
@@ -246,32 +273,52 @@ def _build_tensor_representations(
             continue
         seen_slots.add(slot_key)
 
-        python_expr, var_names = _slot_expr_to_python(
-            slot_expr, constant_values, external_const_names,
-        )
+        # FIX-3: split top-level commas (e.g. "m, k" → ["m", "k"]).
+        # Each part corresponds to a consecutive dimension starting at *dim*.
+        parts = _split_top_level_commas(slot_expr)
 
-        # Skip slots that reduced to a pure number (no variable references)
-        if not var_names:
-            continue
+        cur_dim = dim
+        for part in parts:
+            python_expr, var_names = _slot_expr_to_python(
+                part, constant_values, external_const_names,
+            )
 
-        # Item 5: detect condition guard and wrap the expression.
-        guard = _detect_shape_guard(
-            tensor,
-            m.get("shape_text", ""),
-            desc_map.get(tensor, ""),
-            opt_map.get(tensor, False),
-        )
-        base_expr = f"{tensor}.shape[{dim}] == {python_expr}"
-        final_expr = (
-            f"({base_expr}) if {guard} else True" if guard else base_expr
-        )
+            # Skip parts that reduced to a pure number (no variable references)
+            if not var_names:
+                cur_dim += 1
+                continue
 
-        reps.append({
-            "expr_type": "parameter_representation",
-            "expr": final_expr,
-            "relation_params": [tensor, *var_names],
-            "src_text": m.get("shape_text", ""),
-        })
+            # Item 5: detect condition guard and wrap the expression.
+            guard = _detect_shape_guard(
+                tensor,
+                m.get("shape_text", ""),
+                desc_map.get(tensor, ""),
+                opt_map.get(tensor, False),
+            )
+            base_expr = f"{tensor}.shape[{cur_dim}] == {python_expr}"
+            final_expr = (
+                f"({base_expr}) if {guard} else True" if guard else base_expr
+            )
+
+            # FIX-4: validate syntax on the deterministic path. R10: keep
+            # the constraint with a _syntax_warning flag instead of dropping.
+            is_valid, error = validate_expr_syntax(final_expr)
+            rep: dict[str, Any] = {
+                "expr_type": "parameter_representation",
+                "expr": final_expr,
+                "relation_params": [tensor, *var_names],
+                # FIX-12: prefer source_section_text (document原文) over
+                # shape_text (internal label), falling back to shape_text.
+                "src_text": m.get("source_section_text", m.get("shape_text", "")),
+            }
+            if not is_valid:
+                logger.warning(
+                    "ParameterRepresentationBuild: syntax error in '%s': %s",
+                    final_expr, error,
+                )
+                rep["_syntax_warning"] = error
+            reps.append(rep)
+            cur_dim += 1
 
     return reps
 

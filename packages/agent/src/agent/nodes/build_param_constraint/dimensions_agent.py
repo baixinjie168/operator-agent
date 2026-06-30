@@ -113,9 +113,13 @@ Convert shape descriptions into structured dimensions arrays.
 ## Output Format (MUST follow exactly)
 
 Return a JSON array, one element per input shape, in order. Each element is:
-- Rank format: [min_rank, max_rank]  (e.g. [4, 4] = exactly 4 dimensions)
-- Per-dimension format: [[min,max], ...]  (e.g. [[2,2],[3,3],[4,4]])
+- Enumeration format: [v1, v2, ...]  (e.g. [2,3,4,5,6] = 2D to 6D; [0,3,4] = 0D or 3D or 4D)
+- Single value: [N]  (e.g. [4] = exactly 4 dimensions)
 - Empty array []  (scalar / cannot determine)
+
+All values must be integers in [0, 8], sorted ascending, deduplicated.
+For continuous ranges like "2-6", expand to [2,3,4,5,6].
+For discrete enums like "0,3,4", output [0,3,4] directly.
 
 Return ONLY the JSON array, no explanation.
 
@@ -127,31 +131,56 @@ Apply the parsing rules and examples from the Knowledge Base below.
 # Phase 1: Deterministic preprocessing (reused from dimensions_build)
 # ---------------------------------------------------------------------------
 
+
+def _expand_range(lo: int, hi: int) -> list[int]:
+    """Expand closed interval [lo, hi] to enumeration list [lo, lo+1, ..., hi]."""
+    return list(range(lo, hi + 1))
+
+
 _DIMENSION_PATTERNS: list[tuple[str, Any]] = [
+    # --- Scalar / 0D ---
     (r"^(标量|0[- ]?D|0D)$", []),
+
+    # --- Continuous range: "2-6" / "2~6" -> [2,3,4,5,6] ---
     (
         r"^(\d+)\s*[-~]\s*(\d+)$",
-        lambda m: [int(m.group(1)), int(m.group(2))],
+        lambda m: _expand_range(int(m.group(1)), int(m.group(2))),
     ),
-    (r"^1[- ]?D$", [1, 1]),
-    (r"^(\d+)[- ]?D$", lambda m: [int(m.group(1)), int(m.group(1))]),
-    # Chinese dimension: "N维" → [N,N], "N维，最大长度M" → [N,N] (ignore size info)
-    (r"^(\d+)维(?:[，,]|$)", lambda m: [int(m.group(1)), int(m.group(1))]),
-    # Chinese dimension range: "N维~M维" → [N,M]
-    (r"^(\d+)维\s*[~-]\s*(\d+)维$", lambda m: [int(m.group(1)), int(m.group(2))]),
-    (r"^\(([^)]+)\)$", lambda m: [len(m.group(1).split(","))] * 2),
+
+    # --- Discrete enum: "0、3、4" / "0,3,4" -> [0,3,4]  (NEW) ---
+    (
+        r"^(\d+(?:[、,，]\s*\d+)+)$",
+        lambda m: sorted(set(
+            int(v.strip()) for v in re.split(r"[、,，]", m.group(1))
+        )),
+    ),
+
+    # --- D suffix single value: "2D" / "3-D" -> [2] ---
+    (r"^1[- ]?D$", [1]),
+    (r"^(\d+)[- ]?D$", lambda m: [int(m.group(1))]),
+
+    # --- Chinese dimension: "3维" -> [3]; "3维，最大长度M" -> [3] (ignore size info) ---
+    (r"^(\d+)维(?:[，,]|$)", lambda m: [int(m.group(1))]),
+
+    # --- Chinese range: "2维~6维" -> [2,3,4,5,6] ---
+    (
+        r"^(\d+)维\s*[~-]\s*(\d+)维$",
+        lambda m: _expand_range(int(m.group(1)), int(m.group(2))),
+    ),
+
+    # --- Symbolic tuple: "(N,C,H,W)" -> [4] ---
+    (
+        r"^\(([^)]+)\)$",
+        lambda m: [len([s for s in m.group(1).split(",") if s.strip()])],
+    ),
+
+    # --- Square brackets: "[2, 3, 4]" -> [3]; "[K1, N1]" -> [2] ---
     (
         r"^\[([^\]]+)\]$",
-        lambda m: (
-            # Numeric values → per-dimension format
-            [[int(v.strip()), int(v.strip())]
-             for v in m.group(1).split(",")
-             if v.strip().isdigit()]
-            if any(v.strip().isdigit() for v in m.group(1).split(","))
-            # Symbolic values (e.g. [K1, N1]) → count slots as rank
-            else [len([s for s in m.group(1).split(",") if s.strip()])] * 2
-        ),
+        lambda m: [len([s for s in m.group(1).split(",") if s.strip()])],
     ),
+
+    # --- Cross-param reference -> [] ---
     (r"^(与输入相同|同输入|same as input)$", []),
 ]
 
@@ -189,7 +218,9 @@ def _try_html_list_parse(shape: str) -> list | None:
 
     Strategy: extract **every** ``[...]`` bracket group, count the
     comma-separated slots in each (that is the rank), and return
-    ``[min_rank, max_rank]`` across all variants.
+    ``sorted(set(counts))`` — the distinct ranks that actually appear
+    across all variants.  Using ``_expand_range(min, max)`` would be
+    wrong because variant ranks are not necessarily contiguous.
 
     Returns ``None`` if the shape has no HTML tags or no bracket groups,
     so the caller can fall through to the LLM agent.
@@ -206,53 +237,41 @@ def _try_html_list_parse(shape: str) -> list | None:
             counts.append(len(slots))
     if not counts:
         return None
-    return [min(counts), max(counts)]
+    return sorted(set(counts))
 
 
 # ---------------------------------------------------------------------------
-# Phase 3: Validation (reused from dimensions_build)
+# Phase 3: Validation (enumeration format)
 # ---------------------------------------------------------------------------
 
-
-def _is_rank_format(dims: list) -> bool:
-    """Check if dimensions is rank format [count, count]."""
-    return (
-        isinstance(dims, list)
-        and len(dims) == 2
-        and all(isinstance(d, int) for d in dims)
-    )
+MAX_DIM = 8
 
 
 def _validate_dimensions_structure(dims: list) -> tuple[bool, str]:
-    """Validate structure of dimensions array."""
+    """Validate structure of dimensions array (enumeration format).
+
+    Valid formats:
+    - [] (scalar / unknown / cross-param ref)
+    - [N] (exactly N dimensions)
+    - [v1, v2, ...] (enumeration of supported dimension counts)
+
+    Each value must be an int in [0, MAX_DIM], and the list must be
+    sorted ascending and deduplicated.
+    """
     if not isinstance(dims, list):
         return False, "dimensions must be a list"
 
     if not dims:
         return True, ""
 
-    if _is_rank_format(dims):
-        min_rank, max_rank = dims[0], dims[1]
-        if min_rank < 0:
-            return False, f"rank min must be >= 0, got {min_rank}"
-        if min_rank > max_rank:
-            return False, f"rank [min, max] requires min <= max, got {dims}"
-        if max_rank > 10:
-            return False, f"Too many dimensions: {max_rank}"
-        return True, ""
+    for v in dims:
+        if not isinstance(v, int):
+            return False, f"must be int, got {type(v).__name__}: {v}"
+        if v < 0 or v > MAX_DIM:
+            return False, f"value {v} out of [0, {MAX_DIM}]"
 
-    for i, dim in enumerate(dims):
-        if not isinstance(dim, list) or len(dim) != 2:
-            return False, f"dim[{i}] must be [min, max], got {dim}"
-        min_val, max_val = dim
-        if min_val is not None and max_val is not None:
-            if not isinstance(min_val, (int, float)) or not isinstance(max_val, (int, float)):
-                return False, f"dim[{i}] values must be int/float or null"
-            if min_val > max_val:
-                return False, f"dim[{i}]: min ({min_val}) > max ({max_val})"
-
-    if len(dims) > 10:
-        return False, f"Too many dimensions: {len(dims)}"
+    if dims != sorted(set(dims)):
+        return False, "must be sorted and deduplicated"
 
     return True, ""
 
@@ -340,18 +359,29 @@ async def _parse_shapes_individually(shapes: list[str]) -> list[list]:
 
 
 def _parse_dimensions_response(text: str) -> list[list]:
-    """Parse LLM/Agent response into a list of dimensions arrays."""
+    """Parse LLM/Agent response into a list of dimensions arrays.
+
+    Includes compatibility flattening: if the LLM returns old-format
+    nested lists like [[min, max]], they are flattened to enumeration
+    [min, min+1, ..., max] to avoid migration-period failures.
+    """
     data = parse_json_response(text, list)
     if not isinstance(data, list):
         logger.warning("DimensionsAgent: failed to parse response: %s", text[:200])
         return []
-    # Normalize: non-list items become [] (rank specs stay as flat ints)
     result: list = []
     for item in data:
         if isinstance(item, list):
-            result.append(item)
+            # Compatibility: flatten nested lists (old [min, max] format)
+            flat: list[int] = []
+            for v in item:
+                if isinstance(v, int):
+                    flat.append(v)
+                elif isinstance(v, list) and len(v) == 2:
+                    flat.extend(_expand_range(v[0], v[1]))
+            result.append(sorted(set(flat)) if flat else [])
         elif isinstance(item, (int, float)):
-            result.append(item)
+            result.append([int(item)])
         else:
             result.append([])
     return result

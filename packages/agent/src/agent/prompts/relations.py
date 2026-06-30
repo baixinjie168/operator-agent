@@ -65,6 +65,11 @@ RELATION_OBJECT_BUILD_PROMPT = """\
     示例: "biasDequant2Optional 的 shape[0] 等于 N"
     输出: (biasDequant2Optional.shape[0] == N.range_value) if biasDequant2Optional is not None else True
     例外: 如果约束本身就是存在性判断（presence_dependency），无需额外包装
+22. 当文档描述为"当 A 时 B"的条件约束时，必须提取为 (B) if (A) else True 形式。
+    关键：同一参数在不同条件下可能有不同的取值约束，必须保留条件守卫。
+    错误示例: expr = N1 == 2 * K2  （无条件，丢失了激活函数上下文）
+    正确示例: expr = (N1 == 2 * K2) if (activation.range_value in [geglu,swiglu,reglu]) else True
+    注意：条件不满足时返回 True（约束不适用），而非 False
 
 ## 示例
 
