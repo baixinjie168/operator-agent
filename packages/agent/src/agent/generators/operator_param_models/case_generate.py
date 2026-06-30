@@ -133,6 +133,7 @@ class CaseGenerate:
         else:
             case_config = case_config_template
         case_config.name = self.operator_name
+        case_config.aclnn_name = self.operator_name
         input_case_list = []
         for param_name, param_attributes in param_combination.items():
             param_type = param_attributes.param_type
