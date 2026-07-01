@@ -53,26 +53,34 @@ class OperatorCaseGenerator:
 
     def handle_single_operator(self, operator_constraint_data: OperatorRule,
                                param_combination_list: List[OperatorParameterCombination],
-                               target_platform=RunPlatform.ATLAS_A3_TRAIN_AND_INFER_SERIES.value, case_num: int = 1):
+                               target_platform=RunPlatform.ATLAS_A3_TRAIN_AND_INFER_SERIES.value,
+                               case_num: int = 1, jsonl_save_path: str = None):
         """
         读取参数组合文件，xxx.tsv，解析数据，并生成对用的用例
         :param operator_constraint_data: 算子约束结构化数据
         :param param_combination_list: 算子参数组合用例数据
         :param target_platform: 执行机环境
         :param case_num: 生成用例的个数，默认为1
+        :param jsonl_save_path: JSONL 增量 checkpoint 保存目录，为 None 时不写 checkpoint
         :return: List[CaseConfig]
         """
         if operator_constraint_data is None:
             logger.error("Operator constraint data is None")
+        operator_name = operator_constraint_data.operator_name
         logger.info(
-            f"Start generate cases, operator name : {operator_constraint_data.operator_name}, "
+            f"Start generate cases, operator name : {operator_name}, "
             f"case num : {case_num}, target platform : {target_platform}")
         if param_combination_list is None:
             logger.error(f"Target platform: {target_platform}, no param combinations match")
             return []
-        params_role = self.get_params_roles(operator_constraint_data.operator_name)
-        case_generate_instance = CaseGenerate(operator_name=operator_constraint_data.operator_name,
+        params_role = self.get_params_roles(operator_name)
+        case_generate_instance = CaseGenerate(operator_name=operator_name,
                                               params_role=params_role)
+        jsonl_fp = None
+        if jsonl_save_path is not None:
+            os.makedirs(jsonl_save_path, exist_ok=True)
+            jsonl_file = os.path.join(jsonl_save_path, f"{operator_name}.jsonl")
+            jsonl_fp = open(jsonl_file, "w", encoding="utf-8")
         final_case_list = []
         case_index = 0
         solve_time = 0
@@ -83,15 +91,18 @@ class OperatorCaseGenerator:
             param_combination_dict = {each.param_name: each for each in param_combination.parameter_property}
             case_config = case_generate_instance.generate_case(param_combination_dict)
             correct_status, correct_case = self.correct_case(case_config, operator_constraint_data,
-                                                             param_combination_dict)
+                                                              param_combination_dict)
             t_end = time.time()
             solve_time += 1
             logger.debug(
                 f"Operator solve constraint running, solve time : {solve_time}, solve status : {correct_status}")
             if correct_status:
                 correct_case.outputs = OperatorCaseGenerator.get_output_param(operator_constraint_data)
-                final_case_list.append(correct_case)
                 correct_case.id = case_index
+                final_case_list.append(correct_case)
+                if jsonl_fp is not None:
+                    jsonl_fp.write(correct_case.model_dump_json() + "\n")
+                    jsonl_fp.flush()
                 case_index += 1
                 solve_time = 0
                 logger.debug(
@@ -99,11 +110,13 @@ class OperatorCaseGenerator:
                     f"| use time : {t_end - t_start}s ######")
             if solve_time >= GlobalConfig.Z3_SOLVE_TIME_LIMIT:
                 logger.error(
-                    f"Operator : {operator_constraint_data.operator_name} has run Z3 solve {solve_time} times, "
+                    f"Operator : {operator_name} has run Z3 solve {solve_time} times, "
                     f"and all result is failed or unsat")
                 break
+        if jsonl_fp is not None:
+            jsonl_fp.close()
         logger.info(
-            f"End generate cases, operator name : {operator_constraint_data.operator_name}, "
+            f"End generate cases, operator name : {operator_name}, "
             f"case num : {case_num}, target platform : {target_platform}, actual case num : {len(final_case_list)}")
         return final_case_list
 
@@ -197,8 +210,9 @@ class OperatorCaseGenerator:
             case_list = self.handle_single_operator(operator_constraint_data=effective_operator_constraint_data,
                                                     target_platform=target_platform,
                                                     case_num=case_num,
-                                                    param_combination_list=param_combination_list)
-            data_handle_util.save_cases_to_json(api_name=operator_name, generate_case_list=case_list,
-                                                json_save_path=case_save_path)
+                                                    param_combination_list=param_combination_list,
+                                                    jsonl_save_path=case_save_path)
+            data_handle_util.convert_jsonl_to_json(api_name=operator_name, jsonl_save_path=case_save_path,
+                                                    json_save_path=case_save_path)
             logger.info(f"End handle operator data, file index : {index}/{tsv_file_num}, file name : {file}")
         logger.info(f"End handle param combination, operator file num : {len(tsv_file_list)}")

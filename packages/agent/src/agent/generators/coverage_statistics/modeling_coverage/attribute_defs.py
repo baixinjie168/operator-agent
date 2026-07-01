@@ -97,10 +97,12 @@ class ParamAttributeDomain:
       - length: 数组长度（仅 list 类型参数）
     """
 
-    def __init__(self, param_name: str, param_type: str):
+    def __init__(self, param_name: str, param_type: str, constraint_type: str = ""):
         self.param_name = param_name
         # param_type 取值为 "tensor" / "scalar" / "list" / "attr" 等（ATK 类型）
         self.param_type = param_type
+        # constraint_type 为约束 JSON 中 type 字段的原始值（如 "aclTensor"、"aclIntArray"），用于展示
+        self.constraint_type = constraint_type or param_type
         # 是否为真正的算子参数（从约束 JSON is_operator_param 字段读取）
         self.is_operator_param: bool = False
 
@@ -175,7 +177,7 @@ def _get_range_profile_by_dtype(dtype: str) -> List[str]:
     elif atk_dtype in int_types:
         return list(INT_TENSOR_DATA_PROFILE)
     elif atk_dtype in bool_types:
-        return [True, False]
+        return ["True", "False"]
     return []
 
 
@@ -267,7 +269,7 @@ def _build_domain_for_params(
         param_type = ATK_TYPE_MAP.get(raw_type, "attr")
 
         # --- 步骤 2: 为当前参数创建域定义 ---
-        p = ParamAttributeDomain(param_name, param_type)
+        p = ParamAttributeDomain(param_name, param_type, constraint_type=raw_type)
 
         # --- 标记是否为真正的算子参数 ---
         p.is_operator_param = bool(_extract_value(attr_data.get("is_operator_param")))
@@ -290,9 +292,10 @@ def _build_domain_for_params(
         p.format_values = _resolve_list(_extract_value(attr_data.get("format")))
         logger.debug(f"  [{param_name}] format domain: {p.format_values}")
 
-        # dim_count: 可能取列表或区间（如 [1, 2, 3, 4] 或 [[1, 4]]）
-        p.dim_count_values = _resolve_dim_list(_extract_value(attr_data.get("dimensions")))
-        logger.debug(f"  [{param_name}] dim_count domain: {p.dim_count_values}")
+        # dim_count: 仅 tensor 参数有，从 dimensions 字段解析（如 [1, 2, 3, 4] 或 [[1, 4]]）
+        if p.is_tensor():
+            p.dim_count_values = _resolve_dim_list(_extract_value(attr_data.get("dimensions")))
+            logger.debug(f"  [{param_name}] dim_count domain: {p.dim_count_values}")
 
         # length: 仅 list 类型参数有（格式同 dimensions：支持 [[min, max]] 区间）
         p.length_values = _resolve_dim_list(_extract_value(attr_data.get("array_length")))

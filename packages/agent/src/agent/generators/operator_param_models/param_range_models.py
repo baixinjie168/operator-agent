@@ -229,6 +229,18 @@ class ParamRangeValueModelStatic(CommonDispatcher):
             "Start generate param range by static, operator name: %s, param name: %s, size: %s, data type: %s",
             self.operator_name, self.param_name, size, acl_data_type)
         static_model_data = model_def.value
+        # 将 static 值裁剪到 dtype 的合法范围内，避免硬编码的 INT32
+        # 边界（如 Min/Max profile）超出实际 dtype（如 int8）范围
+        dtype_spec = DataMatchMap.DTYPE_SPECS.get(acl_data_type)
+        if dtype_spec and dtype_spec[0] is not None and dtype_spec[1] is not None:
+            lo, hi = dtype_spec[0], dtype_spec[1]
+            if isinstance(static_model_data, (int, float)):
+                static_model_data = max(lo, min(hi, static_model_data))
+            elif isinstance(static_model_data, list):
+                static_model_data = [
+                    max(lo, min(hi, v)) if isinstance(v, (int, float)) else v
+                    for v in static_model_data
+                ]
         self.logger.debug(
             "End generate param range by static, operator name: %s, param name: %s, size: %s, data type: %s",
             self.operator_name, self.param_name, size, acl_data_type)

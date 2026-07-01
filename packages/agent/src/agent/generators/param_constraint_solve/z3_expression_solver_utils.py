@@ -36,6 +36,7 @@ import z3
 from agent.generators.common_utils.logger_util import LazyLogger
 from agent.generators.data_definition.constants import DataMatchMap
 from agent.generators.param_constraint_solve.expression_preprocess_utils import ASTtoZ3Converter, TensorVar, ScalarVar, ListVar
+from agent.generators.param_constraint_solve.param_var_definition import TensorListVar
 
 logger = LazyLogger()
 
@@ -98,10 +99,13 @@ class ExpressionPreprocessor:
 class Z3ConstraintBuilder:
     _VAR_FACTORY = {
         'tensor': (TensorVar, lambda self, kwargs: (self.solver, kwargs.get("dtype"), kwargs.get('allowed_dtypes'),
-                                                    kwargs.get('allowed_formats'), kwargs.get('range_value'))),
+                                                     kwargs.get('allowed_formats'), kwargs.get('range_value'))),
+        'tensor_list': (TensorListVar, lambda self, kwargs: (self.solver, kwargs.get("dtype"), kwargs.get('allowed_dtypes'),
+                                                              kwargs.get('allowed_formats'), kwargs.get('range_value'),
+                                                              kwargs.get("length"))),
         'scalar': (ScalarVar, lambda self, kwargs: (self.solver, kwargs.get('dtype'), kwargs.get('range_value'))),
         'list': (ListVar, lambda self, kwargs: (self.solver, kwargs.get('dtype'), kwargs.get('range_value'),
-                                                kwargs.get("length"))),
+                                                 kwargs.get("length"))),
     }
 
     def __init__(self, timeout_ms=60000):

@@ -60,7 +60,7 @@ from collections import defaultdict
 from typing import Any, Dict, List, Set, Tuple
 
 from agent.generators.common_utils.logger_util import LazyLogger
-from agent.generators.data_definition.constants import ParamModelConfig
+from agent.generators.data_definition.constants import DataMatchMap, ParamModelConfig
 from agent.generators.operator_param_combine.pairwise_combination.attribute_domain import (
     AttributeDomain,
     ATTR_DTYPE, ATTR_FORMAT, ATTR_DIMENSIONS,
@@ -83,6 +83,26 @@ class PairwiseCombinationGenerator:
         self.param_private_attrs: Dict[str, Dict[str, List[Any]]] = {}
 
         self._build_param_attributes()
+
+    @staticmethod
+    def _get_applicable_range_profiles(dtype_list: List[str]) -> List[str]:
+        if not dtype_list:
+            return list(ParamModelConfig.FLOAT_TENSOR_DATA_PROFILE + ParamModelConfig.INT_TENSOR_DATA_PROFILE)
+
+        has_float = False
+        has_int = False
+        for d in dtype_list:
+            mapped = DataMatchMap.ACL_DTYPE_TRANSFER_TENSOR_MAP.get(d)
+            if mapped in ParamModelConfig.FLOAT_DTYPE:
+                has_float = True
+            elif mapped in ParamModelConfig.INT_DTYPE:
+                has_int = True
+
+        if has_float and not has_int:
+            return list(ParamModelConfig.FLOAT_TENSOR_DATA_PROFILE)
+        if has_int and not has_float:
+            return list(ParamModelConfig.INT_TENSOR_DATA_PROFILE)
+        return list(ParamModelConfig.FLOAT_TENSOR_DATA_PROFILE + ParamModelConfig.INT_TENSOR_DATA_PROFILE)
 
     def _build_param_attributes(self):
         self.constraint_processor.process()
@@ -127,17 +147,16 @@ class PairwiseCombinationGenerator:
                 attrs["dim_count"] = dim_domains[p]
                 attrs["dim_value_profile"] = profile_domains[p]
 
+            param_dtype_list = attrs.get(ATTR_DTYPE, [])
             range_vals = domain.get(ATTR_RANGE_VALUE, [])
             if range_vals:
                 expanded = self._expand_range_values(range_vals, p)
                 if expanded:
                     attrs["range_value_profile"] = expanded
                 else:
-                    rd = list(ParamModelConfig.FLOAT_TENSOR_DATA_PROFILE + ParamModelConfig.INT_TENSOR_DATA_PROFILE)
-                    attrs["range_value_profile"] = rd
+                    attrs["range_value_profile"] = self._get_applicable_range_profiles(param_dtype_list)
             else:
-                rd = list(ParamModelConfig.FLOAT_TENSOR_DATA_PROFILE + ParamModelConfig.INT_TENSOR_DATA_PROFILE)
-                attrs["range_value_profile"] = rd
+                attrs["range_value_profile"] = self._get_applicable_range_profiles(param_dtype_list)
 
             if is_list:
                 attrs["length"] = domain.get(ATTR_ARRAY_LENGTH, [ParamModelConfig.DEFAULT_LIST_LENGTH])
@@ -205,10 +224,7 @@ class PairwiseCombinationGenerator:
     def _expand_range_values(raw_values: List, param_name: str) -> List[Any]:
         expanded = []
         for v in raw_values:
-            if isinstance(v, list) and len(v) == 2:
-                expanded.append(v[0])
-                expanded.append(v[1])
-            elif isinstance(v, (int, float, bool)):
+            if isinstance(v, (int, float, bool)):
                 expanded.append(v)
         return expanded
 

@@ -108,6 +108,7 @@ class AttributeDomain:
         return [str(raw)]
 
     def _extract_dimensions_domain(self, param_name: str, param_attr: ParamAttributes) -> List[int]:
+        """JSON中，dimension.value默认一定为枚举形式，即[2,6]表示dim可取值为2或6"""
         raw = self._get_value(param_name, param_attr.dimensions, "dimensions")
         if raw is None:
             return list(range(

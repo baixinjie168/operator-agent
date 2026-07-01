@@ -11,9 +11,37 @@ import operator
 import z3
 
 from agent.generators.common_utils.logger_util import LazyLogger
-from agent.generators.param_constraint_solve.param_var_definition import TensorVar, ListVar, ScalarVar, DTYPE_MAP
+from agent.generators.param_constraint_solve.param_var_definition import TensorVar, ListVar, ScalarVar, TensorListVar, DTYPE_MAP
 
 logger = LazyLogger()
+
+
+# ==========================================
+# 共享模板 TensorListVar 元素代理
+# ==========================================
+class TensorElementProxy:
+    def __init__(self, list_var, idx):
+        self._list_var = list_var
+        self._idx = idx
+
+    @property
+    def shape(self):
+        return self._list_var.elem_shape
+
+    @property
+    def dtype(self):
+        return self._list_var.elem_dtype
+
+    @property
+    def format(self):
+        return self._list_var.elem_format
+
+    @property
+    def range_value(self):
+        return self._list_var.range_value
+
+    def _scalar(self):
+        return z3.Select(self._list_var.range_value, self._idx)
 
 
 # ==========================================
@@ -43,7 +71,7 @@ class ASTtoZ3Converter(ast.NodeVisitor):
     _CALL_DISPATCH_TABLE = {
         'len': '_handle_len', 'all': '_handle_all', 'any': '_handle_any',
         'max': '_handle_max_min', 'min': '_handle_max_min',
-        'sum': '_handle_sum',
+        'sum': '_handle_sum', 'prod': '_handle_prod',
     }
     def __init__(self, builder):
         self.builder = builder
@@ -91,8 +119,37 @@ class ASTtoZ3Converter(ast.NodeVisitor):
         return [self.visit(e) for e in node.elts]
 
     def visit_Attribute(self, node):
+        # --- 链式访问: x[i].shape / x[i].dtype / x[i].format / x[i].range_value ---
+        if not isinstance(node.value, ast.Name):
+            visited = self.visit(node.value)
+            if isinstance(visited, TensorElementProxy):
+                if node.attr == 'shape':
+                    return visited.shape
+                elif node.attr == 'dtype':
+                    return visited.dtype
+                elif node.attr == 'format':
+                    return visited.format
+                elif node.attr == 'range_value':
+                    return visited.range_value
+                raise AttributeError(f"Attribute '{node.attr}' not supported on tensor element proxy")
+            raise AttributeError(f"Attribute '{node.attr}' not supported for chained access")
+
+        # --- 直接属性访问: var.attr ---
         var_name = node.value.id
         t_var = self.builder.get_or_create_var(var_name)
+        if isinstance(t_var, TensorListVar):
+            if node.attr == 'length':
+                return t_var.length
+            elif node.attr == 'dtype':
+                return t_var.elem_dtype
+            elif node.attr == 'shape':
+                return t_var.elem_shape
+            elif node.attr == 'format':
+                return t_var.elem_format
+            elif node.attr == 'range_value':
+                t_var._range_constraint_used = True
+                return t_var.range_value
+            raise AttributeError(f"Attribute '{node.attr}' not supported for var '{var_name}'")
         if isinstance(t_var, TensorVar):
             if node.attr == 'dtype':
                 return t_var.dtype
@@ -101,6 +158,7 @@ class ASTtoZ3Converter(ast.NodeVisitor):
             elif node.attr == 'format':
                 return t_var.format
             elif node.attr == 'range_value':
+                t_var._range_constraint_used = True
                 return t_var.range_value
         elif isinstance(t_var, ListVar):
             if node.attr == 'dtype':
@@ -110,7 +168,6 @@ class ASTtoZ3Converter(ast.NodeVisitor):
         elif isinstance(t_var, ScalarVar):
             if node.attr == 'dtype':
                 return t_var.dtype
-            # 对于 ScalarVar，range_value 即为其值本身
             elif node.attr == 'range_value':
                 return t_var.z3_var
         raise AttributeError(f"Attribute '{node.attr}' not supported for var '{var_name}'")
@@ -144,21 +201,26 @@ class ASTtoZ3Converter(ast.NodeVisitor):
 
     def visit_UnaryOp(self, node):
         op = self.visit(node.operand)
+        if isinstance(op, TensorElementProxy):
+            op = op._scalar()
         if isinstance(node.op, ast.Not): return z3.Not(op)
         if isinstance(node.op, ast.USub): return -op
         raise NotImplementedError(f"Unsupported unary operator: {type(node.op).__name__}")
 
     def visit_Compare(self, node):
         left = self.visit(node.left)
-        # 【修改】移除对 left 为 None 的直接报错，因为 None 可能是合法值
+        # 展开 TensorElementProxy → 标量 Z3 Select
+        if isinstance(left, TensorElementProxy):
+            left = left._scalar()
 
         ops = node.ops
         comps = [self.visit(c) for c in node.comparators]
-        # 【修改】移除对 comps 包含 None 的直接报错
 
         res = []
         cur_left = left
         for op, right in zip(ops, comps):
+            if isinstance(right, TensorElementProxy):
+                right = right._scalar()
             # 处理类型转换（仅针对非 None 值）
             def convert_operand(l, r):
                 if r is None: return r  # 不转换 None
@@ -201,7 +263,7 @@ class ASTtoZ3Converter(ast.NodeVisitor):
                 raise TypeError(f"Operator {type(op).__name__} does not support None operands")
 
             # 【新增】处理 Python List 与 Z3 Seq 的比较
-            if z3.is_seq(cur_left) and isinstance(right, (list, tuple)):
+            if z3.is_seq(cur_left) and isinstance(right, (list, tuple)) and not isinstance(op, (ast.In, ast.NotIn)):
                 if isinstance(op, ast.Eq):
                     len_c = z3.Length(cur_left) == len(right)
                     elem_cs = [cur_left[i] == v for i, v in enumerate(right)]
@@ -248,7 +310,8 @@ class ASTtoZ3Converter(ast.NodeVisitor):
                     res.append(cur_left >= right)
                 elif isinstance(op, ast.In):
                     if isinstance(right, list):
-                        res.append(z3.Or([cur_left == v for v in right]))
+                        vals = [convert_operand(cur_left, v) for v in right]
+                        res.append(z3.Or([cur_left == v for v in vals]))
                     elif z3.is_seq(right):
                         length = z3.Length(right)
                         idx = z3.Int(f"__in_{self.builder.get_next_slice_id()}")
@@ -257,7 +320,8 @@ class ASTtoZ3Converter(ast.NodeVisitor):
                         raise TypeError("'in' right operand must be a list or sequence")
                 elif isinstance(op, ast.NotIn):
                     if isinstance(right, list):
-                        res.append(z3.And([cur_left != v for v in right]))
+                        vals = [convert_operand(cur_left, v) for v in right]
+                        res.append(z3.And([cur_left != v for v in vals]))
                     elif z3.is_seq(right):
                         length = z3.Length(right)
                         idx = z3.Int(f"__notin_{self.builder.get_next_slice_id()}")
@@ -296,6 +360,10 @@ class ASTtoZ3Converter(ast.NodeVisitor):
     def visit_BinOp(self, node):
         left = self.visit(node.left)
         right = self.visit(node.right)
+        if isinstance(left, TensorElementProxy):
+            left = left._scalar()
+        if isinstance(right, TensorElementProxy):
+            right = right._scalar()
         if left is None or right is None: raise ValueError(f"Binary op failed: {ast.dump(node)}")
 
         # 常量折叠
@@ -355,7 +423,11 @@ class ASTtoZ3Converter(ast.NodeVisitor):
         elif z3.is_seq(value):
             actual_idx = z3.If(idx < 0, z3.Length(value) + idx, idx)
 
+        if isinstance(value, TensorListVar):
+            value._range_constraint_used = True
+            return TensorElementProxy(value, actual_idx)
         if hasattr(value, 'get_element_at'):
+            value._range_constraint_used = True
             return value.get_element_at(actual_idx)
         elif z3.is_seq(value):
             return value[actual_idx]
@@ -384,10 +456,22 @@ class ASTtoZ3Converter(ast.NodeVisitor):
             return getattr(self, handler_name)(node, func_name)
         raise NotImplementedError(f"Unsupported function: {func_name}")
 
+    def _handle_prod(self, node, func_name):
+        if len(node.args) != 1:
+            raise ValueError("prod() requires exactly 1 argument")
+        arg = self.visit(node.args[0])
+        if arg is None:
+            raise ValueError("prod() argument failed")
+        if z3.is_seq(arg):
+            return self._prod_z3_sequence(arg)
+        raise TypeError(f"prod() on unsupported type: {type(arg).__name__}")
+
     def _handle_len(self, node, func_name):
         if len(node.args) != 1: raise ValueError("len() expects 1 argument")
         arg = self.visit(node.args[0])
         if arg is None: raise ValueError("len() argument failed")
+        if isinstance(arg, TensorListVar):
+            return arg.length
         if hasattr(arg, 'shape'): return z3.Length(arg.shape)
         if hasattr(arg, 'z3_var') and z3.is_seq(arg.z3_var): return z3.Length(arg.z3_var)
         if z3.is_seq(arg): return z3.Length(arg)
@@ -559,10 +643,12 @@ class ASTtoZ3Converter(ast.NodeVisitor):
 
         if isinstance(target, TensorVar):
             arr = target.range_value
+        elif isinstance(target, TensorListVar):
+            arr = target.range_value
         elif isinstance(target, ListVar):
             arr = target.z3_var
         else:
-            raise TypeError("max/min requires Tensor or List")
+            raise TypeError("max/min requires Tensor, TensorList, or List")
 
         element_sort = target.get_element_sort()
         res_name = f"__{'max' if is_max else 'min'}_{target.name}_{self.builder.get_next_slice_id()}"
@@ -599,6 +685,11 @@ class ASTtoZ3Converter(ast.NodeVisitor):
     def _get_sequence_length_for_maxmin(self, target):
         if isinstance(target, ListVar):
             return z3.Length(target.z3_var)
+        elif isinstance(target, TensorListVar):
+            _ = target.range_value
+            rank = z3.Length(target.elem_shape)
+            self.builder.solver.add(rank == 1)
+            return target.elem_shape[0]
         elif isinstance(target, TensorVar):
             _ = target.range_value
             rank = z3.Length(target.shape)
@@ -616,6 +707,8 @@ class ASTtoZ3Converter(ast.NodeVisitor):
         if len(node.args) == 1 and isinstance(node.args[0], ast.Name):
             var = self.builder.get_or_create_var(node.args[0].id)
             if isinstance(var, TensorVar):
+                return self._sum_tensor_elements(var)
+            if isinstance(var, TensorListVar):
                 return self._sum_tensor_elements(var)
             if isinstance(var, ListVar):
                 return self._sum_z3_sequence(var.z3_var, var.get_element_sort())
@@ -664,6 +757,21 @@ class ASTtoZ3Converter(ast.NodeVisitor):
 
         return SumSeq(seq)
 
+    def _prod_z3_sequence(self, seq):
+        seq_sort = seq.sort()
+        slice_id = self.builder.get_next_slice_id()
+        func_name = f"__prod_seq_{slice_id}"
+
+        ProdSeq = z3.RecFunction(func_name, seq_sort, z3.IntSort())
+        seq_var = z3.Const(f"{func_name}_arg", seq_sort)
+
+        z3.RecAddDefinition(ProdSeq, [seq_var],
+            z3.If(z3.Length(seq_var) == 0,
+                   z3.IntVal(1),
+                   seq_var[0] * ProdSeq(z3.SubSeq(seq_var, 1, z3.Length(seq_var) - 1))))
+
+        return ProdSeq(seq)
+
     def _sum_tensor_elements(self, tensor_var):
         arr = tensor_var.range_value
         element_sort = tensor_var.get_element_sort()
@@ -690,9 +798,10 @@ class ASTtoZ3Converter(ast.NodeVisitor):
                    zero,
                    z3.Select(arr_var, start_var) + SumArr(arr_var, start_var + 1, end_var)))
 
-        rank = z3.Length(tensor_var.shape)
+        shape = tensor_var.shape if isinstance(tensor_var, TensorVar) else tensor_var.elem_shape
+        rank = z3.Length(shape)
         self.builder.solver.add(rank == 1)
-        n_elements = tensor_var.shape[0]
+        n_elements = shape[0]
         return SumArr(arr, z3.IntVal(0), n_elements)
 
     def _sum_scalars(self, values):

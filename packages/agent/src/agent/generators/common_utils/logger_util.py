@@ -350,7 +350,7 @@ class DocumentLogContext:
         self.doc_logger = ThreadSafeLogger(
             log_name=self.doc_name,
             log_dir=self.log_dir,
-            console_output=False,
+            # 这里可以根据需要添加 rotation 等参数
         )
 
         # 3. 将全局指针指向新的 doc logger
