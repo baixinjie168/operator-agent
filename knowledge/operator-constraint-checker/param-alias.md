@@ -42,3 +42,20 @@ antiquantOffsetOptional: [antiquantOffset1Optional, antiquantOffset2Optional]
 **说明**：
 - `expertTokens` 是 `expertTokensOptional` 的简写（漏了 Optional 后缀）。
 - `deqScaleOptional` / `weight` / `biasOptional` / `antiquantScaleOptional` / `antiquantOffsetOptional` 是对成对参数（1/2 后缀）的泛化简写，约束需同时适用于两个实际参数。
+
+### aclnnGroupedMatmulV5
+
+```yaml
+bias: [biasOptional]
+scale: [scaleOptional]
+offset: [offsetOptional]
+antiquantScale: [antiquantScaleOptional]
+antiquantOffset: [antiquantOffsetOptional]
+perTokenScale: [perTokenScaleOptional]
+groupList: [groupListOptional]
+activationInput: [activationInputOptional]
+```
+
+**说明**：
+- LLM 约束提取时对可选参数使用了简写名（去掉 Optional 后缀），导致 `constraints_in_parameters` 引用了参数列表中不存在的名字。
+- 以上映射将简写名还原为实际参数名，确保别名展开后不被 FIX-2 过滤误删。

@@ -54,6 +54,9 @@ from agent.nodes.build_param_relations import build_param_relations_node as _bui
 from agent.nodes.constraint_extract import (
     constraint_extract_node as _constraint_extract,
 )
+from agent.nodes.constraint_completeness_check import (
+    constraint_completeness_check_node as _completeness_check,
+)
 from agent.nodes.determinism_extract import determinism_extract_node as _determinism_extract
 from agent.nodes.dformat_extract import dformat_extract_node as _dformat_extract
 from agent.nodes.dtype_combo_extract import dtype_combo_extract_node as _dtype_combo_extract
@@ -316,6 +319,7 @@ def _build_extract(graph: StateGraph, *, is_first: bool, is_last: bool) -> None:
            → ConstraintExtract (Pass 1-5: unified constraint extraction)
            → BuildParamRelations (expr generation + dim var substitution)
            → BuildParamConstraint (subgraph: fetch + attrs + dims + assemble)
+           → ConstraintCompletenessCheck (global dtype/shape/equality/coverage)
            → AssembleResult → END
     """
     graph.add_node("init_doc", traced_node("init_doc")(_init_doc))
@@ -337,6 +341,7 @@ def _build_extract(graph: StateGraph, *, is_first: bool, is_last: bool) -> None:
     graph.add_node("build_param_relations", traced_node("build_param_relations")(_build_param_relations))
     bpc_subgraph = create_build_param_constraint_subgraph()
     graph.add_node("build_param_constraint", traced_subgraph("build_param_constraint")(bpc_subgraph))
+    graph.add_node("constraint_completeness_check", traced_node("constraint_completeness_check")(_completeness_check))
     graph.add_node("assemble_result", traced_node("assemble_result")(_assemble_result))
 
     if is_first:
@@ -358,7 +363,12 @@ def _build_extract(graph: StateGraph, *, is_first: bool, is_last: bool) -> None:
 
     graph.add_edge("constraint_extract", "build_param_relations")
     graph.add_edge("build_param_relations", "build_param_constraint")
-    graph.add_edge("build_param_constraint", "assemble_result")
+    # Phase 3 Item 9: global completeness check between build_param_constraint
+    # and assemble_result. Queries DB (params/relations written by upstream
+    # nodes), auto-injects missing cross-equality constraints, flags
+    # dtype/shape/product-coverage gaps as _needs_review. Zero LLM calls.
+    graph.add_edge("build_param_constraint", "constraint_completeness_check")
+    graph.add_edge("constraint_completeness_check", "assemble_result")
 
     if is_last:
         graph.add_edge("assemble_result", END)

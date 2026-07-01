@@ -37,6 +37,7 @@ from agent.nodes.param_relation_extract.prompts import (
 )
 from agent.nodes.param_relation_extract.state import RelationExtractState
 from agent.utils.llm_common import parse_json_response
+from agent.utils.param_validators import is_tensor_type
 
 logger = logging.getLogger(__name__)
 
@@ -156,6 +157,29 @@ def _collect_signature_params(signatures: list[dict]) -> set[str]:
     return names
 
 
+def _build_sig_param_types(signatures: list[dict]) -> dict[str, str]:
+    """Build ``{param_name: param_type}`` from normalized function signatures.
+
+    The signature ``parameters[].type`` field is already normalized to a
+    base type (``aclTensor`` / ``bool`` / ``aclIntArray`` ...) by
+    ``function_signature_extract._normalize_param_types``, making it an
+    authoritative source for the Tensor vs non-Tensor decision (Item 1
+    source defense). Both camelCase and snake_case keys are emitted so
+    callers can look up either form.
+    """
+    out: dict[str, str] = {}
+    for sig in signatures:
+        for p in sig.get("parameters", []):
+            if not isinstance(p, dict):
+                continue
+            name = p.get("name", "")
+            ptype = p.get("type", "")
+            if name:
+                out[name] = ptype
+                out[_camel_to_snake(name)] = ptype
+    return out
+
+
 def _find_nearby_param_name(text: str, pos: int) -> str:
     """Find the parameter name from the HTML table row containing *pos*."""
     tr_start = text.rfind("<tr", 0, pos)
@@ -183,13 +207,20 @@ def _find_nearby_param_name(text: str, pos: int) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _identify_tensor_params(
+def _identify_tensor_params_from_html(
     sections_text: str,
     sig_params: set[str],
 ) -> set[str]:
     """Collect names of tensor-type parameters from HTML table rows.
 
     A parameter is a tensor if its row has shape info or tensor data types.
+
+    This is the HTML-heuristic fallback used when authoritative signature
+    types are unavailable. It is prone to false positives: a non-Tensor
+    parameter (e.g. ``transposeX2(bool)``) whose *usage-notes* cell mentions
+    "shape" (describing another param's shape relation) would be misclassified
+    as a Tensor. The signature-type-preferring :func:`_identify_tensor_params`
+    avoids this by trusting the normalized ``type`` field instead.
     """
     tensor_params: set[str] = set()
 
@@ -220,6 +251,51 @@ def _identify_tensor_params(
                 break
 
     return tensor_params
+
+
+def _identify_tensor_params(
+    sections_text: str,
+    sig_params: set[str],
+    sig_param_types: dict[str, str] | None = None,
+) -> set[str]:
+    """Identify tensor-type parameters, trusting signature types first.
+
+    Item 1 source defense. When *sig_param_types* is provided (the common
+    case — fetched via ``query_function_signatures_by_doc_id`` and normalized
+    by ``_normalize_param_types``), parameters whose signature ``type`` is
+    ``aclTensor*`` are authoritative Tensors. Parameters that appear in the
+    signature type table with a *non-Tensor* type (``bool``,
+    ``aclIntArray``, ...) are **excluded** even if the HTML heuristic would
+    flag them — this is the fix for ``transposeX2(bool)`` being misclassified
+    when its usage notes mention "shape".
+
+    Parameters *absent* from the signature type table fall back to the HTML
+    heuristic (``_identify_tensor_params_from_html``), preserving behavior
+    for params whose type couldn't be resolved.
+
+    Args:
+        sections_text: combined ws+exe section HTML.
+        sig_params: all signature parameter names (camelCase + snake_case).
+        sig_param_types: ``{param_name: param_type}`` from signatures, or
+            None to use the pure HTML heuristic (legacy behavior).
+
+    Returns:
+        Set of tensor parameter names.
+    """
+    if not sig_param_types:
+        return _identify_tensor_params_from_html(sections_text, sig_params)
+
+    # Authoritative: signature types that are aclTensor*
+    typed_tensors = {
+        n for n, t in sig_param_types.items() if is_tensor_type(t)
+    } & sig_params
+
+    # HTML heuristic, then keep only the params NOT covered by the signature
+    # type table (so signature-typed non-Tensors are never rescued by HTML).
+    html_tensors = _identify_tensor_params_from_html(sections_text, sig_params)
+    untyped = html_tensors - set(sig_param_types)
+
+    return typed_tensors | untyped
 
 
 # ---------------------------------------------------------------------------
@@ -490,6 +566,14 @@ _AGENT_SYSTEM_PROMPT_TEMPLATE = (
     "- It appears in a shape tuple representing a dimension **size value**\n"
     "- It is a symbolic variable name (e.g. N, C, H, W, BS, batchSize, k0)\n"
     "- It can be referenced in constraint expressions (e.g. BS.range_value)\n\n"
+    "**Important constraint on tensor_param:** the `tensor_param` field MUST "
+    "point to an aclTensor* type parameter. Do NOT assign bool / int* / "
+    "char* / aclIntArray / aclScalar or any other non-Tensor parameter to "
+    "`tensor_param`. If an identifier appears in the usage notes of a "
+    "non-Tensor parameter (e.g. transposeX2, alltoAllAxesOptional), it is "
+    "describing **another** Tensor parameter's shape — associate it with the "
+    "correct Tensor parameter, or keep it only as a dimension_variable with "
+    "`tensor_param=null`.\n\n"
     "### Rule 2: Concept term (remove)\n"
     "Remove an identifier if it belongs to any of these categories:\n\n"
     "a) Dimension concept name: in X维度, X describes the dimension meaning,\n"
@@ -595,6 +679,10 @@ def _candidate_to_mapping(candidate: dict) -> dict:
         "tensor_param": candidate["tensor_param"],
         "dim_index": candidate["dim_index"],
         "shape_text": candidate["shape_text"],
+        # FIX-12: store the source section text (surrounding context) so
+        # parameter_representation_build can use document原文 as src_text
+        # instead of the internal shape_text label.
+        "source_section_text": candidate.get("surrounding_text", ""),
         "is_constant": False,
         "constant_value": None,
         "slot_index": candidate["slot_index"],
@@ -610,10 +698,22 @@ def _candidate_to_mapping(candidate: dict) -> dict:
 def _apply_agent_actions(
     candidates: list[dict],
     parsed: dict[str, list],
+    tensor_params: set[str] | None = None,
 ) -> list[dict]:
     """Apply Agent actions (confirm/remove/reclassify) and additions to candidates.
 
     Returns the final list of mapping dicts.
+
+    Args:
+        candidates: Phase 1 regex candidates.
+        parsed: Agent response with ``actions`` and ``additions``.
+        tensor_params: authoritative Tensor parameter-name set (Item 1 source
+            defense). When provided, any confirm/reclassify/addition that
+            assigns a non-Tensor parameter to ``tensor_param`` has its shape
+            mapping stripped (``tensor_param``/``dim_index``/``shape_text``/
+            ``slot_*`` nulled) and the variable is kept only as a
+            dimension_variable. External constants are exempt (they carry no
+            tensor_param anyway). When None, no guarding is performed.
     """
     cand_by_id = {c["candidate_id"]: c for c in candidates}
     handled_ids: set[str] = set()
@@ -656,6 +756,28 @@ def _apply_agent_actions(
                 mapping["compound_expr"] = None
                 mapping["referenced_in"] = action.get("referenced_in", [])
 
+            # Item 1 source defense: strip shape mapping when the Agent
+            # assigned a non-Tensor parameter to tensor_param. The variable
+            # is retained as a dimension_variable (tensor_param=null) so it
+            # can still be referenced in cross-variable constraints. External
+            # constants are already nulled above and are exempt.
+            tp = mapping.get("tensor_param")
+            if (
+                tp
+                and tensor_params is not None
+                and tp not in tensor_params
+                and not mapping.get("is_external_constant")
+            ):
+                logger.warning(
+                    "ImplicitParamsAgent: 动作把非 Tensor 参数 %s 标为 "
+                    "tensor_param，剥离 shape 映射", tp,
+                )
+                mapping["tensor_param"] = None
+                mapping["dim_index"] = None
+                mapping["shape_text"] = None
+                mapping["slot_index"] = None
+                mapping["slot_expr"] = None
+
             mappings.append(mapping)
             logger.debug(
                 "ImplicitParamsAgent: %s %s as %s - %s",
@@ -689,6 +811,20 @@ def _apply_agent_actions(
             "is_quantization_type": False,
             "referenced_in": addition.get("referenced_in", []),
         }
+        # Item 1 source defense: guard additions too.
+        tp = mapping.get("tensor_param")
+        if (
+            tp
+            and tensor_params is not None
+            and tp not in tensor_params
+            and not mapping.get("is_external_constant")
+        ):
+            logger.warning(
+                "ImplicitParamsAgent: addition 把非 Tensor 参数 %s 标为 "
+                "tensor_param，置空 tensor_param/dim_index", tp,
+            )
+            mapping["tensor_param"] = None
+            mapping["dim_index"] = None
         mappings.append(mapping)
         logger.debug(
             "ImplicitParamsAgent: added %s as %s - %s",
@@ -747,7 +883,7 @@ async def _validate_via_agent(
         )
         return [_candidate_to_mapping(c) for c in candidates]
 
-    mappings = _apply_agent_actions(candidates, parsed)
+    mappings = _apply_agent_actions(candidates, parsed, tensor_params)
 
     # Degradation 3: too few results — merge with regex fallback
     if len(mappings) < len(candidates) * 0.3:
@@ -819,9 +955,15 @@ async def implicit_param_extract_node(
         # Fetch function signatures
         sigs = await _mcp_client.query_function_signatures_by_doc_id(doc_id)
         sig_params = _collect_signature_params(sigs)
+        # Item 1 source defense: authoritative {param_name: param_type} from
+        # normalized signatures, used to trust signature types over the
+        # shape-keyword HTML heuristic when classifying Tensor params.
+        sig_param_types = _build_sig_param_types(sigs)
 
         # Phase 0: Identify tensor parameters (deterministic)
-        tensor_params = _identify_tensor_params(sections_text, sig_params)
+        tensor_params = _identify_tensor_params(
+            sections_text, sig_params, sig_param_types,
+        )
         logger.debug(
             "ImplicitParamExtract: Phase 0 identified %d tensor params: %s",
             len(tensor_params), sorted(tensor_params),

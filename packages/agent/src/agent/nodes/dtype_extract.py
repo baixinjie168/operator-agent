@@ -20,6 +20,96 @@ logger = logging.getLogger(__name__)
 _mcp_client = MCPClient()
 
 
+# ---------------------------------------------------------------------------
+# Regex fallback & conditional dtype detection (Item 4)
+# ---------------------------------------------------------------------------
+
+# dtype token regex covering the VALID_DTYPES whitelist.  Matches
+# FLOAT(16|32|64)?, INT(8|16|32|64), UINT(8|16|32|64), BOOL, BFLOAT16,
+# BF16, DOUBLE, STRING, COMPLEX(32|64|128).
+# Uses ASCII-only lookaround (not \b) so Chinese characters preceding the
+# token don't block the match (Python's \b treats CJK as word chars).
+_DTYPE_TOKEN_RE = re.compile(
+    r"(?<![A-Za-z])"
+    r"(FLOAT(?:16|32|64)?|INT(?:8|16|32|64)|UINT(?:8|16|32|64)|"
+    r"BOOL|BFLOAT16|BF16|DOUBLE|STRING|COMPLEX(?:32|64|128))"
+    r"(?![A-Za-z0-9])",
+    re.IGNORECASE,
+)
+
+# Normalize aliases to canonical VALID_DTYPES spellings.
+_DTYPE_ALIASES = {"BF16": "BFLOAT16", "DOUBLE": "FLOAT64"}
+
+# Conditional-dtype (quantization scenario) detection.
+# (?<!非) prevents matching "量化" inside "非量化" (non-quantized).
+# (?<!non)(?<!non[-.]) prevents matching "quant" inside "non-quant"/"non.quant".
+# .*? bridges the keyword and the dtype (handles "mode:", "场景下x为", etc.).
+_QUANT_COND_RE = re.compile(
+    r"(?:(?<!非)量化|(?<!non)(?<!non[-.])quant\w*)"
+    r".*?"
+    r"(FLOAT16|INT8|INT32|UINT64|BFLOAT16|BF16|FLOAT32)",
+    re.IGNORECASE,
+)
+_DEFAULT_DTYPE_RE = re.compile(
+    r"(?:非量化|不量化|non.quant\w*|普通|正常)"
+    r".*?"
+    r"(FLOAT16|INT8|INT32|UINT64|BFLOAT16|BF16|FLOAT32)",
+    re.IGNORECASE,
+)
+
+
+def _regex_fallback_dtype(description: str) -> str | None:
+    """Regex fallback: extract dtype tokens from description text (Item 4).
+
+    Zero LLM cost.  Called when LLM extraction fails, searching the
+    ``llm_description`` + ``param_desc`` for VALID_DTYPES whitelist tokens.
+    Returns a comma-separated sorted string (e.g. ``"FLOAT16, INT8"``) or
+    ``None`` when no token is found.
+    """
+    if not description:
+        return None
+    tokens: set[str] = set()
+    for m in _DTYPE_TOKEN_RE.finditer(description):
+        token = m.group(1).upper()
+        token = _DTYPE_ALIASES.get(token, token)
+        if token in VALID_DTYPES:
+            tokens.add(token)
+    if tokens:
+        return ", ".join(sorted(tokens))
+    return None
+
+
+def _detect_conditional_dtype(description: str) -> dict | None:
+    """Detect conditional dtype (quantization scenario) — Item 4.
+
+    Returns ``{"condition": "量化", "cond_dtype": "INT8",
+    "default_dtype": "FLOAT16"}`` or ``None``.
+    """
+    if not description:
+        return None
+    quant_m = _QUANT_COND_RE.search(description)
+    if not quant_m:
+        return None
+    cond_dtype = _DTYPE_ALIASES.get(
+        quant_m.group(1).upper(), quant_m.group(1).upper()
+    )
+    if cond_dtype not in VALID_DTYPES:
+        return None
+    default_dtype = None
+    default_m = _DEFAULT_DTYPE_RE.search(description)
+    if default_m:
+        default_dtype = _DTYPE_ALIASES.get(
+            default_m.group(1).upper(), default_m.group(1).upper()
+        )
+        if default_dtype not in VALID_DTYPES:
+            default_dtype = None
+    return {
+        "condition": "量化",
+        "cond_dtype": cond_dtype,
+        "default_dtype": default_dtype,
+    }
+
+
 def _is_dtype_valid(dtype_desc: str) -> bool:
     """Check whether an existing dtype_desc value is reasonable.
 
@@ -119,12 +209,87 @@ async def dtype_extract_node(state: PipelineState) -> dict[str, Any]:
 
         results = await asyncio.gather(*[_extract_one(p) for p in described])
 
-        dtype_updates = [r for r in results if r is not None and r.get("dtype")]
-        # Wrap plain text dtype values as JSON: {"*": value}
-        for u in dtype_updates:
-            val = u["dtype"]
-            if isinstance(val, str) and not val.startswith("{"):
-                u["dtype"] = json.dumps({"*": val}, ensure_ascii=False)
+        # Item 4: Build param_desc map for regex fallback.
+        # state.parameters may carry param_desc (set by table_column_extract),
+        # but it may be missing for some params.  Query DB to supplement so
+        # the regex fallback has the richest text to search.
+        param_desc_map: dict[str, str] = {}
+        for p in described:
+            pn = p.get("param_name", "")
+            pd = p.get("param_desc", "") or ""
+            if pn and pd:
+                param_desc_map[pn] = pd
+        if any(not p.get("param_desc") for p in described):
+            try:
+                db_params = await _mcp_client.query_params_by_doc_id(doc_id)
+                for dp in db_params:
+                    pn_db = dp.get("param_name", "")
+                    if pn_db and pn_db not in param_desc_map:
+                        pd_db = dp.get("param_desc", "") or ""
+                        if pd_db:
+                            param_desc_map[pn_db] = pd_db
+            except Exception:
+                logger.warning(
+                    "DtypeExtract: 查询 param_desc 失败，"
+                    "正则兜底仅搜 llm_description",
+                )
+
+        # Build LLM result lookup by param_name.
+        result_by_name: dict[str, dict | None] = {}
+        for r, p in zip(results, described):
+            result_by_name[p.get("param_name", "")] = r
+
+        dtype_updates: list[dict] = []
+        for p in described:
+            pn = p.get("param_name", "")
+            fn = p.get("function_name", "")
+            r = result_by_name.get(pn)
+
+            combined_desc = " ".join(filter(None, [
+                p.get("llm_description", ""),
+                param_desc_map.get(pn, ""),
+            ]))
+
+            # Prefer LLM result.
+            dtype_val = r.get("dtype", "").upper() if r else ""
+
+            # Item 4: LLM failed (empty/invalid) → regex fallback.
+            if not dtype_val or not _is_plain_dtype_valid(dtype_val):
+                fb = _regex_fallback_dtype(combined_desc)
+                if fb:
+                    dtype_val = fb
+                    logger.info(
+                        "DtypeExtract: 正则兜底提取 %s dtype=%s", pn, fb,
+                    )
+
+            if not dtype_val:
+                continue
+
+            # Item 4: conditional dtype detection (quantization scenario).
+            cond = _detect_conditional_dtype(combined_desc)
+            if cond and cond["cond_dtype"] != (
+                cond.get("default_dtype") or dtype_val
+            ):
+                default = cond.get("default_dtype") or dtype_val
+                dtype_json = {
+                    cond["condition"]: cond["cond_dtype"],
+                    "*": default,
+                }
+                dtype_updates.append({
+                    "function_name": fn, "param_name": pn,
+                    "dtype": json.dumps(dtype_json, ensure_ascii=False),
+                })
+            else:
+                # Wrap plain text dtype as JSON: {"*": value}
+                if not dtype_val.startswith("{"):
+                    dtype_val = json.dumps(
+                        {"*": dtype_val}, ensure_ascii=False,
+                    )
+                dtype_updates.append({
+                    "function_name": fn, "param_name": pn,
+                    "dtype": dtype_val,
+                })
+
         if dtype_updates:
             result = await _mcp_client.update_param_dtype(doc_id, dtype_updates)
             logger.info(

@@ -10,8 +10,8 @@ import operator
 
 import z3
 
-from common_utils.logger_util import LazyLogger
-from param_constraint_solve.param_var_definition import TensorVar, ListVar, ScalarVar, DTYPE_MAP
+from agent.generators.common_utils.logger_util import LazyLogger
+from agent.generators.param_constraint_solve.param_var_definition import TensorVar, ListVar, ScalarVar, DTYPE_MAP
 
 logger = LazyLogger()
 

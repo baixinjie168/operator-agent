@@ -33,11 +33,20 @@ _OUTPUT_DIR = Path(__file__).resolve().parents[6] / "executors"
 
 
 def _run_generator(cmd: list[str]) -> tuple[int, str, str]:
-    """Run generator.py subprocess (blocking, for use in thread executor)."""
+    """Run generator.py subprocess (blocking, for use in thread executor).
+
+    ``encoding="utf-8"`` + ``errors="replace"`` is mandatory on Windows:
+    ``text=True`` alone defaults to ``locale.getpreferredencoding(False)``
+    (cp1252 on most Windows boxes), and the internal reader thread will
+    raise ``UnicodeDecodeError`` the moment the child writes a UTF-8 byte
+    it can't decode — killing the whole batch run.
+    """
     proc = subprocess.run(
         cmd,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=60,
     )
     return proc.returncode, proc.stdout, proc.stderr

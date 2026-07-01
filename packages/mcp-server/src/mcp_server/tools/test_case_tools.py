@@ -44,7 +44,7 @@ def ensure_test_cases_schema() -> None:
                 operator_name  TEXT NOT NULL,
                 cases_json     TEXT NOT NULL,
                 source         TEXT NOT NULL DEFAULT 'generated',
-                created_at     TEXT DEFAULT (datetime('now'))
+                created_at     TEXT DEFAULT (datetime('now', 'localtime'))
             );
             CREATE INDEX IF NOT EXISTS idx_test_cases_operator
                 ON test_cases(operator_name);

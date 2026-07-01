@@ -93,13 +93,13 @@ def _truthy_pass(value: Any) -> bool:
 def make_local_cache_dir(project_root: Path, operator_name: str, run_id: str) -> Path:
     """Create a per-run directory for downloaded ATK artifacts.
 
-    Layout: ``<project_root>/executtion_results/<operator_name>/<run_id>/``
+    Layout: ``<project_root>/execution_results/<operator_name>/<run_id>/``
     so each operator keeps its own folder and multiple runs of the same
     operator do not overwrite each other.
     """
     safe_operator = re.sub(r"[^A-Za-z0-9_.-]", "_", operator_name).strip("_") or "operator"
     safe_run = re.sub(r"[^A-Za-z0-9_.-]", "_", run_id)[:48] or "run"
-    cache = project_root / "executtion_results" / safe_operator / safe_run
+    cache = project_root / "execution_results" / safe_operator / safe_run
     cache.mkdir(parents=True, exist_ok=True)
     return cache
 

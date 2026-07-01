@@ -18,6 +18,8 @@ import logging
 import os
 from typing import Any
 
+from agent.core.config import settings
+from agent.utils.expr_validation import _simplify_expr
 from agent.utils.llm_common import parse_json_response
 
 logger = logging.getLogger(__name__)
@@ -149,10 +151,27 @@ async def generate_expr_via_agent(
             "messages": [{"role": "user", "content": user_msg}],
         })
         ai_text = await _extract_ai_text(result)
-        return _parse_agent_response(ai_text)
+        parsed = _parse_agent_response(ai_text)
     except Exception:
         logger.exception("ComplexRelationAgent: invocation failed")
         return {"expr_type": "", "expr": "", "confidence": "low"}
+
+    # Phase 3 Item 8: post-generation simplification.
+    # If the Agent produced an over-long expr (>500 chars), attempt to factor
+    # out any sub-expression repeated 3+ times (FFNV3 [50] copy-paste pattern).
+    # Only replaces when the simplified form re-parses to valid syntax.
+    if settings.expr_simplify:
+        expr = parsed.get("expr", "")
+        if expr and len(expr) > 500:
+            simplified = _simplify_expr(expr)
+            if simplified != expr:
+                logger.info(
+                    "ComplexRelationAgent: simplified expr %d -> %d chars",
+                    len(expr), len(simplified),
+                )
+                parsed["expr"] = simplified
+                parsed["_simplified"] = True
+    return parsed
 
 
 async def generate_self_constraints_via_agent(

@@ -116,9 +116,17 @@ _RANGE_PATTERNS: list[tuple[str, Any]] = [
             "enum",
         ),
     ),
-    # "范围0-100" / "0~100" / "[0, 100]" → range [[0, 100]]
+    # FIX-14 (R7+R16): require brackets [...] or explicit range keyword
+    # (~ 到 至) for range detection. Bare comma-separated numbers like
+    # "7,32" are NOT ranges — they are enum values.
+    # "[0, 100]" → range [[0, 100]]
     (
-        r"\[?\s*(-?\d+)\s*[,，\-~]\s*(-?\d+)\s*\]?",
+        r"\[\s*(-?\d+)\s*[,，]\s*(-?\d+)\s*\]",
+        lambda m: ([[int(m.group(1)), int(m.group(2))]], "range"),
+    ),
+    # "0~100" / "0到100" / "0至100" → range [[0, 100]]
+    (
+        r"(-?\d+)\s*[~到至]\s*(-?\d+)",
         lambda m: ([[int(m.group(1)), int(m.group(2))]], "range"),
     ),
 ]
@@ -365,9 +373,9 @@ async def allowed_range_build_node(state: BuildParamConstraintState) -> dict[str
         bool_text = _collect_bool_param_text(p)
         narrowed = _narrow_bool_from_text(bool_text)
         if narrowed is not None:
-            result[key] = {"type": "range", "value": [narrowed]}
+            result[key] = {"type": "enum", "value": [narrowed]}
         else:
-            result[key] = {"type": "range", "value": [True, False]}
+            result[key] = {"type": "enum", "value": [True, False]}
 
     # Tensor types have no scalar value range — dimensions describe shape rank,
     # not value bounds.  Skip all extraction phases to prevent the deterministic

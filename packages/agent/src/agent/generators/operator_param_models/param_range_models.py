@@ -11,10 +11,10 @@ import numpy
 import torch
 from scipy.stats import norm
 
-from common_utils.common_dispatcher import CommonDispatcher
-from common_utils.logger_util import get_logger
-from data_definition.constants import DataMatchMap
-from data_definition.param_models_def import StaticModel, NormalModel, UniformModel, IntUniformModel, LogUniformModel, \
+from agent.generators.common_utils.common_dispatcher import CommonDispatcher
+from agent.generators.common_utils.logger_util import get_logger
+from agent.generators.data_definition.constants import DataMatchMap
+from agent.generators.data_definition.param_models_def import StaticModel, NormalModel, UniformModel, IntUniformModel, LogUniformModel, \
     ChoiceModel, ParamRangeRoleRules, DispatcherTargetType
 
 
