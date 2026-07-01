@@ -1064,13 +1064,41 @@ def main():
     if isinstance(cases, dict):
         cases = [cases]
 
-    # 展开 inputs 中带 length 字段的 list 类型输入（tensors / scalars）为多个独立 input
+    # 展开 inputs 中带 length 字段的 list 类型输入（tensors / scalars / attrs）为多个独立 input
     # 新格式: {"name": "x", "type": "tensors", "length": 2}
     # → 旧格式: [{"name": "x", "type": "tensors"}, {"name": "x", "type": "tensors"}]
     # 支持两种 inputs 结构:
     #   1) [[{dict}, {dict}, ...]] — 嵌套 list（多个输入组合）
     #   2) [{dict_with_length}] — 单层 list（一个输入组合，含 length 字段）
     # 同时清理 stale "length": null 字段（ATK 不需要）
+    # attrs 类型展开规则（type 改为 attr，删除 length）:
+    #   1. range_values 是列表且 len != length → 复制 length 次，每个保持原始 range_values
+    #   2. range_values 是列表且 len == length → 复制 length 次，每个取 range_values[i]
+    #   3. length 为 None/0 → 单个条目，range_values 设为空列表 []
+    def _expand_attrs_input(inp):
+        rv = inp.get("range_values")
+        length = inp.get("length")
+        base = {k: v for k, v in inp.items() if k != "length"}
+        # type 保持为 attrs
+        if length is None or int(length) == 0:
+            base["range_values"] = []
+            return [base]
+        length = int(length)
+        if isinstance(rv, list):
+            rv_list = rv
+        elif rv is not None:
+            rv_list = [rv]
+        else:
+            rv_list = []
+        if len(rv_list) == length:
+            result = []
+            for i in range(length):
+                item = copy.deepcopy(base)
+                item["range_values"] = rv_list[i]
+                result.append(item)
+            return result
+        return [copy.deepcopy(base) for _ in range(length)]
+
     _LIST_TYPES = {"tensors", "scalars"}
     for case in cases:
         new_inputs = []
@@ -1087,6 +1115,11 @@ def main():
                         else:
                             for _ in range(int(length)):
                                 expanded.append(copy.deepcopy(inp))
+                    elif isinstance(inp, dict) and inp.get("type") == "attrs":
+                        if "length" in inp:
+                            expanded.extend(_expand_attrs_input(copy.deepcopy(inp)))
+                        else:
+                            expanded.append(inp)
                     else:
                         expanded.append(inp)
                 new_inputs.append(expanded)
@@ -1099,6 +1132,11 @@ def main():
                         new_inputs.append([inp_group])
                     else:
                         new_inputs.append([copy.deepcopy(inp_group) for _ in range(int(length))])
+                elif inp_group.get("type") == "attrs":
+                    if "length" in inp_group:
+                        new_inputs.append(_expand_attrs_input(copy.deepcopy(inp_group)))
+                    else:
+                        new_inputs.append(inp_group)
                 else:
                     new_inputs.append(inp_group)
             else:
