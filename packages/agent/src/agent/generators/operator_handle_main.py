@@ -65,7 +65,7 @@ def _resolve_operator_name(operator_constraint: Union[str, os.PathLike, Mapping]
 
 
 def single_operator_handle(operator_constraint, platform=RunPlatform.ATLAS_A3_TRAIN_AND_INFER_SERIES.value,
-                           case_num=1) -> List:
+                           case_num=1,jsonl_save_path=None) -> List:
     """
     算子用例生成的主入口。
 
@@ -125,7 +125,7 @@ def single_operator_handle(operator_constraint, platform=RunPlatform.ATLAS_A3_TR
     case_list = operator_case_generate.handle_single_operator(
         operator_constraint_data=effective_operator_constraint_data,
         param_combination_list=param_combination_list, target_platform=platform,
-        case_num=case_num)
+        case_num=case_num, jsonl_save_path=jsonl_save_path)
     return case_list
 
 
@@ -168,10 +168,10 @@ def batch_operator_handel(operator_constraint_directory, operators: List = None,
             continue
         time_str = time.strftime("%Y%m%d%H%M%S", time.localtime())
         with DocumentLogContext(f"{operator_name}_{time_str}"):
-            case_list = single_operator_handle(operator_constraint_path, platform=platform,
-                                               case_num=case_num)
-            data_handle_utils.save_cases_to_json(api_name=operator_name, generate_case_list=case_list,
-                                                 json_save_path=case_save_path)
+            single_operator_handle(operator_constraint_path, platform=platform,
+                                   case_num=case_num, jsonl_save_path=case_save_path)
+            data_handle_utils.convert_jsonl_to_json(api_name=operator_name, jsonl_save_path=case_save_path,
+                                                     json_save_path=case_save_path)
 
         logger.info(
             f"End handle operator, file index : {index + 1}/{operator_constraint_num}, "
@@ -199,17 +199,19 @@ def main():
         raise ValueError("operator_constraint_directory and operator_constraint_path cannot be empty at the same time")
     elif args.operator_constraint_directory is not None:
         # operators = args.operators.split(",") if args.operators is not None else None
-        operators = ["aclnnAlltoAllMatmul"]
+        # operators = ["aclnnFFNV31"]
+        operators = ["aclnnSwinTransformerLnQkvQuant","aclnnSwinAttentionScoreQuant"]
         batch_operator_handel(operator_constraint_directory=args.operator_constraint_directory, operators=operators,
                               platform=args.platform, case_save_path=args.case_save_path, case_num=args.case_num)
     else:
         operator_name, _ = os.path.splitext(os.path.basename(args.operator_constraint_path))
         time_str = time.strftime("%Y%m%d%H%M%S", time.localtime())
         init_logger(log_name=operator_name + "_" + time_str)
-        case_list = single_operator_handle(operator_constraint=args.operator_constraint_path,
-                                           platform=args.platform, case_num=args.case_num)
-        DataHandleUtil.save_cases_to_json(api_name=operator_name, generate_case_list=case_list,
-                                          json_save_path=args.case_save_path)
+        single_operator_handle(operator_constraint=args.operator_constraint_path,
+                               platform=args.platform, case_num=args.case_num,
+                               jsonl_save_path=args.case_save_path)
+        DataHandleUtil.convert_jsonl_to_json(api_name=operator_name, jsonl_save_path=args.case_save_path,
+                                              json_save_path=args.case_save_path)
 
 
 if __name__ == '__main__':
