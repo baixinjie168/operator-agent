@@ -162,12 +162,17 @@ class PairwiseParamCombinationGenerator:
         return int(length_value) if length_value else ParamModelConfig.DEFAULT_LIST_LENGTH
 
     def _get_range_value(self, raw_case: Dict[str, Dict[str, Any]],
-                          param_name: str, param_attr, dtype: str) -> str | int | float | bool | None:
+                           param_name: str, param_attr, dtype: str) -> str | int | float | bool | None:
         from agent.generators.operator_param_combine.param_combination_generate import ParamCombinationGenerator
-        default_profile = random.choice(ParamCombinationGenerator.get_default_range_by_dtype(dtype))
+        valid_profiles = ParamCombinationGenerator.get_default_range_by_dtype(dtype)
+        default_profile = random.choice(valid_profiles)
         rv = raw_case.get(param_name, {}).get("range_value_profile")
         if rv is not None:
-            return rv
+            if isinstance(rv, str):
+                if rv in valid_profiles:
+                    return rv
+            else:
+                return rv
         return default_profile
 
     def _get_bool_attr(self, param_name: str, attr, attr_name: str) -> bool:

@@ -46,6 +46,34 @@ class DataHandleUtil:
         logger.info(f"End save case json, api name : '{api_name}'")
 
     @staticmethod
+    def convert_jsonl_to_json(api_name, jsonl_save_path, json_save_path):
+        """
+        将 .jsonl checkpoint 转换为标准 .json 文件
+        :param api_name: api名称，用来确认json文件名称
+        :param jsonl_save_path: .jsonl 文件所在目录
+        :param json_save_path: 输出 .json 文件目录
+        :return: bool
+        """
+        jsonl_file = os.path.join(jsonl_save_path, api_name + ".jsonl")
+        if not os.path.exists(jsonl_file):
+            logger.warning(f"JSONL file not found, skip convert: {jsonl_file}")
+            return False
+        logger.info(f"Start convert jsonl to json, api name : '{api_name}'")
+        case_config_json_list = []
+        with open(jsonl_file, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    case_config_json_list.append(json.loads(line))
+        if not os.path.exists(json_save_path):
+            os.makedirs(json_save_path)
+        json_save_file = os.path.join(json_save_path, api_name + ".json")
+        with open(json_save_file, "w", encoding="utf-8") as f:
+            f.write(json.dumps(case_config_json_list, ensure_ascii=False, indent=4))
+        logger.info(f"End convert jsonl to json, api name : '{api_name}', case count : {len(case_config_json_list)}")
+        return True
+
+    @staticmethod
     def handle_operator_rule_data(operator_rule_file_path: str) -> OperatorRule | None:
         """
         从约束数据中获取所有约束信息，即inter_parameter_constraints中的数据

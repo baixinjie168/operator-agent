@@ -160,6 +160,38 @@ TYPE_CONFIG = {
     'string': {
         'sort_fn': z3.StringSort,
         'parse_fn': lambda v: v.as_string()
+    },
+    'hifloat8': {
+        'sort_fn': z3.RealSort,
+        'parse_fn': _parse_float_value
+    },
+    'float8_e5m2': {
+        'sort_fn': z3.RealSort,
+        'parse_fn': _parse_float_value
+    },
+    'float8_e4m3fn': {
+        'sort_fn': z3.RealSort,
+        'parse_fn': _parse_float_value
+    },
+    'float8_e8m0': {
+        'sort_fn': z3.RealSort,
+        'parse_fn': _parse_float_value
+    },
+    'float6_e3m2': {
+        'sort_fn': z3.RealSort,
+        'parse_fn': _parse_float_value
+    },
+    'float6_e2m3': {
+        'sort_fn': z3.RealSort,
+        'parse_fn': _parse_float_value
+    },
+    'float4_e2m1': {
+        'sort_fn': z3.RealSort,
+        'parse_fn': _parse_float_value
+    },
+    'float4_e1m2': {
+        'sort_fn': z3.RealSort,
+        'parse_fn': _parse_float_value
     }
 }
 
@@ -585,6 +617,7 @@ class TensorVar(BaseVar):
         # 保存原始 spec 供优化逻辑使用
         self._range_spec = range_value
         self._dtype_arg = dtype
+        self._range_constraint_used = False
 
         # 1. 推断元素类型
         self._element_sort = self._infer_element_sort(dtype, range_value, z3.RealSort())
@@ -692,6 +725,7 @@ class TensorVar(BaseVar):
         if self.range_value.decl() in decls:
             logger.info("Get Tensor range")
             actual_values = set()
+            arr_expr = None
             try:
                 arr_expr = model.eval(self.range_value)
                 actual_values = self._extract_values_from_array_expr(arr_expr)
@@ -704,11 +738,141 @@ class TensorVar(BaseVar):
                 for v in actual_values:
                     pv = self._z3_val_to_py(v)
                     if pv is not None: py_vals.add(pv)
-            # 快速解析 Range,效率高，避免多次调用solver.check()
-            resolved_range = BaseVar._resolve_range_from_set_fast(py_vals, self._range_spec)
-            # 智能解析
-            # resolved_range = BaseVar._resolve_range_from_set(py_vals, self._range_spec)
+            # 当 range_value 未被任何约束表达式引用（无显式索引、无 .range_value 访问），
+            # 且 Z3 返回常量数组（K）时，回退到初始输入范围 input_spec
+            if (not self._range_constraint_used
+                    and self._range_spec is not None
+                    and arr_expr is not None and z3.is_const_array(arr_expr)):
+                resolved_range = self._range_spec
+            else:
+                resolved_range = BaseVar._resolve_range_from_set_fast(py_vals, self._range_spec)
             result["range_values"] = resolved_range
+        return result
+
+
+class TensorListVar(BaseVar):
+    def __init__(self, name, solver, dtype=None, allowed_dtypes=None, allowed_formats=None, range_value=None, length=None):
+        super().__init__(name, solver)
+        self.name = name
+        self.type = "tensor_list"
+        self.solver = solver
+
+        self._range_spec = range_value
+        self._dtype_arg = dtype
+        self._range_constraint_used = False
+
+        self._element_sort = self._infer_element_sort(dtype, range_value, z3.RealSort())
+
+        self.length = z3.Int(f"{name}.length")
+        if length is not None:
+            if isinstance(length, int):
+                self.solver.add(self.length == length)
+            elif isinstance(length, (list, tuple)) and len(length) == 2:
+                self.solver.add(self.length >= length[0])
+                self.solver.add(self.length <= length[1])
+
+        self.elem_dtype = z3.Const(f"{name}.elem.dtype", DType)
+        self.elem_shape = z3.Const(f"{name}.elem.shape", z3.SeqSort(z3.IntSort()))
+        self.elem_format = z3.Const(f"{name}.elem.format", z3.StringSort())
+        self.range_value = z3.Array(f"{name}.range_value", z3.IntSort(), self._element_sort)
+        self.solver.add(z3.Length(self.elem_shape) >= 0)
+
+        idx = z3.Int('idx')
+        self.solver.add(
+            z3.ForAll([idx],
+                      z3.Implies(z3.And(idx >= 0, idx < z3.Length(self.elem_shape)),
+                                 self.elem_shape[idx] > 0))
+        )
+
+        prod_func_name = f"__prod_shape_{self.name}"
+        SeqIntSort = z3.SeqSort(z3.IntSort())
+        ProdShape = z3.RecFunction(prod_func_name, SeqIntSort, z3.IntSort())
+        s_var = z3.Const(f"{prod_func_name}_arg", SeqIntSort)
+        z3.RecAddDefinition(ProdShape, [s_var],
+            z3.If(z3.Length(s_var) == 0,
+                   z3.IntVal(1),
+                   s_var[0] * ProdShape(
+                       z3.SubSeq(s_var, 1, z3.Length(s_var) - 1))))
+        self.solver.add(ProdShape(self.elem_shape) < ParamModelConfig.TENSOR_TENSOR_ELEMENT_LIMIT)
+
+        self._add_dtype_constraints(dtype, allowed_dtypes)
+        self._add_format_constraints(allowed_formats)
+
+        if self._dtype_arg and self._dtype_arg in DataMatchMap.DTYPE_SPECS:
+            min_val, max_val, _ = DataMatchMap.DTYPE_SPECS[self._dtype_arg]
+            if min_val is not None:
+                idx = z3.Int('idx')
+                self.solver.add(z3.ForAll([idx],
+                                          z3.Implies(
+                                              idx >= 0,
+                                              z3.And(
+                                                  z3.Select(self.range_value, idx) >= min_val,
+                                                  z3.Select(self.range_value, idx) <= max_val))))
+
+    def _add_dtype_constraints(self, dtype, allowed_dtypes):
+        if allowed_dtypes:
+            valid_dtypes = [dt for dt in allowed_dtypes if dt in DTYPE_MAP]
+            if valid_dtypes:
+                self.solver.add(z3.Or([self.elem_dtype == DTYPE_MAP.get(dt) for dt in valid_dtypes]))
+
+    def _add_format_constraints(self, allowed_formats):
+        if allowed_formats:
+            self.solver.add(z3.Or([self.elem_format == z3.StringVal(fmt) for fmt in allowed_formats]))
+
+    def get_z3_expr(self):
+        return self
+
+    def get_element_at(self, idx):
+        return z3.Select(self.range_value, idx)
+
+    def resolve_model(self, model):
+        decls = model.decls()
+        result = {'type': self.type, "length": 0, "dtype": self._dtype_arg, "range_value": self._range_spec}
+
+        if self.length.decl() in decls:
+            length_val = model.eval(self.length).as_long()
+            result['length'] = length_val
+
+        if self.elem_dtype.decl() in decls:
+            dtype_val = str(model.eval(self.elem_dtype))
+            result['dtype'] = dtype_val
+
+        if self.elem_format.decl() in decls:
+            format_val = model.eval(self.elem_format).as_string()
+            result['format'] = format_val
+
+        if self.elem_shape.decl() in decls:
+            shape_len = model.eval(z3.Length(self.elem_shape)).as_long()
+            if shape_len > 0:
+                try:
+                    shape_vals = [model.eval(self.elem_shape[i]).as_long() for i in range(shape_len)]
+                    result['shape'] = shape_vals
+                except Exception as e:
+                    logger.warning(f"Could not resolve shape for {self.name}: {str(e)}")
+
+        if self.range_value.decl() in decls:
+            actual_values = set()
+            arr_expr = None
+            try:
+                arr_expr = model.eval(self.range_value)
+                actual_values = self._extract_values_from_array_expr(arr_expr)
+            except Exception as e:
+                logger.warning(f"Could not resolve range_value for {self.name}: {str(e)}")
+            py_vals = set()
+            if actual_values is None:
+                py_vals = None
+            else:
+                for v in actual_values:
+                    pv = self._z3_val_to_py(v)
+                    if pv is not None: py_vals.add(pv)
+            if (not self._range_constraint_used
+                    and self._range_spec is not None
+                    and arr_expr is not None and z3.is_const_array(arr_expr)):
+                resolved_range = self._range_spec
+            else:
+                resolved_range = BaseVar._resolve_range_from_set_fast(py_vals, self._range_spec)
+            result['range_values'] = resolved_range
+
         return result
 
 

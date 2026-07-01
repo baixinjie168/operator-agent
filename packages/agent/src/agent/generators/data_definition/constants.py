@@ -99,7 +99,7 @@ class ParamModelConfig:
     BOOL_DTYPE = ["bool"]
 
     # 数值类参数以及bool类参数填充值模型全集
-    FLOAT_TENSOR_DATA_PROFILE = ["Typical", "PosNormal", "NegNormal", "Zero", "One", "NaN", "PosInf", "NegInf",
+    FLOAT_TENSOR_DATA_PROFILE = ["Typical", "PosNormal", "NegNormal", "Zero", "One",
                                  "SubNormal"]
     INT_TENSOR_DATA_PROFILE = ["Pos", "Neg", "Zero", "One", "Max", "Min"]
     BOOL_DATA_PROFILE = [True, False]
@@ -146,7 +146,7 @@ class DataMatchMap:
 
     # 在case_config中只生成数据生成方法字段，不生成实际数据时使用，用于适配ATK框架
     ACL_DTYPE_TRANSFER_TENSOR_MAP = {"INT4": "int4", "INT8": "int8", "INT16": "int16", "INT32": "int32",
-                                     "UINT8": "uint8", "INT": "int64",
+                                     "UINT8": "uint8", "INT": "int64", "uint64": "uint64",
                                      "UINT16": "uint16", "UINT32": "uint32", "UINT64": "uint64", "INT64": "int64",
                                      "BFLOAT16": "bf16", "FLOAT16": "fp16", "FLOAT32": "fp32", "FLOAT64": "fp64",
                                      "float32": "fp32", "float16": "fp16", "float64": "fp64", "COMPLEX64": "complex64",
@@ -155,7 +155,15 @@ class DataMatchMap:
                                      "ACL_FLOAT32": "fp32", "ACL_FLOAT64": "fp64", "ACL_FLOAT": "fp32",
                                      "ACL_BF16": "bf16", "BOOL": "bool", "STRING": "string", "CHAR": "string",
                                      "string": "string", "bool": "bool", "double": "double", "int64_t": "int64",
-                                     "int64": "int64", "int":"int64"}
+                                     "int64": "int64", "int": "int64", "HIFLOAT8": "hifloat8",
+                                     "ACL_HIFLOAT8": "hifloat8", "FLOAT8_E5M2": "float8_e5m2",
+                                     "ACL_FLOAT8_E5M2": "float8_e5m2", "FLOAT8_E4M3FN": "float8_e4m3fn",
+                                     "ACL_FLOAT8_E4M3FN": "float8_e4m3fn", "FLOAT8_E8M0": "float8_e8m0",
+                                     "ACL_FLOAT8_E8M0": "float8_e8m0", "FLOAT6_E3M2": "float6_e3m2",
+                                     "ACL_FLOAT6_E3M2": "float6_e3m2", "FLOAT6_E2M3": "float6_e2m3",
+                                     "ACL_FLOAT6_E2M3": "float6_e2m3", "FLOAT4_E2M1": "float4_e2m1",
+                                     "ACL_FLOAT4_E2M1": "float4_e2m1", "FLOAT4_E1M2": "float4_e1m2",
+                                     "ACL_FLOAT4_E1M2": "float4_e1m2"}
 
     # 如果type字段在ACL_TYPE_TRANSFER_ATK_MAP中，则转换为MAP中的值，否则默认为attr
     ACL_TYPE_TRANSFER_ATK_MAP = {"aclTensor": "tensor", "aclScalar": "scalar", "aclIntArray": "attrs",
@@ -170,14 +178,15 @@ class DataMatchMap:
     PARAM_VALUE_TO_ROLE_MODEL = {0: "Zero", 1: "One"}
     # 表达式中的关键词替换
     EXPR_KEYWORD_REPLACE = {"'nullptr'": None, 'TRUE': True,
-        'FALSE': False,}
+                            'FALSE': False, }
     # 约束类型映射关系表
     CONSTRAINT_TYPE_MAP = {"shape": ["shape_equality", "shape_broadcast", "shape_choice", "shape_dependency"],
                            "dtype": ["type_equality", "type_dependency"],
                            "range_values": ["presence_dependency", "value_dependency"]}
     # 构建Z3变量的时候，初始化时，需要根据不同的变量类型以及数据类型，将ACL_TYPE_TRANSFER_ATK_MAP中的value值映射到Z3中定义的var_type,
     # 当前Z3的变量类型只支持tensor、scalar、list，对于scalar, list,.数据类型只支持：int、float、bool
-    Z3_VAR_TYPE_MAP = {"tensor": "tensor", "tensors": "tensor", "scalar": "scalar", "scalars": "list", "attr": "scalar",
+    Z3_VAR_TYPE_MAP = {"tensor": "tensor", "tensors": "tensor_list", "scalar": "scalar", "scalars": "list",
+                       "attr": "scalar",
                        "attrs": "list"}
     # 根据参数数据类型设置可取值范围，防止未提供取值范围约束时，求解结果中的取值范围超出可表示上限
     DTYPE_SPECS = {
@@ -189,6 +198,9 @@ class DataMatchMap:
         "bf16": (-3.389e38, 3.389e38, False),
         "fp16": (-65504, 65504, False), "float": (-3.4e38, 3.4e38, False),
         "fp32": (-3.4e38, 3.4e38, False), "fp64": (-1.797e308, 1.797e308, False),
-        "double": (-1.797e308, 1.797e308, False),
+        "double": (-1.797e308, 1.797e308, False), "hifloat8": (-32768, 32768, False),
+        "float8_e5m2": (-57344, 57344, False), "float8_e4m3fn": (-448, 448, False),
+        "float8_e8m0": (-1.70e38, 1.70e38, False), "float6_e3m2": (-28, 28, False), "float6_e2m3": (-7.5, 7.5, False),
+        "float4_e2m1": (-6, 6, False), "float4_e1m2": (-3.5, 3.5, False),
         "bool": (None, None, None), "string": (None, None, None)
     }

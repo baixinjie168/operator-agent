@@ -36,10 +36,8 @@ logger = LazyLogger()
 ATTR_NAMES_1PAIR = ["dtype", "format", "dim_count", "dim_value_profile", "range_value_profile", "length"]
 
 # 2-pair 覆盖涉及的属性（仅统计可枚举的离散化属性）
-# dim_count 和 length 未包含在内，原因是：
-#   - dim_count 的取值范围通常在 1~8，配对空间巨大但实际约束限制严格
-#   - length 仅对少量 list 参数有效，跨参数时多数不存在
-ATTR_NAMES_2PAIR = ["dtype", "format", "dim_value_profile", "range_value_profile"]
+# length 未包含在内，原因是仅对少量 list 参数有效，跨参数时多数不存在
+ATTR_NAMES_2PAIR = ["dtype", "format", "dim_count", "dim_value_profile", "range_value_profile"]
 
 
 class CoverageResult:
@@ -49,13 +47,16 @@ class CoverageResult:
     Attributes:
         one_pair: Dict[参数名, Dict[属性名, dict]]
           示例: {"x1": {"dtype": {"count": 3, "total": 4, "rate": 0.75, ...}}}
-        two_pair: Dict[属性对标识, dict]
+        two_pair: Dict[属性对标识, dict]  — 同属性配对
           示例: {"x1.dtype × x2.dtype": {"count": 9, "total": 16, "rate": 0.5625, ...}}
+        two_pair_cross: Dict[属性对标识, dict]  — 跨属性配对
+          示例: {"x1.dtype × x2.format": {"count": 3, "total": 8, "rate": 0.375, ...}}
     """
 
     def __init__(self):
         self.one_pair: Dict[str, Dict[str, dict]] = {}
         self.two_pair: Dict[str, Dict[str, dict]] = {}
+        self.two_pair_cross: Dict[str, Dict[str, dict]] = {}
 
 
 # ============================================================
@@ -120,8 +121,12 @@ def compute_one_pair_coverage(
 
         for attr_name in ATTR_NAMES_1PAIR:
             # --- 过滤不适用的属性 ---
-            # dim_value_profile 只有 tensor 参数有
-            if attr_name == "dim_value_profile" and not param_domain.is_tensor():
+            # dim_count、dim_value_profile 和 dtype 只有 tensor 参数有意义
+            # 非 tensor 参数的 dtype 由类型本身隐含确定，用例中不会显式赋值
+            if attr_name in ("dim_count", "dim_value_profile", "dtype") and not param_domain.is_tensor():
+                continue
+            # format 只有 tensor 参数有意义
+            if attr_name == "format" and not param_domain.is_tensor():
                 continue
             # length 只有 list 类型参数有
             if attr_name == "length" and not param_domain.is_list_type():
@@ -219,8 +224,8 @@ def compute_two_pair_coverage(
             if not dom1 or not dom2:
                 continue
 
-            # --- 过滤：dim_value_profile 仅对 tensor 参数有意义 ---
-            if attr_name == "dim_value_profile" and not (d1.is_tensor() and d2.is_tensor()):
+            # --- 过滤：dim_count、dim_value_profile、dtype、format 仅对 tensor 参数有意义 ---
+            if attr_name in ("dim_count", "dim_value_profile", "dtype", "format") and not (d1.is_tensor() and d2.is_tensor()):
                 continue
 
             # --- 计算全组合空间（分母） ---
@@ -268,6 +273,75 @@ def compute_two_pair_coverage(
 # 总入口
 # ============================================================
 
+def compute_two_pair_cross_attr_coverage(
+    case_records_list: List[Dict[str, CaseAttributeRecord]],
+    domain: OperatorAttributeDomain,
+) -> Dict[str, dict]:
+    """
+    计算跨属性 2-pair 覆盖率。
+
+    对每对参数的不同属性进行配对统计，例如 paramA.dtype × paramB.format。
+    同属性的配对由 compute_two_pair_coverage 处理，此处只产出 cross-attr 结果。
+    """
+    logger.info("Computing cross-attribute 2-pair coverage...")
+    result = {}
+    param_names = list(domain.params.keys())
+
+    for p1_name, p2_name in itertools.combinations(param_names, 2):
+        d1, d2 = domain.params[p1_name], domain.params[p2_name]
+
+        for attr1 in ATTR_NAMES_2PAIR:
+            # 过滤：attr1 对 d1 不适用
+            if attr1 in ("dim_value_profile", "dtype", "format") and not d1.is_tensor():
+                continue
+            dom1 = _get_domain_values(d1, attr1)
+            if not dom1:
+                continue
+
+            for attr2 in ATTR_NAMES_2PAIR:
+                if attr1 == attr2:
+                    continue  # 同属性由 compute_two_pair_coverage 处理
+                # 过滤：attr2 对 d2 不适用
+                if attr2 in ("dim_value_profile", "dtype", "format") and not d2.is_tensor():
+                    continue
+                dom2 = _get_domain_values(d2, attr2)
+                if not dom2:
+                    continue
+
+                key = f"{p1_name}.{attr1} × {p2_name}.{attr2}"
+                total = len(dom1) * len(dom2)
+
+                covered_pairs = set()
+                for records in case_records_list:
+                    r1 = records.get(p1_name)
+                    r2 = records.get(p2_name)
+                    if r1 is None or r2 is None:
+                        continue
+                    v1 = _get_case_value(r1, attr1)
+                    v2 = _get_case_value(r2, attr2)
+                    if v1 is not None and v2 is not None:
+                        covered_pairs.add((v1, v2))
+
+                cov_count = sum(1 for a in dom1 for b in dom2 if (a, b) in covered_pairs)
+                rate = cov_count / total if total > 0 else 0.0
+
+                result[key] = {
+                    "covered_pairs": sorted((a, b) for a, b in covered_pairs if a in dom1 and b in dom2),
+                    "count": cov_count,
+                    "total": total,
+                    "rate": rate,
+                }
+
+    all_rates = [v["rate"] for v in result.values()]
+    if all_rates:
+        avg = sum(all_rates) / len(all_rates)
+        logger.info(f"Cross-attr 2-pair coverage done. Total attr-pairs: {len(result)}, Avg rate: {avg:.2%}")
+    else:
+        logger.info("Cross-attr 2-pair coverage done. No valid pairs.")
+
+    return result
+
+
 def compute_coverage(
     case_records_list: List[Dict[str, CaseAttributeRecord]],
     domain: OperatorAttributeDomain,
@@ -286,6 +360,7 @@ def compute_coverage(
     result = CoverageResult()
     result.one_pair = compute_one_pair_coverage(case_records_list, domain)
     result.two_pair = compute_two_pair_coverage(case_records_list, domain)
+    result.two_pair_cross = compute_two_pair_cross_attr_coverage(case_records_list, domain)
 
     logger.info("=" * 60)
     logger.info("Coverage computation completed")

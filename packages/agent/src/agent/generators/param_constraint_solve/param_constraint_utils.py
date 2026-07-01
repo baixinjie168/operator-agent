@@ -57,11 +57,11 @@ class ParamConstraintUtils(CommonDispatcher):
         self.has_set_value_param = defaultdict(ParamSetValueFlag)
         self.relation_params = list(operator_rule_data.inputs.keys())
         self.customize_constraint_patch = CustomizeConstraintPatch(case=case,
-                                                                    case_generate_instance=case_generate_instance,
-                                                                    inter_param_constraints=inter_param_constraints,
-                                                                    operator_rule_data=operator_rule_data,
-                                                                    param_combinations=param_combinations,
-                                                                    is_generate_real_data=is_generate_real_data)
+                                                                   case_generate_instance=case_generate_instance,
+                                                                   inter_param_constraints=inter_param_constraints,
+                                                                   operator_rule_data=operator_rule_data,
+                                                                   param_combinations=param_combinations,
+                                                                   is_generate_real_data=is_generate_real_data)
         self.dtype_domain_data, self.format_domain_data = self.get_param_domain_value()
 
     def get_param_domain_value(self) -> tuple[Dict[str, List], Dict[str, List]]:
@@ -128,14 +128,14 @@ class ParamConstraintUtils(CommonDispatcher):
                 # 还可能有只包含输入参数的子表达式，如果不处理可能会导致部分表达式不生效
                 # if not self.is_param_all_input(constraint_relation.relation_params):
                 #     continue
-                logger.debug(f"Relation type : {relation_type}, use z3 solver")
+                logger.debug(f"Relation type : {relation_type}, expr : {constraint_relation.expr}, use z3 solver")
                 z3_constraints.append(constraint_relation)
         self.solve_z3_constraints(z3_constraints)
         for customize_constraint in customize_constraints:
             relation_type = customize_constraint.expr_type
             logger.debug(f"Relation type : {relation_type}, use strict constraint logical")
             strict_check_result, relation_params = self.customize_constraint_patch.dispatch(relation_type,
-                                                                                             customize_constraint)
+                                                                                            customize_constraint)
             if not strict_check_result:
                 logger.debug(
                     f"Relation type : {relation_type}, use strict constraint logical failed, "
@@ -287,7 +287,7 @@ class ParamConstraintUtils(CommonDispatcher):
             constraint_exprs.extend(static_value_exprs)
 
     def build_param_range_value_constraint(self, constraint_exprs: List[str],
-                                            builder: Z3ConstraintBuilder, check: bool = True) -> None:
+                                           builder: Z3ConstraintBuilder, check: bool = True) -> None:
         """
         对于range_value，如果range_value是浮点数或整数，则直接加入求解条件表达式，否则不加入求解表达式
         :param constraint_exprs: 约束条件数据（会被原地修改）
@@ -327,7 +327,8 @@ class ParamConstraintUtils(CommonDispatcher):
                         param_range_value_expr_list.append(
                             f"({param_name}.range_value > {value_rule[0]} and {param_name}.range_value < {value_rule[1]})")
                     else:
-                        logger.error(f"Param name : {param_name}, allowed range value is invalid, type : 'range', value : '{value_rule}'")
+                        logger.error(
+                            f"Param name : {param_name}, allowed range value is invalid, type : 'range', value : '{value_rule}'")
             param_range_value_expr = " or ".join(param_range_value_expr_list)
             static_range_value_expr_list.append(param_range_value_expr)
         if check:
@@ -335,6 +336,42 @@ class ParamConstraintUtils(CommonDispatcher):
                                           param_static_expr_list=static_range_value_expr_list)
         else:
             constraint_exprs.extend(static_range_value_expr_list)
+
+    def build_param_shape_len_constraint(self, constraint_exprs: List[str], builder: Z3ConstraintBuilder,
+                                         check: bool = True) -> None:
+        """
+        基于约束数据冲的dimension创建shape的len条件
+        :param constraint_exprs: 约束表达式对象（会被原地修改）
+        :param builder: Z3求解器构建器
+        :param check: 是否立即执行冲突检测
+        """
+        shape_len_static_value_expr_list = []
+        relation_params = list(self.case_input_map.keys())
+        for param_name in relation_params:
+            param_ori_data = self.operator_rule_data.inputs.get(
+                param_name) if param_name in self.operator_rule_data.inputs else self.operator_rule_data.outputs.get(
+                param_name)
+            if param_ori_data is None:
+                continue
+            param_shape_dimension, _ = DataHandleUtil.get_relevant_attribute_value(param_name,
+                                                                                   param_ori_data.dimensions,
+                                                                                   "dimensions")
+            # 如果参数的shape属性为None，表明该参数不是tensor，没有shape属性，不需要添加shape约束
+            if param_shape_dimension is None:
+                continue
+            if isinstance(param_shape_dimension, list):
+                param_shape_dimension = list(set(param_shape_dimension))
+                shape_len_static_value_expr_list.append(f"len({param_name}.shape) in {param_shape_dimension}")
+            elif isinstance(param_shape_dimension, int):
+                shape_len_static_value_expr_list.append(f"len({param_name}.shape) == {param_shape_dimension}")
+            else:
+                logger.warning(f"Can't get valid tensor dimension data, param name : {param_name}")
+
+        if check:
+            self.choice_no_conflicts_expr(builder=builder, param_union_expr=constraint_exprs,
+                                          param_static_expr_list=shape_len_static_value_expr_list)
+        else:
+            constraint_exprs.extend(shape_len_static_value_expr_list)
 
     def build_param_shape_constraint(self, constraint_exprs: List[str],
                                      builder: Z3ConstraintBuilder, check: bool = True) -> None:
@@ -395,7 +432,7 @@ class ParamConstraintUtils(CommonDispatcher):
         else:
             constraint_exprs.extend(length_static_value_expr_list)
 
-    def declare_param_in_z3(self, builder: Z3ConstraintBuilder, is_print_log = False):
+    def declare_param_in_z3(self, builder: Z3ConstraintBuilder, is_print_log=False):
         """
         声明每个变量，指定变量的type(Tensor, scalar，list)，以及数据类型(float, int, string, bool)
         :param is_print_log: 日志中是否打印详细信息
@@ -416,7 +453,9 @@ class ParamConstraintUtils(CommonDispatcher):
                 dtype_domain = self.dtype_domain_data.get(param_name)
                 format_domain = self.format_domain_data.get(param_name)
                 builder.declare_var(param_name, type_hint=z3_param_type, dtype=param_dtype, allowed_dtypes=dtype_domain,
-                                    allowed_formats=format_domain, range_value=range_values, is_print_log=is_print_log)
+                                    allowed_formats=format_domain, range_value=range_values,
+                                    length=param_length if z3_param_type == "tensor_list" else None,
+                                    is_print_log=is_print_log)
             else:
                 builder.declare_var(param_name, z3_param_type, dtype=param_dtype, range_value=range_values,
                                     length=param_length, is_print_log=is_print_log)
@@ -442,6 +481,7 @@ class ParamConstraintUtils(CommonDispatcher):
         self.build_param_format_constraint(all_static, builder, check=False)
         self.build_param_shape_constraint(all_static, builder, check=False)
         self.build_param_range_value_constraint(all_static, builder, check=False)
+        self.build_param_shape_len_constraint(all_static, builder, check=False)
         self.build_param_length_constraint(all_static, builder, check=False)
 
         if all_static:
