@@ -110,7 +110,7 @@ class PairwiseParamCombinationGenerator:
         return result
 
     def _get_attr_value(self, param_name: str, attr, attr_name: str):
-        from common_utils.data_handle_utils import DataHandleUtil
+        from agent.generators.common_utils.data_handle_utils import DataHandleUtil
         raw, _ = DataHandleUtil.get_relevant_attribute_value(param_name, attr, attr_name)
         return raw
 
@@ -122,7 +122,7 @@ class PairwiseParamCombinationGenerator:
 
     def _get_dtype_value(self, raw_case: Dict[str, Dict[str, Any]],
                           param_name: str, param_attr) -> str:
-        from common_utils.data_handle_utils import DataHandleUtil
+        from agent.generators.common_utils.data_handle_utils import DataHandleUtil
         dtype_vals = raw_case.get(param_name, {}).get(ATTR_DTYPE)
         if dtype_vals is not None:
             return str(dtype_vals)
@@ -136,7 +136,7 @@ class PairwiseParamCombinationGenerator:
 
     def _get_length_value(self, raw_case: Dict[str, Dict[str, Any]],
                            param_name: str, param_attr, param_type: str) -> int | None:
-        from common_utils.data_handle_utils import DataHandleUtil
+        from agent.generators.common_utils.data_handle_utils import DataHandleUtil
         if param_type not in ParamModelConfig.LIST_ATK_TYPE:
             return None
         lv = raw_case.get(param_name, {}).get(ATTR_ARRAY_LENGTH)
