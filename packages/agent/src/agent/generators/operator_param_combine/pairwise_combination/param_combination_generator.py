@@ -15,6 +15,8 @@ from agent.generators.operator_param_combine.pairwise_combination.attribute_doma
     AttributeDomain, ATTR_DTYPE, ATTR_FORMAT, ATTR_ARRAY_LENGTH, )
 from agent.generators.operator_param_combine.pairwise_combination.constraint_filter import ConstraintProcessor
 from agent.generators.operator_param_combine.pairwise_combination.pairwise_generator import PairwiseCombinationGenerator
+from common_utils.data_handle_utils import DataHandleUtil
+from operator_param_combine.param_combination_generate import ParamCombinationGenerator
 
 logger = LazyLogger()
 
@@ -108,7 +110,6 @@ class PairwiseParamCombinationGenerator:
         return result
 
     def _get_attr_value(self, param_name: str, attr, attr_name: str):
-        from agent.generators.common_utils.data_handle_utils import DataHandleUtil
         raw, _ = DataHandleUtil.get_relevant_attribute_value(param_name, attr, attr_name)
         return raw
 
@@ -120,7 +121,6 @@ class PairwiseParamCombinationGenerator:
 
     def _get_dtype_value(self, raw_case: Dict[str, Dict[str, Any]],
                           param_name: str, param_attr) -> str:
-        from agent.generators.common_utils.data_handle_utils import DataHandleUtil
         dtype_vals = raw_case.get(param_name, {}).get(ATTR_DTYPE)
         if dtype_vals is not None:
             return str(dtype_vals)
@@ -134,7 +134,6 @@ class PairwiseParamCombinationGenerator:
 
     def _get_length_value(self, raw_case: Dict[str, Dict[str, Any]],
                            param_name: str, param_attr, param_type: str) -> int | None:
-        from agent.generators.common_utils.data_handle_utils import DataHandleUtil
         if param_type not in ParamModelConfig.LIST_ATK_TYPE:
             return None
         lv = raw_case.get(param_name, {}).get(ATTR_ARRAY_LENGTH)
@@ -161,7 +160,6 @@ class PairwiseParamCombinationGenerator:
 
     def _get_range_value(self, raw_case: Dict[str, Dict[str, Any]],
                            param_name: str, param_attr, dtype: str) -> str | int | float | bool | None:
-        from agent.generators.operator_param_combine.param_combination_generate import ParamCombinationGenerator
         valid_profiles = ParamCombinationGenerator.get_default_range_by_dtype(dtype)
         default_profile = random.choice(valid_profiles)
         rv = raw_case.get(param_name, {}).get("range_value_profile")
@@ -175,7 +173,6 @@ class PairwiseParamCombinationGenerator:
         return default_profile
 
     def _get_bool_attr(self, param_name: str, attr, attr_name: str) -> bool:
-        from agent.generators.common_utils.data_handle_utils import DataHandleUtil
         raw, _ = DataHandleUtil.get_relevant_attribute_value(param_name, attr, attr_name)
         if raw is None:
             return True
@@ -185,7 +182,6 @@ class PairwiseParamCombinationGenerator:
                              param_name: str, param_attr) -> tuple:
         dim_count = raw_case.get(param_name, {}).get("dim_count")
         if dim_count is None:
-            from agent.generators.common_utils.data_handle_utils import DataHandleUtil
             dim_value, _ = DataHandleUtil.get_relevant_attribute_value(
                 param_name, param_attr.dimensions, "dimensions"
             )
