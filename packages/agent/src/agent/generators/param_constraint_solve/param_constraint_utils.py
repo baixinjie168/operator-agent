@@ -110,16 +110,10 @@ class ParamConstraintUtils(CommonDispatcher):
         :return: None
         """
         logger.info(f"Start correct case param, operator name : {self.operator_name}")
-        all_constraint_relations = [relation.value for relation in InterConstraintsRuleType]
-        match_relations = []
-        for relation in all_constraint_relations:
-            match_relation = [each for each in self.inter_param_constraints if each.expr_type == relation]
-            if match_relation:
-                match_relations.extend(match_relation)
         customize_constraints = []
         z3_constraints = []
 
-        for constraint_relation in match_relations:
+        for constraint_relation in self.inter_param_constraints:
             relation_type = constraint_relation.expr_type
             if relation_type in ParamModelConfig.STRICT_CONSTRAINT_TYPE:
                 customize_constraints.append(constraint_relation)
