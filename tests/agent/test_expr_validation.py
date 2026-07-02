@@ -20,6 +20,7 @@ from agent.utils.expr_validation import (  # noqa: E402
     _semantic_expr_key,
     _simplify_expr,
     validate_expr,
+    validate_expr_refs,
     validate_expr_semantic,
 )
 
@@ -121,6 +122,48 @@ class TestValidateExprWiring:
         ok, err = validate_expr("z.shape[0] == 1", params=["x"])
         assert ok is False
         assert "Unknown parameter" in err
+
+
+# ---------------------------------------------------------------------------
+# Fix 0: _ALLOWED_MODULES — math.ceil/floor/... no longer rejected
+# ---------------------------------------------------------------------------
+
+class TestAllowedModules:
+    """Fix 0: whitelist module attributes (math.ceil etc.) pass Phase 0b.
+
+    RELATION_OBJECT_BUILD_PROMPT 示例 7 自身使用 math.ceil；扩 _BUILTIN_NAMES
+    + _ALLOWED_MODULES 前会被误判 "Unknown attribute: '.ceil'"。
+    """
+
+    def test_math_ceil_passes(self):
+        ok, err = validate_expr(
+            "math.ceil(x.shape[0] / 16) == y.shape[2]", params=["x", "y"],
+        )
+        assert ok is True, err
+        assert err == ""
+
+    def test_math_floor_passes(self):
+        ok, err = validate_expr(
+            "math.floor(x.range_value / 16) == 0", params=["x"],
+        )
+        assert ok is True, err
+
+    def test_math_attr_direct_refs(self):
+        ok, err = validate_expr_refs("math.ceil(x.shape[0])", params=["x"])
+        assert ok is True, err
+
+    def test_non_allowed_attribute_still_rejected(self):
+        """x.unknown_attr 仍被拒（不在 _ALLOWED_ATTRS）。"""
+        ok, err = validate_expr("x.unknown_attr == 1", params=["x"])
+        assert ok is False
+        assert "Unknown attribute" in err
+        assert "unknown_attr" in err
+
+    def test_unknown_module_name_rejected(self):
+        """未白名单的模块名仍被拒（os.path 不被放行）。"""
+        ok, err = validate_expr("os.path == 'a'", params=["x"])
+        assert ok is False
+        assert "Unknown" in err  # Unknown attribute(.path) 或 Unknown parameter(os)
 
 
 # ---------------------------------------------------------------------------

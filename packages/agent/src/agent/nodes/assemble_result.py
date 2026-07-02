@@ -398,6 +398,18 @@ def _build_deterministic_computing(platforms: list[dict]) -> dict[str, Any]:
             det = p.get("deterministic_computing", {})
             if name:
                 result[name] = det
+    # Fallback: when no supported platform has determinism data, include
+    # all platforms that have non-empty deterministic_computing values.
+    if not result:
+        logger.warning(
+            "assemble_result: no supported platform has deterministic_computing, "
+            "falling back to all platforms"
+        )
+        for p in platforms:
+            name = p.get("platform_name", "")
+            det = p.get("deterministic_computing", {})
+            if name and det.get("value"):
+                result[name] = det
     return result
 
 
@@ -597,6 +609,14 @@ def _build_inputs_outputs(
         if ar_lookup:
             _fill_ar_for_params(inputs, ar_lookup)
             _fill_ar_for_params(outputs, ar_lookup)
+
+    # 4b. Bool default: an unconstrained bool param allows [True, False].
+    #     AR is finalised here (after the relation-derived fill), so a bool
+    #     with no textual restriction still gets a non-empty enum.  Mirrors
+    #     allowed_range_build_node Phase 0 bool short-circuit, whose output
+    #     (allowed_range_map) is no longer consumed by constraint_assemble.
+    _apply_bool_default(inputs)
+    _apply_bool_default(outputs)
 
     return inputs, outputs
 
@@ -929,6 +949,39 @@ def _fill_ar_for_params(
                         ar["src_text"] = src_text
 
 
+def _apply_bool_default(param_dict: dict[str, Any]) -> None:
+    """Fill ``[True, False]`` enum for bool params whose AR is still empty.
+
+    After the relation-derived AR fill, unconstrained bool params still carry
+    the empty AR hardcoded by ``constraint_assemble_node`` (the
+    ``allowed_range_map`` from ``allowed_range_build_node`` is no longer
+    consumed).  A bool with no textual restriction genuinely allows both True
+    and False, so defaulting here keeps ``tokensIndexFlag`` etc. from shipping
+    an empty value range.
+
+    A bool restricted to a single value is left untouched: Pass 2 emits a
+    ``pname.range_value == True/False`` relation for it, so ``ar_lookup``
+    already filled a non-empty AR and the ``not ar.get("value")`` guard skips.
+    """
+    for _pname, constraint_dict in param_dict.items():
+        if not isinstance(constraint_dict, dict):
+            continue
+        for _plat, plat_data in constraint_dict.items():
+            if not isinstance(plat_data, dict):
+                continue
+            ptype = plat_data.get("type", {})
+            ptype_val = (
+                ptype.get("value", "") if isinstance(ptype, dict) else str(ptype)
+            )
+            if str(ptype_val).lower() != "bool":
+                continue
+            ar = plat_data.get("allowed_range_value")
+            if isinstance(ar, dict) and not ar.get("value"):
+                ar["value"] = [True, False]
+                ar["type"] = "enum"
+                ar["src_text"] = "bool 默认取值 [True, False]"
+
+
 def _inject_parameter_representations(
     constraints_ip: dict[str, list[dict]],
     param_reprs_data: dict,
@@ -1091,6 +1144,9 @@ def _build_constraints_in_parameters(
 
         platform_str = r.get("platform", "")
         targets = resolve_target_platforms(platform_str, supported_platforms)
+        # Empty-platform fallback: keep constraints under "common" key
+        if not targets:
+            targets = ["common"]
 
         for plat in targets:
             grouped.setdefault(plat, []).append(obj)
@@ -1226,6 +1282,9 @@ def _inject_allowed_range_as_constraints(
                 if not expr:
                     continue
                 targets = resolve_target_platforms(plat, supported_platforms)
+                # Empty-platform fallback: inject AR constraint under "common"
+                if not targets:
+                    targets = ["common"]
                 ar_src = ar.get("src_text", "")  # R4
                 constraint = {
                     "expr_type": (

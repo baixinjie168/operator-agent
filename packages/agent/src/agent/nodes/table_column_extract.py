@@ -38,12 +38,22 @@ _SECTION_TYPES = [
 
 
 async def _fetch_sections_text(doc_id: int) -> str:
-    """Fetch and concatenate section content for table parsing."""
+    """Fetch and concatenate ALL section content for table parsing.
+
+    Fix 1D: use ``get_sections_by_type`` (returns every same-type section)
+    instead of ``get_section`` (first match only), so parameter tables split
+    across multiple ``params_execute`` / ``params_get_workspace`` sections are
+    not masked (同型遮蔽 bug). Scope-limited: does not change
+    ``document_tools.get_section`` semantics; only this node fetches the
+    plural form.
+    """
     parts: list[str] = []
     for section_type in _SECTION_TYPES:
-        section = await _mcp_client.get_section(doc_id, section_type)
-        if section and section.get("content"):
-            parts.append(section["content"])
+        sections = await _mcp_client.get_sections_by_type(doc_id, section_type)
+        for section in (sections or []):
+            content = (section or {}).get("content", "") or ""
+            if content:
+                parts.append(content)
     return "\n\n".join(parts)
 
 
@@ -276,10 +286,27 @@ async def table_column_extract_node(state: PipelineState) -> dict[str, Any]:
 
         sections_text = await _fetch_sections_text(doc_id)
         if not sections_text.strip():
-            logger.info("TableColumnExtract: no section content, skipping")
+            logger.warning(
+                "TableColumnExtract: params_get_workspace/params_execute 均无内容 "
+                "(doc_id=%s) — dtype_desc/shape 将缺失，下游 dtype 可能落 Level-3 兜底",
+                doc_id,
+            )
             return {"error": None}
 
         results = _extract_from_sections(sections_text, params)
+
+        # Fix 1B: diagnostics — surface params that yielded no dtype_desc so
+        # the runtime断点 (section delivery vs parser) is directly visible.
+        got_dtype = {r["param_name"] for r in results if r.get("dtype_desc")}
+        missing_dtype = [
+            p.get("param_name", "") for p in params
+            if p.get("param_name", "") and p.get("param_name", "") not in got_dtype
+        ]
+        if missing_dtype:
+            logger.warning(
+                "TableColumnExtract: %d params 未提取到 dtype_desc: %s (doc_id=%s)",
+                len(missing_dtype), missing_dtype, doc_id,
+            )
 
         if results:
             await _persist_to_db(doc_id, results)
@@ -288,7 +315,11 @@ async def table_column_extract_node(state: PipelineState) -> dict[str, Any]:
                 len(results), len(params), doc_id,
             )
         else:
-            logger.info("TableColumnExtract: no table-form params found (doc_id=%s)", doc_id)
+            logger.warning(
+                "TableColumnExtract: no table-form params found (doc_id=%s) — "
+                "section content present but no 8-column table matched",
+                doc_id,
+            )
 
         # Merge into parameters for downstream consumption
         enriched = _merge_into_params(params, results)

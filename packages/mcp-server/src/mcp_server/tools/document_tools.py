@@ -230,6 +230,31 @@ def get_section_by_type(doc_id: int, section_type: str) -> dict | None:
     return None
 
 
+def get_sections_by_type(doc_id: int, section_type: str) -> list[dict]:
+    """Retrieve ALL sections of a given section_type from parsed document.
+
+    Unlike ``get_section_by_type`` (which returns only the first match), this
+    returns every matching section — needed when an operator splits its
+    parameter table across multiple same-type sections (e.g. H3-divided
+    ``params_execute``). ``table_column_extract`` merges them so no row is
+    lost to the 同型遮蔽 (first-match masking) bug.
+
+    Args:
+        doc_id: Primary key of document_versions table.
+        section_type: The section_type to match (e.g. "params_execute").
+
+    Returns:
+        List of matching section dicts (empty if none / no parsed doc).
+    """
+    parsed = get_parsed_by_doc_id(doc_id)
+    if not parsed:
+        return []
+    return [
+        section for section in parsed.get("sections", [])
+        if section.get("section_type") == section_type
+    ]
+
+
 def save_parsed_document(operator_name: str, version: int, parsed_data: dict) -> None:
     """Save parsed document data to the database."""
     db = get_db()

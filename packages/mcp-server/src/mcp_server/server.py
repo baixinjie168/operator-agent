@@ -18,6 +18,7 @@ from mcp_server.tools.document_tools import (
     get_doc_for_check_by_name,
     get_parsed_document,
     get_section_by_type,
+    get_sections_by_type as _get_sections_by_type,
     list_all_operators,
     parse_document,
     query_parameters,
@@ -401,6 +402,25 @@ def get_section(doc_id: int, section_type: str) -> str:
         JSON string of the section dict, or "null" if not found.
     """
     result = get_section_by_type(doc_id, section_type)
+    return json.dumps(result, ensure_ascii=False)
+
+
+@mcp.tool()
+def get_sections_by_type(doc_id: int, section_type: str) -> str:
+    """Retrieve ALL sections of a given section_type from a parsed document.
+
+    Returns every matching section (vs ``get_section`` which returns only the
+    first). Use when an operator may split content across multiple same-type
+    sections (e.g. H3-divided ``params_execute`` tables) so no row is masked.
+
+    Args:
+        doc_id: Primary key of document_versions table.
+        section_type: Section type to match (e.g. "params_execute").
+
+    Returns:
+        JSON array of section dicts (empty array if none found).
+    """
+    result = _get_sections_by_type(doc_id, section_type)
     return json.dumps(result, ensure_ascii=False)
 
 

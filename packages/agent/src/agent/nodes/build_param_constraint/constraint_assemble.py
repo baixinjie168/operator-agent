@@ -36,6 +36,9 @@ async def constraint_assemble_node(state: BuildParamConstraintState) -> dict[str
     if not params:
         return {"error": None}
 
+    # Empty-platform fallback: use "common" so constraint JSON is still built.
+    platforms_to_build = supported_platforms or ["common"]
+
     # Assemble constraint JSON
     updates: list[dict] = []
     for param in params:
@@ -43,7 +46,7 @@ async def constraint_assemble_node(state: BuildParamConstraintState) -> dict[str
         fn_name = param["function_name"]
         constraint: dict[str, Any] = {}
 
-        for plat in supported_platforms:
+        for plat in platforms_to_build:
             attr_key = f"{fn_name}::{pname}::{plat}"
             map_key = f"{fn_name}::{pname}"
 
@@ -67,7 +70,7 @@ async def constraint_assemble_node(state: BuildParamConstraintState) -> dict[str
             }
 
         # Expand "common" key to per-platform entries before DB save
-        expand_common_in_constraint(constraint, supported_platforms)
+        expand_common_in_constraint(constraint, platforms_to_build)
 
         updates.append({
             "function_name": fn_name,
@@ -104,10 +107,10 @@ async def constraint_assemble_node(state: BuildParamConstraintState) -> dict[str
         range_struct_failed: list[str] = []
         parsed_dims_list: list = []
         any_passed = False
-        has_validation = bool(supported_platforms) and assembled is not None
+        has_validation = bool(platforms_to_build) and assembled is not None
 
         if assembled is not None:
-            for plat in supported_platforms:
+            for plat in platforms_to_build:
                 plat_data = assembled.get(plat, {})
                 dims = plat_data.get("dimensions", {}).get("value", [])
                 shape_raw = plat_data.get("dimensions", {}).get("src_text", "")
@@ -161,9 +164,9 @@ async def constraint_assemble_node(state: BuildParamConstraintState) -> dict[str
         validation_results.append({
             "function_name": fn_name,
             "param_name": pname,
-            "platforms_count": len(supported_platforms),
+            "platforms_count": len(platforms_to_build),
             "missing_platforms": [
-                plat for plat in supported_platforms
+                plat for plat in platforms_to_build
                 if assembled is None or not assembled.get(plat)
             ],
             "has_constraint": assembled is not None and bool(assembled),

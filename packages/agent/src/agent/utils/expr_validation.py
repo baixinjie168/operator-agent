@@ -35,7 +35,14 @@ _BUILTIN_NAMES = {
     "True", "False", "None", "len", "range",
     "all", "any", "int", "float", "str", "bool", "set",
     "min", "max", "list",
+    # 数学函数 / 模块：放行 math.ceil/floor/... 等合法 expr
+    # （RELATION_OBJECT_BUILD_PROMPT 示例 7 自身即使用 math.ceil）。
+    "abs", "sum", "round", "pow", "math",
 }
+# 白名单模块：这些 Name 的任意属性都放行（math.ceil/floor/...），
+# 避免 validate_expr_refs 误判 "Unknown attribute: '.ceil'"。
+# z3 生成器侧会再做一次校验，此处仅放宽不收紧，零回退。
+_ALLOWED_MODULES = {"math"}
 
 
 # ---------------------------------------------------------------------------
@@ -112,6 +119,9 @@ def validate_expr_refs(
             ):
                 return False, f"Unknown parameter: '{node.id}'"
         if isinstance(node, ast.Attribute):
+            # 放行白名单模块的任意属性（math.ceil/floor/...）
+            if isinstance(node.value, ast.Name) and node.value.id in _ALLOWED_MODULES:
+                continue
             if node.attr not in _ALLOWED_ATTRS:
                 return False, f"Unknown attribute: '.{node.attr}'"
     return True, ""

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from agent.nodes.assemble_result import (
+    _apply_bool_default,
     _build_allowed_range_lookup,
     _build_ar_lookup_from_io,
     _build_constraints_in_parameters,
@@ -608,13 +609,14 @@ class TestParseRangeExpr:
         )
 
     def test_bool_false(self):
+        # bool 是离散值，ar_type 为 "enum"（非 "range"）
         assert _parse_range_expr("transposeX1.range_value == False", "value_dependency") == (
-            [False], "range",
+            [False], "enum",
         )
 
     def test_bool_true(self):
         assert _parse_range_expr("x.range_value == True", "self_value_dependency") == (
-            [True], "range",
+            [True], "enum",
         )
 
     def test_compound_product_not_chained_parsed(self):
@@ -705,8 +707,9 @@ class TestBuildAllowedRangeLookup:
             self._rel("1 <= N.range_value <= 2147483647", ["N"], src),
         ]
         lookup = _build_allowed_range_lookup(rels)
-        assert lookup["BS"] == ([[0, 2147483647]], "range", src)
-        assert lookup["N"] == ([[1, 2147483647]], "range", src)
+        # lookup 现按 platform 二级嵌套（""=common）
+        assert lookup["BS"][""] == ([[0, 2147483647]], "range", src)
+        assert lookup["N"][""] == ([[1, 2147483647]], "range", src)
 
     def test_compound_h_ranksize_is_filtered_out(self):
         """Multi-param compound '1 <= H*rankSize <= 35000' is NOT flattened
@@ -727,7 +730,7 @@ class TestBuildAllowedRangeLookup:
     def test_one_sided_recoverable_fills_both(self):
         rels = [self._rel("x.range_value <= 100", ["x"], "x不得小于1，且不得超过100。")]
         lookup = _build_allowed_range_lookup(rels)
-        assert lookup["x"] == ([[1, 100]], "range", "x不得小于1，且不得超过100。")
+        assert lookup["x"][""] == ([[1, 100]], "range", "x不得小于1，且不得超过100。")
 
     def test_split_bounds_across_relations_aggregate(self):
         """Bounds split across two relations are reunited into one range."""
@@ -736,18 +739,19 @@ class TestBuildAllowedRangeLookup:
             self._rel("x.range_value <= 100", ["x"], "x不得超过100"),
         ]
         lookup = _build_allowed_range_lookup(rels)
-        assert lookup["x"][0] == [[1, 100]]
-        assert lookup["x"][1] == "range"
+        assert lookup["x"][""][0] == [[1, 100]]
+        assert lookup["x"][""][1] == "range"
 
     def test_enum_kept(self):
         rels = [self._rel("rankSize.range_value in [2, 4, 8, 16]", ["rankSize"], "")]
         lookup = _build_allowed_range_lookup(rels)
-        assert lookup["rankSize"] == ([2, 4, 8, 16], "enum", "")
+        assert lookup["rankSize"][""] == ([2, 4, 8, 16], "enum", "")
 
     def test_bool_kept(self):
         rels = [self._rel("transposeX1.range_value == False", ["transposeX1"], "")]
         lookup = _build_allowed_range_lookup(rels)
-        assert lookup["transposeX1"] == ([False], "range", "")
+        # bool 离散 → "enum"
+        assert lookup["transposeX1"][""] == ([False], "enum", "")
 
     def test_no_null_bounds_anywhere(self):
         """Invariant: no lookup value ever contains a None bound."""
@@ -759,14 +763,16 @@ class TestBuildAllowedRangeLookup:
             self._rel("y.range_value >= 1", ["y"], "y不得小于1"),
         ]
         lookup = _build_allowed_range_lookup(rels)
-        for pname, (value, ar_type, _src) in lookup.items():
-            if ar_type != "range":
-                continue
-            for item in value:
-                if isinstance(item, list):
-                    lo, hi = item[0], item[1]
-                    assert lo is not None, f"{pname} has null lower bound"
-                    assert hi is not None, f"{pname} has null upper bound"
+        # lookup 现为 {pname: {platform: (value, ar_type, src)}}，遍历两层
+        for pname, plat_map in lookup.items():
+            for value, ar_type, _src in plat_map.values():
+                if ar_type != "range":
+                    continue
+                for item in value:
+                    if isinstance(item, list):
+                        lo, hi = item[0], item[1]
+                        assert lo is not None, f"{pname} has null lower bound"
+                        assert hi is not None, f"{pname} has null upper bound"
 
 
 class TestConstraintsInParametersArLookup:
@@ -991,4 +997,53 @@ class TestPrimaryFunctionHelpers:
     def test_is_single_function_mode_empty_false(self):
         """Empty signatures -> False (must not misclassify as single-function)."""
         assert is_single_function_mode([]) is False
+
+
+class TestApplyBoolDefault:
+    """F2: unconstrained bool params default to [True, False] enum."""
+
+    def _pd(self, ptype_value, ar_value=None, ar_type="range"):
+        # Structure: {param_name: {platform: {type, allowed_range_value}}}
+        return {
+            "tokensIndexFlag": {
+                "common": {
+                    "type": {"value": ptype_value, "src_text": ""},
+                    "allowed_range_value": {
+                        "value": [] if ar_value is None else ar_value,
+                        "type": ar_type,
+                        "src_text": "",
+                    },
+                }
+            }
+        }
+
+    def test_bool_empty_ar_gets_true_false(self):
+        pd = self._pd("bool")
+        _apply_bool_default(pd)
+        ar = pd["tokensIndexFlag"]["common"]["allowed_range_value"]
+        assert ar["value"] == [True, False]
+        assert ar["type"] == "enum"
+
+    def test_non_bool_untouched(self):
+        pd = self._pd("int64_t")
+        _apply_bool_default(pd)
+        assert pd["tokensIndexFlag"]["common"]["allowed_range_value"]["value"] == []
+
+    def test_bool_with_existing_ar_not_overwritten(self):
+        pd = self._pd("bool", ar_value=[True], ar_type="enum")
+        _apply_bool_default(pd)
+        assert pd["tokensIndexFlag"]["common"]["allowed_range_value"]["value"] == [True]
+
+    def test_string_type_value_supported(self):
+        """Some param types are stored as a plain string, not {value:...}."""
+        pd = {
+            "tokensIndexFlag": {
+                "common": {
+                    "type": "bool",
+                    "allowed_range_value": {"value": [], "type": "range", "src_text": ""},
+                }
+            }
+        }
+        _apply_bool_default(pd)
+        assert pd["tokensIndexFlag"]["common"]["allowed_range_value"]["value"] == [True, False]
 

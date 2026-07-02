@@ -8,11 +8,13 @@ import pytest
 
 from agent.utils.table_parser import (
     _extract_discontinuous,
+    _is_relative_ref,
     detect_table_columns,
-    extract_4_columns_from_table,
+    extract_columns_as_json,
+    extract_platform_tagged_values,
     find_param_name_column,
     is_table_form,
-    parse_html_tables,
+    parse_html_tables_with_raw,
 )
 
 # ---------------------------------------------------------------------------
@@ -69,30 +71,32 @@ ROWSPAN_TABLE_HTML = """
 
 class TestParseHtmlTables:
     def test_basic_table(self):
-        tables = parse_html_tables(BASIC_TABLE_HTML)
+        tables, _ = parse_html_tables_with_raw(BASIC_TABLE_HTML)
         assert len(tables) == 1
         grid = tables[0]
         assert len(grid) == 4  # 1 header + 3 data rows
         assert grid[0] == ["参数名", "输入/输出", "数据类型", "数据格式", "维度(shape)", "非连续Tensor"]
 
     def test_simple_table(self):
-        tables = parse_html_tables(SIMPLE_TABLE_HTML)
+        tables, _ = parse_html_tables_with_raw(SIMPLE_TABLE_HTML)
         assert len(tables) == 1
         assert len(tables[0]) == 2  # 1 header + 1 data row
 
     def test_rowspan_expansion(self):
-        tables = parse_html_tables(ROWSPAN_TABLE_HTML)
+        tables, _ = parse_html_tables_with_raw(ROWSPAN_TABLE_HTML)
         grid = tables[0]
         # x2 row should have FLOAT32 in dtype column due to rowspan
         assert grid[2][1] == "FLOAT32"
 
     def test_empty_content(self):
-        assert parse_html_tables("") == []
-        assert parse_html_tables("no tables here") == []
+        tables, _ = parse_html_tables_with_raw("")
+        assert tables == []
+        tables, _ = parse_html_tables_with_raw("no tables here")
+        assert tables == []
 
     def test_multiple_tables(self):
         html = BASIC_TABLE_HTML + SIMPLE_TABLE_HTML
-        tables = parse_html_tables(html)
+        tables, _ = parse_html_tables_with_raw(html)
         assert len(tables) == 2
 
 
@@ -149,47 +153,48 @@ class TestFindParamNameColumn:
 
 
 # ---------------------------------------------------------------------------
-# Test extract_4_columns_from_table
+# Test extract_columns_as_json
 # ---------------------------------------------------------------------------
 
 class TestExtract4Columns:
     def _get_grid_and_map(self, html: str = BASIC_TABLE_HTML):
-        tables = parse_html_tables(html)
+        tables, raw_tables = parse_html_tables_with_raw(html)
         grid = tables[0]
+        raw_grid = raw_tables[0]
         col_map = detect_table_columns(grid[0])
         name_idx = find_param_name_column(grid[0])
-        return grid, col_map, name_idx
+        return grid, raw_grid, col_map, name_idx
 
     def test_tensor_param_with_all_columns(self):
-        grid, col_map, name_idx = self._get_grid_and_map()
-        result = extract_4_columns_from_table(grid, col_map, "x", "aclTensor", name_idx)
-        assert result["shape"] == "1-8"
-        assert result["dtype_desc"] == "FLOAT32、FLOAT16"
-        assert result["dformat_desc"] == "ND"
+        grid, raw_grid, col_map, name_idx = self._get_grid_and_map()
+        result = extract_columns_as_json(grid, raw_grid, col_map, "x", "aclTensor", name_idx)
+        assert result["shape"] == {"*": "1-8"}
+        assert result["dtype_desc"] == {"*": "FLOAT32、FLOAT16"}
+        assert result["dformat_desc"] == {"*": "ND"}
         disc = json.loads(result["is_support_discontinuous"])
         assert disc["value"] is True
         assert disc["src_text"] == "√"
 
     def test_dash_values_treated_as_empty(self):
-        grid, col_map, name_idx = self._get_grid_and_map()
-        result = extract_4_columns_from_table(grid, col_map, "y", "aclTensor", name_idx)
-        assert result.get("shape") in (None, "")  # dash → not included or empty
-        assert result["dtype_desc"] == "INT64"
-        assert result["dformat_desc"] == "ND、NZ"
+        grid, raw_grid, col_map, name_idx = self._get_grid_and_map()
+        result = extract_columns_as_json(grid, raw_grid, col_map, "y", "aclTensor", name_idx)
+        assert result.get("shape") is None  # dash → key not included
+        assert result["dtype_desc"] == {"*": "INT64"}
+        assert result["dformat_desc"] == {"*": "ND、NZ"}
         disc = json.loads(result["is_support_discontinuous"])
         assert disc["value"] is False
 
     def test_non_tensor_param(self):
-        grid, col_map, name_idx = self._get_grid_and_map()
-        result = extract_4_columns_from_table(grid, col_map, "offset", "uint64_t", name_idx)
-        assert result["shape"] == "1"
-        assert result.get("dformat_desc") in (None, "")  # dash → not included or empty
+        grid, raw_grid, col_map, name_idx = self._get_grid_and_map()
+        result = extract_columns_as_json(grid, raw_grid, col_map, "offset", "uint64_t", name_idx)
+        assert result["shape"] == {"*": "1"}
+        assert result.get("dformat_desc") is None  # dash → key not included
         disc = json.loads(result["is_support_discontinuous"])
         assert disc["value"] == "N/A"
 
     def test_param_not_found(self):
-        grid, col_map, name_idx = self._get_grid_and_map()
-        result = extract_4_columns_from_table(grid, col_map, "nonexistent", "aclTensor", name_idx)
+        grid, raw_grid, col_map, name_idx = self._get_grid_and_map()
+        result = extract_columns_as_json(grid, raw_grid, col_map, "nonexistent", "aclTensor", name_idx)
         assert result == {}
 
     def test_simple_table_no_target_columns(self):
@@ -198,53 +203,53 @@ class TestExtract4Columns:
         grid = [header, ["handle", "必需", "tpu handle"]]
         col_map = detect_table_columns(header)
         assert col_map == {}
-        result = extract_4_columns_from_table(grid, col_map, "handle", "aclTensor", 0)
+        result = extract_columns_as_json(grid, grid, col_map, "handle", "aclTensor", 0)
         assert result == {}
 
     def test_rowspan_table(self):
-        grid, col_map, name_idx = self._get_grid_and_map(ROWSPAN_TABLE_HTML)
+        grid, raw_grid, col_map, name_idx = self._get_grid_and_map(ROWSPAN_TABLE_HTML)
         # x2 should inherit FLOAT32 from rowspan
-        result = extract_4_columns_from_table(grid, col_map, "x2", "aclTensor", name_idx)
-        assert result["dtype_desc"] == "FLOAT32"
-        assert result["shape"] == "2-4"
+        result = extract_columns_as_json(grid, raw_grid, col_map, "x2", "aclTensor", name_idx)
+        assert result["dtype_desc"] == {"*": "FLOAT32"}
+        assert result["shape"] == {"*": "2-4"}
 
     def test_param_desc_extraction(self):
         header = ["参数名", "数据类型", "描述"]
         grid = [header, ["x", "FLOAT32", "输入张量"], ["y", "INT64", "维度数量"]]
         col_map = detect_table_columns(header)
         assert col_map == {"dtype_desc": 1, "param_desc": 2}
-        result = extract_4_columns_from_table(grid, col_map, "x", "aclTensor", 0)
-        assert result["param_desc"] == "输入张量"
-        assert result["dtype_desc"] == "FLOAT32"
+        result = extract_columns_as_json(grid, grid, col_map, "x", "aclTensor", 0)
+        assert result["param_desc"] == {"*": "输入张量"}
+        assert result["dtype_desc"] == {"*": "FLOAT32"}
 
     def test_param_desc_dash_treated_as_empty(self):
         header = ["参数名", "描述"]
         grid = [header, ["x", "-"]]
         col_map = detect_table_columns(header)
-        result = extract_4_columns_from_table(grid, col_map, "x", "aclTensor", 0)
-        assert result.get("param_desc") == ""  # dash → empty string
+        result = extract_columns_as_json(grid, grid, col_map, "x", "aclTensor", 0)
+        assert result.get("param_desc") is None  # dash → key not included
 
     def test_direction_input_chinese(self):
         header = ["参数名", "输入/输出", "数据类型"]
         grid = [header, ["x", "输入", "FLOAT32"]]
         col_map = detect_table_columns(header)
         assert col_map["direction"] == 1
-        result = extract_4_columns_from_table(grid, col_map, "x", "aclTensor", 0)
+        result = extract_columns_as_json(grid, grid, col_map, "x", "aclTensor", 0)
         assert result["direction"] == "input"
 
     def test_direction_output_chinese(self):
         header = ["参数名", "输入/输出"]
         grid = [header, ["y", "输出"]]
         col_map = detect_table_columns(header)
-        result = extract_4_columns_from_table(grid, col_map, "y", "aclTensor", 0)
+        result = extract_columns_as_json(grid, grid, col_map, "y", "aclTensor", 0)
         assert result["direction"] == "output"
 
     def test_direction_dash_ignored(self):
         header = ["参数名", "输入/输出"]
         grid = [header, ["z", "-"]]
         col_map = detect_table_columns(header)
-        result = extract_4_columns_from_table(grid, col_map, "z", "aclTensor", 0)
-        assert "direction" not in result  # dash → empty → not included
+        result = extract_columns_as_json(grid, grid, col_map, "z", "aclTensor", 0)
+        assert "direction" not in result  # dash → not included
 
 
 # ---------------------------------------------------------------------------
@@ -305,8 +310,6 @@ class TestExtractDiscontinuous:
 # Relative-reference handling (e.g. "与self一致")
 # ---------------------------------------------------------------------------
 
-from agent.utils.table_parser import _is_relative_ref
-
 
 class TestIsRelativeRef:
     """Test _is_relative_ref detects cross-parameter references."""
@@ -356,13 +359,13 @@ class TestExtract4ColumnsRelativeRef:
         grid = [header, ["gradOutput", "与`self`一致", "ND", "-", "√"]]
         col_map = detect_table_columns(header)
         name_idx = find_param_name_column(header)
-        result = extract_4_columns_from_table(grid, col_map, "gradOutput", "aclTensor", name_idx)
+        result = extract_columns_as_json(grid, grid, col_map, "gradOutput", "aclTensor", name_idx)
         # dtype should be cleared (relative ref)
-        assert result.get("dtype_desc") is None or result.get("dtype_desc") == ""
+        assert result.get("dtype_desc") is None
         # dformat "ND" is a real value — should be preserved
-        assert result["dformat_desc"] == "ND"
-        # shape "-" → empty
-        assert result.get("shape") is None or result.get("shape") == ""
+        assert result["dformat_desc"] == {"*": "ND"}
+        # shape "-" → cleared
+        assert result.get("shape") is None
         # discontinuous should work normally
         disc = json.loads(result["is_support_discontinuous"])
         assert disc["value"] is True
@@ -372,11 +375,11 @@ class TestExtract4ColumnsRelativeRef:
         grid = [header, ["target", "FLOAT32", "与self一致"]]
         col_map = detect_table_columns(header)
         name_idx = find_param_name_column(header)
-        result = extract_4_columns_from_table(grid, col_map, "target", "aclTensor", name_idx)
+        result = extract_columns_as_json(grid, grid, col_map, "target", "aclTensor", name_idx)
         # dtype "FLOAT32" is real — preserved
-        assert result["dtype_desc"] == "FLOAT32"
+        assert result["dtype_desc"] == {"*": "FLOAT32"}
         # shape "与self一致" should be cleared
-        assert result.get("shape") is None or result.get("shape") == ""
+        assert result.get("shape") is None
 
     def test_param_desc_relative_ref_preserved(self):
         """param_desc should NOT be cleared — it's useful context for LLM."""
@@ -384,23 +387,16 @@ class TestExtract4ColumnsRelativeRef:
         grid = [header, ["out", "与self一致", "shape与self相同"]]
         col_map = detect_table_columns(header)
         name_idx = find_param_name_column(header)
-        result = extract_4_columns_from_table(grid, col_map, "out", "aclTensor", name_idx)
+        result = extract_columns_as_json(grid, grid, col_map, "out", "aclTensor", name_idx)
         # dtype cleared (relative ref)
-        assert result.get("dtype_desc") is None or result.get("dtype_desc") == ""
+        assert result.get("dtype_desc") is None
         # param_desc preserved (even if it contains relative ref language)
-        assert result["param_desc"] == "shape与self相同"
+        assert result["param_desc"] == {"*": "shape与self相同"}
 
 
 # ---------------------------------------------------------------------------
 # Platform-tagged value extraction (term + nested ul/li)
 # ---------------------------------------------------------------------------
-
-from agent.utils.table_parser import (
-    extract_columns_as_json,
-    extract_platform_tagged_values,
-    parse_html_tables_with_raw,
-)
-
 
 class TestExtractPlatformTaggedValues:
     """Test extract_platform_tagged_values handles all HTML patterns."""

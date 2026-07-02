@@ -131,6 +131,14 @@ RELATION_OBJECT_BUILD_PROMPT = """\
 - "shape size" 指维数（rank），用 len(x.shape) 表示
 - 不是各维大小的乘积，不要写成 out.shape[0]*out.shape[1]*... 的形式
 
+### 示例 11b: shape_dependency（维度数区间，关键）
+输入: description="x 支持2-6维", params=["x"]
+输出: {{"expr_type": "shape_dependency", "expr": "2 <= len(x.shape) <= 6"}}
+注意：
+- "支持N-M维"/"N-M维" 指维数(rank)区间，必须用 len(x.shape)
+- 严禁写成对 shape[i]（第i维大小）的范围，如 "2 <= x.shape[0] <= 6" 是错误
+- 数组参数（aclIntArray）同理：维度数即元素个数，用 len(x.shape)
+
 ### 示例 11: presence_dependency（存在性依赖）
 输入: description="expertTokensOptional 不为空时 bias2Optional 必须存在",
       params=["expertTokensOptional", "bias2Optional"]

@@ -137,23 +137,31 @@ class TestBuildEnrichedParams:
 
 
 class TestPromptExcludesCrossParamRelations:
-    """Verify prompt rule 7 excludes cross-parameter relationship constraints."""
+    """Verify prompt handles cross-parameter references (rule 4).
 
-    def test_prompt_contains_rule_7(self):
-        assert "不要包含**与其他参数之间的关系约束" in LLM_DESCRIPTION_EXTRACT_PROMPT
+    新 prompt 把跨参数关系从"不要包含"改为"跨参数引用解析规则"：
+    能解析的填实际值，不能解析的（shape 维度依赖、取值依赖）填"无"并交由其他模块。
+    """
+
+    def test_prompt_contains_rule_4(self):
+        assert "跨参数引用解析规则" in LLM_DESCRIPTION_EXTRACT_PROMPT
 
     def test_prompt_examples_include_dtype_relation(self):
-        assert "与参数X的数据类型一致" in LLM_DESCRIPTION_EXTRACT_PROMPT
+        # dtype 跨参引用示例（与self一致 → 解析为实际值）
+        assert "与self一致" in LLM_DESCRIPTION_EXTRACT_PROMPT
 
     def test_prompt_examples_include_shape_relation(self):
-        assert "shape的第N维与参数Y相同" in LLM_DESCRIPTION_EXTRACT_PROMPT
+        # shape 维度跨参依赖 → 交由其他模块
+        assert "shape的第N维" in LLM_DESCRIPTION_EXTRACT_PROMPT
 
     def test_prompt_examples_include_value_dependency(self):
         assert "取值依赖参数Z" in LLM_DESCRIPTION_EXTRACT_PROMPT
 
     def test_prompt_examples_include_input_dtype(self):
-        assert "必须与input的dtype保持一致" in LLM_DESCRIPTION_EXTRACT_PROMPT
+        # 上下文有具体值时解析引用
+        assert "解析引用" in LLM_DESCRIPTION_EXTRACT_PROMPT
 
     def test_prompt_mentions_other_modules(self):
-        assert "这类跨参数关系由其他模块专门处理" in LLM_DESCRIPTION_EXTRACT_PROMPT
+        # 跨参数 shape 约束由其他模块处理
+        assert "由其他模块专门处理" in LLM_DESCRIPTION_EXTRACT_PROMPT
 

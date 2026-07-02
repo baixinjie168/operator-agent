@@ -23,10 +23,13 @@ from agent.nodes.constraint_extract import (
     _extract_src_context,
     _expr_exists,
     _normalize_expr,
+    _pass2_single_param,
     _pass3b_dim_equalities,
     _pass6b_conditional_shapes_from_params,
+    _pass6c_conditional_ordering,
     _pass7b_conditional_dtype,
     _strip_html,
+    _supersede_bare_with_guarded,
     _try_deterministic_range,
 )
 
@@ -329,9 +332,9 @@ class TestDetectConditionClause:
     def test_activation_clause(self):
         text = "激活层为geglu/swiglu/reglu时，且N1=2*K2"
         cond = _detect_condition_clause(text, text.index("N1="))
-        assert "activation in" in cond
-        assert "geglu" in cond
-        assert "swiglu" in cond
+        assert "activation.range_value in" in cond
+        assert "'geglu'" in cond
+        assert "'swiglu'" in cond
 
     def test_no_clause_returns_empty(self):
         text = "需满足K1=N2"
@@ -345,6 +348,39 @@ class TestDetectConditionClause:
         # Non-activation conditions return "" so the equality is emitted
         # unconditionally (never dropped).
         assert cond == ""
+
+    def test_activation_clause_long_sentence(self):
+        """FFNV3 bug: condition at sentence head, equality at tail (>80 chars).
+
+        The old 80-char window missed the condition; the sentence-level window
+        must reach back to the sentence head.
+        """
+        text = (
+            "激活层为geglu/swiglu/reglu时，仅支持无专家分组时的FLOAT16高性能场景"
+            "（FLOAT16场景指类型为aclTensor的必选参数数据类型都为FLOAT16的场景），"
+            "且N1=2*K2。"
+        )
+        cond = _detect_condition_clause(text, text.index("N1="))
+        assert cond == "activation.range_value in ['geglu', 'swiglu', 'reglu']"
+
+    def test_activation_clause_quoted_values(self):
+        """Guard must use quoted string literals (bare names would NameError)."""
+        text = "激活层为gelu/fastgelu时，且N1=K2"
+        cond = _detect_condition_clause(text, text.index("N1="))
+        assert "'gelu'" in cond and "'fastgelu'" in cond
+        # No bare (unquoted) gelu token left in the guard
+        assert cond.replace("'gelu'", "").replace("'fastgelu'", "") == (
+            "activation.range_value in [, ]"
+        )
+
+    def test_condition_not_swallowed_across_sentence(self):
+        """Previous sentence's 激活 condition must not leak into next equality."""
+        text = (
+            "激活层为geglu时，N1=2*K2。"   # sentence 1: guarded
+            "需满足N1=K2。"                 # sentence 2: no condition
+        )
+        cond_s2 = _detect_condition_clause(text, text.index("N1=K2"))
+        assert cond_s2 == ""
 
 
 # ── _pass3b_dim_equalities (Item 3) ──────────────────────────────────────────
@@ -385,7 +421,7 @@ class TestPass3bDimEqualities:
         expr = results[0]["relation_object"]["expr"]
         assert "N1 == 2 * K2" in expr
         assert "if" in expr
-        assert "activation in" in expr
+        assert "activation.range_value in" in expr
         assert "else True" in expr
 
     def test_t3_4_unknown_variable_filtered(self):
@@ -624,3 +660,243 @@ class TestPass7bConditionalDtype:
 
     def test_empty_params_returns_empty(self):
         assert _pass7b_conditional_dtype([], []) == []
+
+
+# ── _pass2_single_param: axis length bound (F3) ──────────────────────────────
+
+class TestPass2AxisLength:
+    def _param(self, shape_text, ptype="aclTensor*"):
+        return {
+            "param_name": "expertTokensOptional",
+            "function_name": "aclnnFFNV3GetWorkspaceSize",
+            "param_type": ptype,
+            "param_desc": "各专家的token数。",
+            "shape": json.dumps({"common": shape_text}, ensure_ascii=False),
+        }
+
+    def test_1d_with_max_length_emits_shape0_bound(self):
+        results = _pass2_single_param([self._param("1维，最大长度256")], [])
+        exprs = [r["relation_object"]["expr"] for r in results]
+        assert any(
+            "expertTokensOptional.shape[0]" in e
+            and "256" in e
+            and "is not None" in e
+            and "0 <" in e
+            for e in exprs
+        ), exprs
+
+    def test_multi_dim_skips_axis_length(self):
+        """2维 + 最大长度 must not emit a shape[0] bound (axis ambiguous)."""
+        results = _pass2_single_param(
+            [self._param("2维，最大长度128", ptype="aclTensor*")], [],
+        )
+        # rename to avoid name collision in expr match
+        exprs = [r["relation_object"]["expr"] for r in results]
+        assert not any("shape[0]" in e and "128" in e for e in exprs), exprs
+
+    def test_no_max_length_no_bound(self):
+        results = _pass2_single_param([self._param("1维")], [])
+        exprs = [r["relation_object"]["expr"] for r in results]
+        assert not any("shape[0]" in e for e in exprs), exprs
+
+
+# ── _pass2_single_param: shape rank range (C2 / Fix 2A) ──────────────────────
+
+class TestPass2ShapeRankRange:
+    """Fix 2A: 'shape支持N-M维' (lo>=1) → self_shape_rank_range.
+
+    与 _P2_SHAPE_UPPER_RE 的 'shape支持0-N维' (lo=0) 互斥；rank 区间用
+    len(x.shape)，不得用 shape[0]（aclnnCalculateMatmulWeightSize 缺陷 2）。
+    """
+
+    def _param(self, desc, name="tensorShape", ptype="aclIntArray*"):
+        return {
+            "param_name": name,
+            "function_name": "aclnnCalculateMatmulWeightSize",
+            "param_type": ptype,
+            "llm_description": desc,
+        }
+
+    def test_rank_range_emits_len_shape(self):
+        """'shape支持2-6维' → 2 <= len(tensorShape.shape) <= 6。"""
+        results = _pass2_single_param(
+            [self._param("输入shape支持2-6维，即（batch，n，k）")], [],
+        )
+        rank = [
+            r for r in results
+            if r["relation_object"].get("expr_type") == "self_shape_rank_range"
+        ]
+        assert len(rank) == 1
+        assert rank[0]["relation_object"]["expr"] == "2 <= len(tensorShape.shape) <= 6"
+        assert rank[0]["relation_object"]["relation_params"] == ["tensorShape"]
+
+    def test_lo_zero_still_upper_bound_not_range(self):
+        """'shape支持0-4维' (lo=0) 归上界规则，不触发 range 规则（不重复）。"""
+        results = _pass2_single_param([self._param("shape支持0-4维", name="x")], [])
+        assert not any(
+            r["relation_object"].get("expr_type") == "self_shape_rank_range"
+            for r in results
+        ), [r["relation_object"] for r in results]
+        assert any(
+            "len(x.shape) <= 4" in r["relation_object"].get("expr", "")
+            for r in results
+        ), [r["relation_object"] for r in results]
+
+    def test_no_shape_prefix_no_range(self):
+        """裸'支持2-6维'（无 shape 前缀）不误命中其它参数文本。"""
+        results = _pass2_single_param([self._param("支持2-6维", name="y")], [])
+        assert not any(
+            r["relation_object"].get("expr_type") == "self_shape_rank_range"
+            for r in results
+        ), [r["relation_object"] for r in results]
+
+    def test_rank_range_suppressed_by_existing_upper_bound(self):
+        """已有 self_shape_upper_bound 时，rank range 被双向互抑跳过。"""
+        existing = [{
+            "params": ["x"],
+            "relation_object": {
+                "expr_type": "self_shape_upper_bound",
+                "expr": "len(x.shape) <= 6",
+                "relation_params": ["x"],
+                "src_text": "",
+            },
+        }]
+        results = _pass2_single_param(
+            [self._param("shape支持2-6维", name="x")], existing,
+        )
+        assert not any(
+            r["relation_object"].get("expr_type") == "self_shape_rank_range"
+            for r in results
+        ), [r["relation_object"] for r in results]
+
+    def test_upper_bound_suppressed_by_existing_rank_range(self):
+        """反向：已有 rank range 时，上界规则也被互抑跳过（双向）。"""
+        existing = [{
+            "params": ["x"],
+            "relation_object": {
+                "expr_type": "self_shape_rank_range",
+                "expr": "2 <= len(x.shape) <= 6",
+                "relation_params": ["x"],
+                "src_text": "",
+            },
+        }]
+        results = _pass2_single_param(
+            [self._param("shape维度不高于6维", name="x")], existing,
+        )
+        assert not any(
+            r["relation_object"].get("expr_type") == "self_shape_upper_bound"
+            for r in results
+        ), [r["relation_object"] for r in results]
+
+
+# ── _pass6c_conditional_ordering (F4) ────────────────────────────────────────
+
+class TestPass6cOrdering:
+    _SOURCE = (
+        "tokensIndexFlag为true且有专家（expertTokens不为空）时，"
+        "expertTokens中的数值必须满足：如果i和j都是expertTokens中有效的数组索引，"
+        "且j大于i，那么expertTokens中第j个元素的数值大于或者等于"
+        "expertTokens中第i个元素的数值。"
+    )
+
+    def test_detects_non_decreasing_ordering(self):
+        results = _pass6c_conditional_ordering(
+            self._SOURCE,
+            all_param_names={"expertTokensOptional", "tokensIndexFlag", "x"},
+            implicit_param_names={"E", "N1"},
+            existing=[],
+        )
+        assert len(results) == 1
+        obj = results[0]["relation_object"]
+        assert obj["expr_type"] == "self_value_ordering"
+        expr = obj["expr"]
+        assert "all(expertTokensOptional[i] <= expertTokensOptional[i + 1]" in expr
+        assert "tokensIndexFlag.range_value == True" in expr
+        assert "E > 0" in expr
+        assert "expertTokensOptional is not None" in expr
+        assert "len(expertTokensOptional) > 0" in expr
+        assert "else True" in expr
+        # relation_params MUST include all referenced params (not just et_param)
+        assert "expertTokensOptional" in obj["relation_params"]
+        assert "tokensIndexFlag" in obj["relation_params"]
+        assert "E" in obj["relation_params"]
+
+    def test_no_tokensflag_returns_empty(self):
+        text = "expertTokens中第j个元素大于或者等于第i个元素。"
+        results = _pass6c_conditional_ordering(
+            text, {"expertTokensOptional"}, set(), [],
+        )
+        assert results == []
+
+    def test_no_ordering_pattern_returns_empty(self):
+        text = "tokensIndexFlag为true时，expertTokens为索引值。"
+        results = _pass6c_conditional_ordering(
+            text, {"expertTokensOptional", "tokensIndexFlag"}, {"E"}, [],
+        )
+        assert results == []
+
+    def test_param_name_maps_to_longest(self):
+        """Source 'expertTokens' maps to param 'expertTokensOptional'."""
+        text = "tokensIndexFlag为true且有专家时，第j个元素大于或者等于第i个元素。"
+        results = _pass6c_conditional_ordering(
+            text, {"expertTokensOptional", "tokensIndexFlag"}, {"E"}, [],
+        )
+        assert len(results) == 1
+        assert "expertTokensOptional" in results[0]["relation_object"]["expr"]
+
+    def test_dedup_against_existing(self):
+        results = _pass6c_conditional_ordering(
+            self._SOURCE,
+            {"expertTokensOptional", "tokensIndexFlag"},
+            {"E"},
+            existing=[{  # same expr already exists
+                "relation_object": json.dumps({
+                    "expr_type": "self_value_ordering",
+                    "expr": "(all(expertTokensOptional[i] <= expertTokensOptional[i + 1] for i in range(len(expertTokensOptional) - 1))) if (expertTokensOptional is not None and len(expertTokensOptional) > 0 and tokensIndexFlag.range_value == True and E > 0) else True",
+                    "relation_params": ["expertTokensOptional", "tokensIndexFlag", "E"],
+                    "src_text": "",
+                }),
+            }],
+        )
+        assert results == []
+
+
+# ── _supersede_bare_with_guarded (F1) ────────────────────────────────────────
+
+class TestSupersedeBareWithGuarded:
+    def _rel(self, expr, et="cross_variable_equality"):
+        return {
+            "relation_object": {
+                "expr_type": et,
+                "expr": expr,
+                "relation_params": ["N1", "K2"],
+                "src_text": "",
+            },
+            "platform": "",
+        }
+
+    def test_bare_removed_when_guarded_exists(self):
+        existing = [self._rel("N1 == 2 * K2"), self._rel("N1 == K2")]
+        new_rels = [self._rel(
+            "(N1 == 2 * K2) if activation.range_value in ['geglu'] else True"
+        )]
+        kept = _supersede_bare_with_guarded(existing, new_rels)
+        kept_exprs = [r["relation_object"]["expr"] for r in kept]
+        assert "N1 == 2 * K2" not in kept_exprs  # superseded by guarded
+        assert "N1 == K2" in kept_exprs  # unrelated bare kept
+
+    def test_guarded_existing_not_removed(self):
+        existing = [self._rel(
+            "(N1 == K2) if activation.range_value in ['gelu'] else True"
+        )]
+        new_rels = [self._rel(
+            "(N1 == K2) if activation.range_value in ['gelu'] else True"
+        )]
+        kept = _supersede_bare_with_guarded(existing, new_rels)
+        assert len(kept) == 1  # guarded existing is not bare, not removed
+
+    def test_no_guarded_new_returns_existing_unchanged(self):
+        existing = [self._rel("N1 == K2")]
+        new_rels = [self._rel("N1 == K2")]  # bare new, not guarded
+        kept = _supersede_bare_with_guarded(existing, new_rels)
+        assert len(kept) == 1
