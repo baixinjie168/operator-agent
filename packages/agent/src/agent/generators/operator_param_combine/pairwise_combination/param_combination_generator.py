@@ -65,7 +65,7 @@ class PairwiseParamCombinationGenerator:
                 param_format = self._get_format_value(raw_case, input_name)
                 param_dtype = self._get_dtype_value(raw_case, input_name, param_attr)
                 param_length = self._get_length_value(raw_case, input_name, param_attr, param_type)
-                param_range = self._get_range_value(raw_case, input_name, param_attr, param_dtype)
+                param_range = self._get_range_value(raw_case, input_name, param_dtype)
                 param_is_optional = self._get_bool_attr(
                     input_name, param_attr.is_optional, "is_optional"
                 )
@@ -120,7 +120,7 @@ class PairwiseParamCombinationGenerator:
         return None
 
     def _get_dtype_value(self, raw_case: Dict[str, Dict[str, Any]],
-                          param_name: str, param_attr) -> str:
+                         param_name: str, param_attr) -> str:
         dtype_vals = raw_case.get(param_name, {}).get(ATTR_DTYPE)
         if dtype_vals is not None:
             return str(dtype_vals)
@@ -133,7 +133,7 @@ class PairwiseParamCombinationGenerator:
         return ParamModelConfig.DEFAULT_PARAM_DTYPE_DTYPE_IN_ORIGINAL_DOC
 
     def _get_length_value(self, raw_case: Dict[str, Dict[str, Any]],
-                           param_name: str, param_attr, param_type: str) -> int | None:
+                          param_name: str, param_attr, param_type: str) -> int | None:
         if param_type not in ParamModelConfig.LIST_ATK_TYPE:
             return None
         lv = raw_case.get(param_name, {}).get(ATTR_ARRAY_LENGTH)
@@ -159,18 +159,19 @@ class PairwiseParamCombinationGenerator:
         return int(length_value) if length_value else ParamModelConfig.DEFAULT_LIST_LENGTH
 
     def _get_range_value(self, raw_case: Dict[str, Dict[str, Any]],
-                           param_name: str, param_attr, dtype: str) -> str | int | float | bool | None:
+                         param_name: str, dtype: str) -> str | int | float | bool | None:
         valid_profiles = ParamCombinationGenerator.get_default_range_by_dtype(dtype)
         default_profile = random.choice(valid_profiles)
         rv = raw_case.get(param_name, {}).get("range_value_profile")
         if rv is None:
             return rv
-        if isinstance(rv, str):
+        if DataMatchMap.ACL_DTYPE_TRANSFER_TENSOR_MAP.get(
+                dtype) in ParamModelConfig.FLOAT_DTYPE or dtype in ParamModelConfig.INT_DTYPE:
             if rv in valid_profiles:
                 return rv
-        else:
-            return rv
-        return default_profile
+            else:
+                return default_profile
+        return rv
 
     def _get_bool_attr(self, param_name: str, attr, attr_name: str) -> bool:
         raw, _ = DataHandleUtil.get_relevant_attribute_value(param_name, attr, attr_name)
@@ -179,7 +180,7 @@ class PairwiseParamCombinationGenerator:
         return bool(raw)
 
     def _get_shape_property(self, raw_case: Dict[str, Dict[str, Any]],
-                             param_name: str, param_attr) -> tuple:
+                            param_name: str, param_attr) -> tuple:
         dim_count = raw_case.get(param_name, {}).get("dim_count")
         if dim_count is None:
             dim_value, _ = DataHandleUtil.get_relevant_attribute_value(
