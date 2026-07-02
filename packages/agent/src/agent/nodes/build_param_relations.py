@@ -127,6 +127,10 @@ expr: {expr}
 7. 维度索引是否正确？（对照"参数 shape 信息"，确认 shape[i] 引用的确实是描述中所指的维度；当参数有多种 shape 形式时，应使用负索引 shape[-N]）
 8. 可选参数（名称含 Optional）的属性引用是否有 is not None 守卫？
    即 expr 应包含 (paramName is not None) 的条件包装
+9. 维度数 vs 维大小：当 source_citation/description 出现"N维""N-M维""维度数""shape size"
+   等**维数**语义时，expr 必须用 len(x.shape)，不得用 shape[i]（第i维的**大小**）。
+   错误: "2-6维" → 2 <= x.shape[0] <= 6
+   正确: "2-6维" → 2 <= len(x.shape) <= 6
 
 ## 输出
 严格按以下 JSON 返回：
@@ -460,6 +464,26 @@ async def _verify_and_fix(
     }
 
 
+def _needs_rank_verify(rel: dict, result: dict) -> bool:
+    """Fix 2C-c: narrow Phase-2b forced re-verification to rank-vs-dim cases.
+
+    Only triggers when a single-param shape_dependency / shape_value_dependency
+    expr uses shape[i] while the source text mentions 维 (rank semantics) —
+    the canonical misuse where "支持N-M维" is mistranslated to a shape[i]
+    range instead of len(x.shape). Avoids re-running the verify LLM on every
+    high-confidence shape_dependency (which would risk corrupting correct exprs).
+    """
+    if not result.get("expr"):
+        return False
+    et = result.get("expr_type", "")
+    if et not in ("shape_dependency", "shape_value_dependency"):
+        return False
+    if "shape[" not in result["expr"]:
+        return False
+    src = (rel.get("source_citation", "") or "") + (rel.get("description", "") or "")
+    return "维" in src
+
+
 async def _batch_extract_relation_objects(
     relations: list[dict],
     signatures_text: str,
@@ -580,6 +604,12 @@ async def _batch_extract_relation_objects(
                 # Phase 2b verification for medium confidence — enables
                 # expr_type correction and None-guard checks that the
                 # initial single-shot LLM may have missed.
+                result = await _verify_and_fix(llm, rel, result, param_shapes_text, sem)
+            elif confidence == "high" and _needs_rank_verify(rel, result):
+                # Fix 2C-c: narrowed forced re-verification — only the
+                # rank-vs-dim misuse ("N维" → shape[i] instead of len(shape))
+                # is worth re-running the verify LLM on a high-confidence
+                # result; broader triggers risk corrupting correct exprs.
                 result = await _verify_and_fix(llm, rel, result, param_shapes_text, sem)
 
         return result

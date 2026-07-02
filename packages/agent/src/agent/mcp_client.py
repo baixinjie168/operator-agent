@@ -216,6 +216,20 @@ class MCPClient:
             "section_type": section_type,
         })
 
+    async def get_sections_by_type(
+        self, doc_id: int, section_type: str,
+    ) -> list[dict]:
+        """Retrieve ALL sections of a section_type (vs get_section's first match).
+
+        Fix 1D: returns every same-type section so parameter tables split
+        across multiple params_execute / params_get_workspace sections are
+        not masked (同型遮蔽 bug).
+        """
+        return await self._call_tool("get_sections_by_type", {
+            "doc_id": doc_id,
+            "section_type": section_type,
+        })
+
     async def update_param_shape(self, doc_id: int, updates: list[dict]) -> dict:
         """Batch update only the shape field of parameters."""
         return await self._call_tool("update_param_shape", {

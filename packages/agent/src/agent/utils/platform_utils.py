@@ -131,6 +131,10 @@ def expand_common_in_constraint(
     """
     if not isinstance(constraint, dict) or "common" not in constraint:
         return constraint
+    # When supported_platforms is empty, keep "common" as-is to avoid
+    # data loss (pop would delete the only key without adding replacements).
+    if not supported_platforms:
+        return constraint
     common_data = constraint.pop("common")
     for plat in supported_platforms:
         if plat not in constraint:

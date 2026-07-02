@@ -1,6 +1,7 @@
 """ProductSupport node: extracts product support info via LLM and persists to DB."""
 
 import logging
+import re
 from typing import Any
 
 from agent.mcp_client import MCPClient
@@ -12,6 +13,38 @@ from agent.utils.llm_common import parse_json_response
 logger = logging.getLogger(__name__)
 
 _mcp_client = MCPClient()
+
+# Deterministic fallback: regex patterns for product support table parsing.
+_TERM_TAG_RE = re.compile(r"</?term>")
+_SUPPORTED_SYMBOLS = {"√", "✓", "✔", "是"}
+
+
+def _extract_via_regex(content: str) -> list[dict]:
+    """Deterministic fallback: parse product support table with regex.
+
+    Used when the LLM returns an empty or unparseable response. Handles
+    <term> tag stripping and √/× symbol recognition.
+    """
+    results: list[dict] = []
+    for line in content.split("\n"):
+        line = line.strip()
+        if not line.startswith("|") or not line.endswith("|"):
+            continue
+        cells = [c.strip() for c in line[1:-1].split("|")]
+        if len(cells) < 2:
+            continue
+        # Skip separator rows (e.g. | :--- | :---: |)
+        if all(re.match(r"^[\s\-:]+$", c) for c in cells):
+            continue
+        product = _TERM_TAG_RE.sub("", cells[0]).strip()
+        symbol = cells[1].strip()
+        if not product or product == "产品":
+            continue
+        results.append({
+            "product": product,
+            "support": symbol in _SUPPORTED_SYMBOLS,
+        })
+    return results
 
 
 async def product_support_node(state: PipelineState) -> dict[str, Any]:
@@ -75,11 +108,24 @@ def _find_product_support_content(sections: list[dict]) -> str | None:
 
 
 async def _extract_via_llm(content: str) -> list[dict]:
-    """Call LLM to extract product support info from markdown table content."""
+    """Call LLM to extract product support info from markdown table content.
+
+    Falls back to deterministic regex parsing when the LLM returns an empty
+    or unparseable response.
+    """
     llm = create_llm()
 
     prompt = PRODUCT_SUPPORT_EXTRACT_PROMPT.format(content=content)
     response = await llm.ainvoke(prompt)
     text = response.content if hasattr(response, "content") else str(response)
 
-    return parse_json_response(text, list) or []
+    products = parse_json_response(text, list) or []
+
+    # Fallback: LLM returned empty or unparseable response — use regex
+    if not products:
+        logger.warning(
+            "ProductSupport: LLM returned empty, using regex fallback"
+        )
+        products = _extract_via_regex(content)
+
+    return products

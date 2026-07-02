@@ -132,6 +132,9 @@ async def dtype_combo_extract_node(state: PipelineState) -> dict[str, Any]:
                     "dtype_combo_extract: could not fetch platform support for doc_id=%s",
                     doc_id,
                 )
+        # Empty-platform fallback: use "common" so combos are still built
+        if not supported_platforms:
+            supported_platforms = ["common"]
         platform_context = _build_platform_context(supported_platforms)
 
         section = await _mcp_client.get_section(doc_id, "constraints")

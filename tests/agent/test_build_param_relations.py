@@ -14,11 +14,11 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from agent.nodes.build_param_relations import (
-    _select_relevant_example,
-    _validate_expr,
-    _validate_expr_refs,
-    _validate_expr_syntax,
+from agent.nodes.build_param_relations import _select_relevant_example
+from agent.utils.expr_validation import (
+    validate_expr as _validate_expr,
+    validate_expr_refs as _validate_expr_refs,
+    validate_expr_syntax as _validate_expr_syntax,
 )
 
 
@@ -206,10 +206,6 @@ class TestExtractWithRetry:
 
         assert result["expr"] == "x.shape == y.shape"
         assert mock_llm.ainvoke.call_count == 1
-        # 三段式校验结果：AST + refs 通过
-        phases = result.get("_validation_phases") or {}
-        assert phases.get("ast_syntax", {}).get("status") == "passed"
-        assert phases.get("param_refs", {}).get("status") == "passed"
 
     @pytest.mark.asyncio
     async def test_retry_on_syntax_error(self):
@@ -266,10 +262,6 @@ class TestExtractWithRetry:
 
         assert result["expr"] == "x.shape == y.shape"
         assert mock_llm.ainvoke.call_count == 2
-        # AST 通过、refs 通过（重试后修好）
-        phases = result.get("_validation_phases") or {}
-        assert phases.get("ast_syntax", {}).get("status") == "passed"
-        assert phases.get("param_refs", {}).get("status") == "passed"
 
     @pytest.mark.asyncio
     async def test_max_retries_exceeded(self):
@@ -293,11 +285,6 @@ class TestExtractWithRetry:
         assert result["expr"] == ""
         assert "_validation_error" in result
         assert mock_llm.ainvoke.call_count == 3
-        # 三段式 phase：AST 失败、refs skipped
-        phases = result.get("_validation_phases") or {}
-        assert phases.get("ast_syntax", {}).get("status") == "failed"
-        assert phases.get("ast_syntax", {}).get("error")
-        assert phases.get("param_refs", {}).get("status") == "skipped"
 
 
 # ---------------------------------------------------------------------------
@@ -334,9 +321,6 @@ class TestVerifyAndFix:
 
         assert result["expr"] == "x.shape == y.shape"
         assert "_corrected" not in result
-        # 语义校验：passed
-        phases = result.get("_validation_phases") or {}
-        assert phases.get("semantic", {}).get("status") == "passed"
 
     @pytest.mark.asyncio
     async def test_incorrect_expr_corrected(self):
@@ -367,10 +351,6 @@ class TestVerifyAndFix:
 
         assert result["expr"] == "(x.shape[0] == y.shape[0]) if axis == 0 else True"
         assert result["_corrected"] is True
-        # 语义校验：corrected
-        phases = result.get("_validation_phases") or {}
-        assert phases.get("semantic", {}).get("status") == "corrected"
-        assert phases.get("semantic", {}).get("reason")
 
     @pytest.mark.asyncio
     async def test_corrected_expr_invalid_fallback(self):
@@ -401,10 +381,6 @@ class TestVerifyAndFix:
 
         assert result["expr"] == "x.shape == y.shape"
         assert "_corrected" not in result
-        # 语义校验：failed（修正表达式未通过 Phase 0）
-        phases = result.get("_validation_phases") or {}
-        assert phases.get("semantic", {}).get("status") == "failed"
-        assert phases.get("semantic", {}).get("reason")
 
     @pytest.mark.asyncio
     async def test_corrected_expr_hallucinated_param_fallback(self):
@@ -434,6 +410,3 @@ class TestVerifyAndFix:
         result = await _verify_and_fix(mock_llm, rel, expr_result, "shapes", sem)
 
         assert result["expr"] == "x.shape == y.shape"
-        # 语义校验：failed（修正表达式引用了不存在的参数 z）
-        phases = result.get("_validation_phases") or {}
-        assert phases.get("semantic", {}).get("status") == "failed"

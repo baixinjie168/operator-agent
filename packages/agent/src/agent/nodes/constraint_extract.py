@@ -30,13 +30,14 @@ Zero LLM calls.
 
 from __future__ import annotations
 
+import ast
 import json
 import logging
 import re
 from typing import Any
 
 from agent.mcp_client import MCPClient
-from agent.nodes.build_param_constraint._helpers import _normalize_type
+from agent.nodes.build_param_constraint._helpers import _normalize_type, _parse_json_field
 from agent.nodes.state import PipelineState
 from agent.core.config import settings
 from agent.utils.expr_validation import _semantic_expr_key
@@ -291,6 +292,90 @@ def _deduplicate_relations(
     return existing, deduped_new
 
 
+def _supersede_bare_with_guarded(
+    existing: list[dict], new_rels: list[dict],
+) -> list[dict]:
+    """Drop bare relations from *existing* when a new guarded version supersedes them.
+
+    A new guarded relation ``(X) if cond else True`` strictly subsumes a bare
+    ``X`` already in the DB: the guard makes it more precise, and leaving the
+    bare version alongside would re-introduce the very contradiction the guard
+    was added to fix (the bare form applies unconditionally).  Without this
+    step ``_deduplicate_relations`` cannot help — it never touches
+    ``existing`` (by design, to avoid data loss) and ``_semantic_expr_key``
+    gives guarded/bare *different* keys (guard stripping marks the guarded one
+    as ``guarded(X)``), so both survive and the contradiction persists across
+    re-parses.
+
+    Only removes an existing relation when:
+      1. the existing expr is itself bare (NOT an IfExp) — a guarded existing
+         relation is more precise and is kept;
+      2. its ``_semantic_expr_key`` matches the body key of a new guarded
+         relation (AST-canonical, so spacing/operand-order differences don't
+         block the match).
+    Unrelated relations are untouched.
+    """
+    # Collect AST-canonical keys of the BARE bodies of new guarded relations.
+    guarded_body_keys: set[str] = set()
+    for r in new_rels:
+        obj = r.get("relation_object", {})
+        if isinstance(obj, str):
+            try:
+                obj = json.loads(obj)
+            except (json.JSONDecodeError, TypeError):
+                continue
+        if not isinstance(obj, dict):
+            continue
+        expr = obj.get("expr", "")
+        if not expr:
+            continue
+        try:
+            tree = ast.parse(expr, mode="eval")
+        except SyntaxError:
+            continue
+        node = tree.body
+        if (isinstance(node, ast.IfExp)
+                and isinstance(node.orelse, ast.Constant)
+                and node.orelse.value is True):
+            key = _semantic_expr_key(ast.unparse(node.body))
+            if key:
+                guarded_body_keys.add(key)
+
+    if not guarded_body_keys:
+        return existing
+
+    kept: list[dict] = []
+    removed = 0
+    for r in existing:
+        obj = r.get("relation_object", {})
+        if isinstance(obj, str):
+            try:
+                obj = json.loads(obj)
+            except (json.JSONDecodeError, TypeError):
+                obj = {}
+        if isinstance(obj, dict):
+            expr = obj.get("expr", "")
+            if expr:
+                try:
+                    tree = ast.parse(expr, mode="eval")
+                    is_bare = not isinstance(tree.body, ast.IfExp)
+                except SyntaxError:
+                    is_bare = False
+                if is_bare and _semantic_expr_key(expr) in guarded_body_keys:
+                    removed += 1
+                    logger.info(
+                        "ConstraintSupersede: 移除被守卫版覆盖的裸关系 expr=%s",
+                        expr[:60],
+                    )
+                    continue
+        kept.append(r)
+    if removed:
+        logger.info(
+            "ConstraintSupersede: 移除 %d 条被守卫版覆盖的裸关系", removed,
+        )
+    return kept
+
+
 def _make_cross_rel(
     fn: str, ptype: str, pa: str, pb: str,
     expr: str, desc: str, src: str,
@@ -465,6 +550,18 @@ _P2_SHAPE_UPPER_RE = re.compile(
     r"|维度不高于\s*(\d+)\s*维"
     r"|shape\s*支持\s*0[-~](\d+)\s*维"
 )
+# 维度数区间 "shape支持2-6维"（lo 非零）：与 _P2_SHAPE_UPPER_RE 的
+# "shape支持0-N维"（lo=0）互斥，避免重复约束。要求 shape 前缀，
+# 避免裸"支持N-M维"误命中描述其它参数的文本。
+_P2_SHAPE_RANGE_RE = re.compile(
+    r"shape\s*支持\s*([1-9]\d*)\s*[-~]\s*(\d+)\s*维"
+)
+# Axis length bound: "最大长度N" — the per-axis element cap that
+# dimensions_agent deliberately drops ("ignore size info") when computing
+# rank.  Recovered in Pass 2 sub-branch F as a shape[0] bound, gated on 1-D
+# so the length is unambiguously on axis 0.
+_P2_AXIS_LEN_RE = re.compile(r"最大长度\s*(\d+)")
+_P2_DIM_RANK_RE = re.compile(r"(\d+)\s*维")
 _P2_BOOL_NOT_TRUE_RE = re.compile(
     r"不支持.*(?:配|设|置).*True|暂不支持.*True|不能.*True|仅支持.*False|只支持.*False",
     re.IGNORECASE,
@@ -501,12 +598,17 @@ def _is_already_covered_self(
         elif expr_type == "self_shape_upper_bound":
             if f"len({pname}.shape)" in expr:
                 return True
+        elif expr_type == "self_shape_rank_range":
+            if f"len({pname}.shape)" in expr:
+                return True  # 已有同型 rank 区间/上界约束，跳过（双向互抑）
         elif expr_type == "self_value_dependency":
             if f"{pname}.range_value" in expr:
                 return True
         elif expr_type == "self_string_length":
             if f"len({pname})" in expr and ("and" in expr or "or" in expr):
                 return True
+        elif expr_type == "self_shape_dim_range" and f"{pname}.shape[0]" in expr:
+            return True
 
     return False
 
@@ -607,6 +709,26 @@ def _pass2_single_param(
                     m_ub.group(0), et,
                 ))
 
+        # --- C2. Shape rank range ("shape支持2-6维") ---
+        # 与 C 的上界规则互斥：C 只认 lo=0（"支持0-N维"），本分支认 lo>=1。
+        # expr_type=self_shape_rank_range：与 self_shape_dim_range（per-axis
+        # 大小区间）命名对仗，遵循 Pass 2 的 self_* 词汇表。下游 z3 对
+        # len(x.shape) 比较链已知支持（z3_expression_solver_utils 示例即
+        # len(x.shape)==2）；assemble_result 不按 expr_type 过滤，可携带进
+        # constraints_in_parameters。
+        m_rg = _P2_SHAPE_RANGE_RE.search(text)
+        if m_rg:
+            et = "self_shape_rank_range"
+            if not _is_already_covered_self(pn, et, existing):
+                lo_val = int(m_rg.group(1))
+                hi_val = int(m_rg.group(2))
+                expr = f"{lo_val} <= len({pn}.shape) <= {hi_val}"
+                new_rels.append(_make_self_rel(
+                    fn, pn, expr,
+                    f"{pn} 的维度数为{lo_val}~{hi_val}",
+                    m_rg.group(0), et,
+                ))
+
         # --- D. Bool value restriction ---
         if "bool" in ptype.lower():
             m_bt = _P2_BOOL_NOT_TRUE_RE.search(text)
@@ -645,6 +767,32 @@ def _pass2_single_param(
                         f"{pn} 字符串长度要求({min_val}, {max_val})",
                         m_sl.group(0), et,
                     ))
+
+        # --- F. Tensor axis length bound ("1维，最大长度N") ---
+        # dimensions_agent only extracts rank and drops "最大长度N" (its
+        # pattern comment says "ignore size info").  Recover the per-axis cap
+        # here as a shape[0] bound.  Gate on 1-D so the length is on axis 0;
+        # multi-D shapes are skipped (the axis would be ambiguous).
+        shape_json = _parse_json_field(param.get("shape", ""))
+        for _plat, shape_text in shape_json.items():
+            if not shape_text:
+                continue
+            dim_m = _P2_DIM_RANK_RE.search(shape_text)
+            if not dim_m or int(dim_m.group(1)) != 1:
+                continue  # only 1-D: shape[0] is unambiguous
+            m_ax = _P2_AXIS_LEN_RE.search(shape_text)
+            if not m_ax:
+                continue
+            et = "self_shape_dim_range"
+            if _is_already_covered_self(pn, et, existing):
+                continue
+            n_val = int(m_ax.group(1))
+            expr = f"(0 < {pn}.shape[0] <= {n_val}) if {pn} is not None else True"
+            new_rels.append(_make_self_rel(
+                fn, pn, expr,
+                f"{pn} 第0维长度不超过{n_val}",
+                f"最大长度{n_val}", et,
+            ))
 
     return new_rels
 
@@ -821,16 +969,35 @@ _P3B_COND_RE = re.compile(
 
 
 def _detect_condition_clause(text: str, pos: int) -> str:
-    """Look back up to 80 chars before *pos* for a ``...时`` condition.
+    """Scan the containing sentence for a ``...时`` condition clause.
+
+    Looks back from *pos* to the nearest sentence boundary (``。；\\n``) — not
+    just 80 chars — so a condition at the start of a long sentence (e.g.
+    ``激活层为geglu/swiglu/reglu时，…且N1=2*K2。``) is still found when the
+    equality sits at the sentence tail.  Caps at 600 chars to bound
+    pathological text.  The old 80-char window missed the condition whenever
+    the equality was more than 80 chars after the ``…时`` clause, causing the
+    guard to be dropped and the equality emitted unconditionally — the root
+    cause of the ``N1==K2`` vs ``N1==2*K2`` contradiction.
 
     Returns a Python condition fragment (e.g.
-    ``activation in [geglu, swiglu, reglu]``) or an empty string when no
-    encodable condition is found. Only ``激活层为X时`` clauses are encoded
-    into a Python ``in`` test today; other ``当X时``/``若X时`` clauses are
-    detected but not yet encoded (returns "" so the equality is emitted
-    unconditionally — conservative, never drops the constraint).
+    ``activation.range_value in ['geglu', 'swiglu', 'reglu']``) or an empty
+    string when no encodable condition is found.  Only ``激活层为X时`` clauses
+    are encoded into a Python ``in`` test today; other ``当X时``/``若X时``
+    clauses are detected but not yet encoded (returns "" so the equality is
+    emitted unconditionally — conservative, never drops the constraint).
+
+    The guard uses ``activation.range_value`` and quoted string literals (not
+    bare ``activation in [geglu, …]``) so the emitted expr passes
+    ``validate_expr_refs`` and matches the conditional_constraint.md skill
+    convention — bare names would be unresolved Name nodes (NameError on eval).
     """
-    window = text[max(0, pos - 80):pos]
+    start = 0
+    for i in range(pos - 1, max(-1, pos - 600) - 1, -1):
+        if i >= 0 and text[i] in "。；\n":
+            start = i + 1
+            break
+    window = text[start:pos]
     last = None
     for m in _P3B_COND_RE.finditer(window):
         last = m  # take the condition nearest to the equality
@@ -840,7 +1007,7 @@ def _detect_condition_clause(text: str, pos: int) -> str:
         p.strip() for p in re.split(r"[/、，,]", last.group(1)) if p.strip()
     ]
     if parts and "激活" in window:
-        return f"activation in [{', '.join(parts)}]"
+        return f"activation.range_value in [{', '.join(repr(p) for p in parts)}]"
     return ""
 
 
@@ -1666,6 +1833,95 @@ def _pass6b_conditional_shapes_from_params(
 
 
 # ===================================================================
+# Pass 6c: Conditional intra-tensor ordering (deterministic)
+# Detects "第j个元素…大于等于…第i个元素" + tokensIndexFlag==true antecedent
+# → non-decreasing ordering constraint.  Source wording is regular, so this
+# is deterministic (no LLM); variants fall back to complex_relation_agent via
+# the intra_tensor_ordering.md skill.
+# ===================================================================
+
+_P6C_ORDER_RE = re.compile(
+    r"第\s*j\s*个.{0,30}?大于.{0,10}?(?:或者)?等于.{0,30}?第\s*i\s*个"
+)
+_P6C_TOKENSFLAG_TRUE_RE = re.compile(r"tokensIndexFlag\s*为\s*true", re.IGNORECASE)
+_P6C_EXPERT_RE = re.compile(r"有专家|不为空")
+
+
+def _pass6c_conditional_ordering(
+    constraints_text: str,
+    all_param_names: set[str],
+    implicit_param_names: set[str],
+    existing: list[dict],
+) -> list[dict]:
+    """Pass 6c: 条件性张量内元素非递减排序约束（确定性直出）。
+
+    命中"第j个元素…大于等于…第i个元素"句式（j>i 时后者不小于前者 ⟺ 非递减），
+    在同句内抽取 tokensIndexFlag==true 与 有专家/expertTokens不为空 前件，产出
+    规范 expr。
+
+    relation_params 必须含被引用的全部参数（expertTokens*、tokensIndexFlag、E），
+    否则 validate_expr_refs 会把 tokensIndexFlag/E 判为非法引用，且下游按
+    relation_params 做依赖传播会漏掉这两个依赖。  因此这里自建关系 dict，不用
+    只接受单参的 _make_self_rel。
+    """
+    if not constraints_text.strip():
+        return []
+    new_rels: list[dict] = []
+    sentences = re.split(r"[。；\n]", constraints_text)
+    for sentence in sentences:
+        sentence = _strip_html(sentence.strip())
+        if not sentence or not _P6C_ORDER_RE.search(sentence):
+            continue
+        if not _P6C_TOKENSFLAG_TRUE_RE.search(sentence):
+            continue  # 前件必须含 tokensIndexFlag==true
+        # 参数名：含 expertTokens 的最长参数名（源文 expertTokens → expertTokensOptional）
+        et_param = ""
+        for n in sorted(all_param_names, key=len, reverse=True):
+            if "experttokens" in n.lower():
+                et_param = n
+                break
+        if not et_param:
+            continue
+        has_expert = bool(_P6C_EXPERT_RE.search(sentence))
+        rel_params = [et_param, "tokensIndexFlag"]
+        cond_parts = [
+            f"{et_param} is not None",
+            f"len({et_param}) > 0",
+            "tokensIndexFlag.range_value == True",
+        ]
+        if has_expert and "E" in implicit_param_names:
+            rel_params.append("E")
+            cond_parts.append("E > 0")
+        cond = " and ".join(cond_parts)
+        expr = (
+            f"(all({et_param}[i] <= {et_param}[i + 1] "
+            f"for i in range(len({et_param}) - 1))) "
+            f"if ({cond}) else True"
+        )
+        if _expr_exists(existing + new_rels, expr):
+            continue
+        new_rels.append({
+            "function_name": "",
+            "relation_type": "self_constraint",
+            "platform": "",
+            "description": f"{et_param} 在 tokensIndexFlag=true 且有专家时非递减",
+            "params": rel_params,
+            "param_optional": {p: False for p in rel_params},
+            "source_citation": sentence,
+            "relation_object": {
+                "expr_type": "self_value_ordering",
+                "expr": expr,
+                "relation_params": rel_params,
+                "src_text": sentence,
+            },
+        })
+        logger.info(
+            "Pass6c: detected ordering constraint for %s", et_param,
+        )
+    return new_rels
+
+
+# ===================================================================
 # Pass 5: LLM fallback (relation discovery + expr generation)
 # Merges: extract_ws/exe (agent_loop) + single_param_constraint Layer 2
 # ===================================================================
@@ -2142,6 +2398,7 @@ async def constraint_extract_node(state: PipelineState) -> dict[str, Any]:
         pass5_count = 0
         pass6_count = 0
         pass6b_count = 0
+        pass6c_count = 0
         pass7_count = 0
         pass7b_count = 0
 
@@ -2305,6 +2562,30 @@ async def constraint_extract_node(state: PipelineState) -> dict[str, Any]:
         except Exception:
             logger.exception("ConstraintExtract Pass 6b failed")
 
+        # --- Pass 6c: Conditional intra-tensor ordering ---
+        # Detects "第j个元素…大于等于…第i个元素" + tokensIndexFlag==true
+        # antecedent → non-decreasing ordering.  Deterministic (no LLM).
+        try:
+            implicit_params = state.get("implicit_params", [])
+            implicit_param_names = {
+                m["var_name"] for m in implicit_params
+                if m.get("var_name")
+                and not m.get("is_constant")
+                and not m.get("is_external_constant")
+            }
+            pass6c_results = _pass6c_conditional_ordering(
+                constraints_text, all_param_names, implicit_param_names,
+                existing + all_new,
+            )
+            all_new.extend(pass6c_results)
+            pass6c_count = len(pass6c_results)
+            logger.info(
+                "ConstraintExtract Pass 6c (conditional ordering): %d new constraints",
+                pass6c_count,
+            )
+        except Exception:
+            logger.exception("ConstraintExtract Pass 6c failed")
+
         # --- Pass 7: Dtype constraints from dtype_combinations ---
         # Generates type_equality relations from the dtype_combos table.
         try:
@@ -2354,6 +2635,21 @@ async def constraint_extract_node(state: PipelineState) -> dict[str, Any]:
                         "ConstraintExtract dedup: %d -> %d new after semantic dedup",
                         _pre_dedup, len(all_new),
                     )
+                # Supersede: drop bare existing relations that a new guarded
+                # version subsumes.  Without this, re-parsing an operator
+                # whose DB still holds the old bare N1==K2 / N1==2*K2 would
+                # keep both bare and guarded -> the contradiction persists.
+                # _deduplicate_relations cannot do this (it never touches
+                # existing, and _semantic_expr_key gives guarded/bare
+                # different keys).
+                _pre_super = len(existing)
+                existing = _supersede_bare_with_guarded(existing, all_new)
+                if len(existing) != _pre_super:
+                    logger.info(
+                        "ConstraintExtract supersede: %d -> %d existing after "
+                        "removing bare relations superseded by guarded versions",
+                        _pre_super, len(existing),
+                    )
             except Exception:
                 logger.exception("ConstraintExtract dedup failed (non-blocking)")
 
@@ -2362,8 +2658,8 @@ async def constraint_extract_node(state: PipelineState) -> dict[str, Any]:
                 f"P1:{pass1_count} P2:{pass2_count} P3:{pass3_count} "
                 f"P3b:{pass3b_count} "
                 f"P4:{pass4_count} P4b:{pass4b_count} P5:{pass5_count} "
-                f"P6:{pass6_count} P6b:{pass6b_count} P7:{pass7_count} "
-                f"P7b:{pass7b_count} "
+                f"P6:{pass6_count} P6b:{pass6b_count} P6c:{pass6c_count} "
+                f"P7:{pass7_count} P7b:{pass7b_count} "
                 f"合计新增 {len(all_new)} 条"
             ),
             "phase": "extract_done",
@@ -2376,6 +2672,7 @@ async def constraint_extract_node(state: PipelineState) -> dict[str, Any]:
             "pass5_count": pass5_count,
             "pass6_count": pass6_count,
             "pass6b_count": pass6b_count,
+            "pass6c_count": pass6c_count,
             "pass7_count": pass7_count,
             "pass7b_count": pass7b_count,
             "new_count": len(all_new),
@@ -2391,13 +2688,14 @@ async def constraint_extract_node(state: PipelineState) -> dict[str, Any]:
             logger.info(
                 "ConstraintExtract: saved %d total relations "
                 "(%d existing + %d new [P1=%d, P2=%d, P3=%d, P4=%d, P4b=%d, "
-                "P5=%d, P6=%d, P6b=%d, P7=%d, P7b=%d])",
+                "P5=%d, P6=%d, P6b=%d, P6c=%d, P7=%d, P7b=%d])",
                 result.get("saved", 0),
                 len(existing),
                 len(all_new),
                 pass1_count, pass2_count, pass3_count,
                 pass4_count, pass4b_count, pass5_count,
-                pass6_count, pass6b_count, pass7_count, pass7b_count,
+                pass6_count, pass6b_count, pass6c_count,
+                pass7_count, pass7b_count,
             )
         else:
             logger.info(

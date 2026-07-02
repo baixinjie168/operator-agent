@@ -98,8 +98,12 @@ async def attrs_build_node(state: BuildParamConstraintState) -> dict[str, Any]:
     dtype_by_platform = state.get("dtype_by_platform", {})
     supported_platforms = state.get("supported_platforms", [])
 
-    if not params or not supported_platforms:
+    if not params:
         return {"attrs_map": {}}
+
+    # Empty-platform fallback: use "common" as default platform so attrs
+    # are still built. Downstream expand_common can then operate normally.
+    platforms_to_build = supported_platforms or ["common"]
 
     all_sig_set = set(all_sig_param_names)
     attrs_map: dict[str, dict[str, Any]] = {}
@@ -115,7 +119,7 @@ async def attrs_build_node(state: BuildParamConstraintState) -> dict[str, Any]:
         desc_json = _parse_json_field(param.get("param_desc", ""))
         usage_json = _parse_json_field(param.get("usage_notes", ""))
 
-        for plat in supported_platforms:
+        for plat in platforms_to_build:
             # type: sig_type_map -> param_type fallback
             sig_key = f"{fn_name}::{pname}"
             ptype = sig_type_map.get(sig_key, param.get("param_type", ""))
