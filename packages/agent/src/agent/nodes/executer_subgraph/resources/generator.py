@@ -663,6 +663,7 @@ def generate_api_class_for_op(cases: list[dict], signature: str, op_name: str) -
             lines.append('        _mat2_transposed = self._get_kwarg(input_data, "mat2_transposed") or False')
             lines.append("        if _self_in is not None and _self_transposed:")
             lines.append('            _self_converted["self"] = _self_in.transpose(1, 2)')
+            lines.append("        _k_padded = None  # track padded k for self padding")
             lines.append("        if _nz_in is not None and _nz_in.dim() >= 4:")
             lines.append("            _bdims = list(_nz_in.shape[:-4])")
             lines.append("            if _mat2_transposed:")
@@ -706,6 +707,16 @@ def generate_api_class_for_op(cases: list[dict], signature: str, op_name: str) -
             lines.append("                self._nz_storage_shape = torch.Size([_bdims[0] if _bdims else 1, _k1_p, _n1_p, 16, 16])")
             lines.append("            else:")
             lines.append("                self._nz_storage_shape = torch.Size([_bdims[0] if _bdims else 1, _n1_p, _k1_p, 16, 16])")
+            lines.append("            _k_padded = _outer  # track padded k for self padding")
+        lines.append("")
+        lines.append("        # self 需要 pad 到 k 的 16 字节对齐，使 self.last_dim == mat2.padded_k")
+        lines.append("        if _self_in is not None and _k_padded is not None:")
+        lines.append('            _self_for_pad = _self_converted.get("self", _self_in)')
+        lines.append("            _k_actual = _self_for_pad.shape[-1]")
+        lines.append("            if _k_actual < _k_padded:")
+        lines.append("                _padded_self = F.pad(_self_for_pad, (0, _k_padded - _k_actual))")
+        lines.append('                _self_converted["self"] = _padded_self')
+        lines.append("                self._self_k_padded = _k_padded")
         lines.append("")
         lines.append("        # 转置时修正 output shape（CPU golden shape 不对 + NPU 用 NZ padding 后 n 校验 out）")
         lines.append("        if _self_transposed or _mat2_transposed:")
@@ -1053,13 +1064,41 @@ def main():
     if isinstance(cases, dict):
         cases = [cases]
 
-    # 展开 inputs 中带 length 字段的 list 类型输入（tensors / scalars）为多个独立 input
+    # 展开 inputs 中带 length 字段的 list 类型输入（tensors / scalars / attrs）为多个独立 input
     # 新格式: {"name": "x", "type": "tensors", "length": 2}
     # → 旧格式: [{"name": "x", "type": "tensors"}, {"name": "x", "type": "tensors"}]
     # 支持两种 inputs 结构:
     #   1) [[{dict}, {dict}, ...]] — 嵌套 list（多个输入组合）
     #   2) [{dict_with_length}] — 单层 list（一个输入组合，含 length 字段）
     # 同时清理 stale "length": null 字段（ATK 不需要）
+    # attrs 类型展开规则（type 改为 attr，删除 length）:
+    #   1. range_values 是列表且 len != length → 复制 length 次，每个保持原始 range_values
+    #   2. range_values 是列表且 len == length → 复制 length 次，每个取 range_values[i]
+    #   3. length 为 None/0 → 单个条目，range_values 设为空列表 []
+    def _expand_attrs_input(inp):
+        rv = inp.get("range_values")
+        length = inp.get("length")
+        base = {k: v for k, v in inp.items() if k != "length"}
+        # type 保持为 attrs
+        if length is None or int(length) == 0:
+            base["range_values"] = []
+            return [base]
+        length = int(length)
+        if isinstance(rv, list):
+            rv_list = rv
+        elif rv is not None:
+            rv_list = [rv]
+        else:
+            rv_list = []
+        if len(rv_list) == length:
+            result = []
+            for i in range(length):
+                item = copy.deepcopy(base)
+                item["range_values"] = rv_list[i]
+                result.append(item)
+            return result
+        return [copy.deepcopy(base) for _ in range(length)]
+
     _LIST_TYPES = {"tensors", "scalars"}
     for case in cases:
         new_inputs = []
@@ -1076,6 +1115,11 @@ def main():
                         else:
                             for _ in range(int(length)):
                                 expanded.append(copy.deepcopy(inp))
+                    elif isinstance(inp, dict) and inp.get("type") == "attrs":
+                        if "length" in inp:
+                            expanded.extend(_expand_attrs_input(copy.deepcopy(inp)))
+                        else:
+                            expanded.append(inp)
                     else:
                         expanded.append(inp)
                 new_inputs.append(expanded)
@@ -1088,6 +1132,11 @@ def main():
                         new_inputs.append([inp_group])
                     else:
                         new_inputs.append([copy.deepcopy(inp_group) for _ in range(int(length))])
+                elif inp_group.get("type") == "attrs":
+                    if "length" in inp_group:
+                        new_inputs.append(_expand_attrs_input(copy.deepcopy(inp_group)))
+                    else:
+                        new_inputs.append(inp_group)
                 else:
                     new_inputs.append(inp_group)
             else:
