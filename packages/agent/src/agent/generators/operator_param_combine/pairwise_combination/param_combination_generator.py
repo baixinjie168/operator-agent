@@ -15,8 +15,8 @@ from agent.generators.operator_param_combine.pairwise_combination.attribute_doma
     AttributeDomain, ATTR_DTYPE, ATTR_FORMAT, ATTR_ARRAY_LENGTH, )
 from agent.generators.operator_param_combine.pairwise_combination.constraint_filter import ConstraintProcessor
 from agent.generators.operator_param_combine.pairwise_combination.pairwise_generator import PairwiseCombinationGenerator
-from common_utils.data_handle_utils import DataHandleUtil
-from operator_param_combine.param_combination_generate import ParamCombinationGenerator
+from agent.generators.common_utils.data_handle_utils import DataHandleUtil
+from agent.generators.operator_param_combine.param_combination_generate import ParamCombinationGenerator
 
 logger = LazyLogger()
 
