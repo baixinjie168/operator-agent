@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 import copy
-from typing import Any, Dict, List, Set, Tuple
+from typing import Any, Dict, List
 
+from agent.generators.common_model_definition import OperatorRule, ParamAttributes, ValueWithSrcText
 from agent.generators.common_utils.data_handle_utils import DataHandleUtil
 from agent.generators.common_utils.logger_util import LazyLogger
 from agent.generators.data_definition.constants import DataMatchMap, ParamModelConfig
-from agent.generators.data_definition.param_models_def import ParamShapeRoleRules
-from agent.generators.common_model_definition import OperatorRule, ParamAttributes, ValueWithSrcText
 
 logger = LazyLogger()
 
@@ -17,6 +16,7 @@ ATTR_DTYPE = "dtype"
 ATTR_DIMENSIONS = "dimensions"
 ATTR_ARRAY_LENGTH = "array_length"
 ATTR_RANGE_VALUE = "allowed_range_value"
+ATTR_RANGE_VALUE_TYPE = "allowed_range_value_type"
 ATTR_IS_OPTIONAL = "is_optional"
 ATTR_IS_OPERATOR_PARAM = "is_operator_param"
 
@@ -66,20 +66,18 @@ class AttributeDomain:
             domain[ATTR_DTYPE] = self._extract_dtype_domain(param_name, param_attr)
             domain[ATTR_DIMENSIONS] = self._extract_dimensions_domain(param_name, param_attr)
             domain[ATTR_ARRAY_LENGTH] = self._extract_array_length_domain(param_name, param_attr)
-            domain[ATTR_RANGE_VALUE] = self._extract_range_value_domain(param_name, param_attr)
+            domain[ATTR_RANGE_VALUE], domain[ATTR_RANGE_VALUE_TYPE] = self._extract_range_value_domain(param_name, param_attr)
             domain[ATTR_IS_OPTIONAL] = self._extract_bool_domain(param_name, param_attr, "is_optional")
             domain[ATTR_IS_OPERATOR_PARAM] = self._extract_bool_domain(param_name, param_attr, "is_operator_param")
             self.param_domains[param_name] = domain
 
     @staticmethod
     def _get_value(param_name: str, attr: ValueWithSrcText | str, attr_name: str):
-        raw = DataHandleUtil.get_relevant_attribute_value(param_name, attr, attr_name)
-        if isinstance(raw, tuple):
-            return raw[0]
-        return raw
+        raw, value_type = DataHandleUtil.get_relevant_attribute_value(param_name, attr, attr_name)
+        return raw, value_type
 
     def _extract_type_domain(self, param_name: str, param_attr: ParamAttributes) -> List[str]:
-        raw = self._get_value(param_name, param_attr.type, "type")
+        raw, _ = self._get_value(param_name, param_attr.type, "type")
         if raw is None:
             return [ParamModelConfig.DEFAULT_ATK_TYPE]
         if isinstance(raw, list):
@@ -92,7 +90,7 @@ class AttributeDomain:
         return [mapped]
 
     def _extract_format_domain(self, param_name: str, param_attr: ParamAttributes) -> List[str]:
-        raw = self._get_value(param_name, param_attr.format, "format")
+        raw, _ = self._get_value(param_name, param_attr.format, "format")
         if raw is None:
             return []
         if isinstance(raw, list):
@@ -100,7 +98,7 @@ class AttributeDomain:
         return [str(raw)]
 
     def _extract_dtype_domain(self, param_name: str, param_attr: ParamAttributes) -> List[str]:
-        raw = self._get_value(param_name, param_attr.dtype, "dtype")
+        raw, _ = self._get_value(param_name, param_attr.dtype, "dtype")
         if raw is None:
             return [ParamModelConfig.DEFAULT_PARAM_DTYPE_DTYPE_IN_ORIGINAL_DOC]
         if isinstance(raw, list):
@@ -109,7 +107,7 @@ class AttributeDomain:
 
     def _extract_dimensions_domain(self, param_name: str, param_attr: ParamAttributes) -> List[int]:
         """JSON中，dimension.value默认一定为枚举形式，即[2,6]表示dim可取值为2或6"""
-        raw = self._get_value(param_name, param_attr.dimensions, "dimensions")
+        raw, _ = self._get_value(param_name, param_attr.dimensions, "dimensions")
         if raw is None:
             return list(range(
                 ParamModelConfig.DEFAULT_TENSOR_SHAPE_DIM_MIN,
@@ -128,7 +126,7 @@ class AttributeDomain:
         return [ParamModelConfig.DEFAULT_TENSOR_SHAPE_DIM]
 
     def _extract_array_length_domain(self, param_name: str, param_attr: ParamAttributes) -> List[int]:
-        raw = self._get_value(param_name, param_attr.array_length, "array_length")
+        raw, _ = self._get_value(param_name, param_attr.array_length, "array_length")
         if raw is None:
             return [ParamModelConfig.DEFAULT_LIST_LENGTH]
         if isinstance(raw, int):
@@ -143,13 +141,13 @@ class AttributeDomain:
             return sorted(set(vals)) if vals else [ParamModelConfig.DEFAULT_LIST_LENGTH]
         return [ParamModelConfig.DEFAULT_LIST_LENGTH]
 
-    def _extract_range_value_domain(self, param_name: str, param_attr: ParamAttributes) -> List[Any]:
-        raw = self._get_value(param_name, param_attr.allowed_range_value, "allowed_range_value")
+    def _extract_range_value_domain(self, param_name: str, param_attr: ParamAttributes) -> tuple[List[Any], str|None ]:
+        raw, value_type = self._get_value(param_name, param_attr.allowed_range_value, "allowed_range_value")
         if raw is None:
-            return []
+            return [], None
         if isinstance(raw, list):
-            return copy.deepcopy(raw)
-        return [raw]
+            return copy.deepcopy(raw), value_type
+        return [raw], value_type
 
     @staticmethod
     def _extract_bool_domain(param_name: str, param_attr: ParamAttributes, attr_name: str) -> List[bool]:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import random
 from typing import Any, Dict, List
 
+from agent.generators.common_model_definition import OperatorRule
 from agent.generators.common_utils.logger_util import LazyLogger
 from agent.generators.data_definition.constants import DataMatchMap, ParamModelConfig
 from agent.generators.data_definition.param_models_def import (
@@ -11,12 +12,9 @@ from agent.generators.data_definition.param_models_def import (
     ParameterShapeProperty,
 )
 from agent.generators.operator_param_combine.pairwise_combination.attribute_domain import (
-    AttributeDomain, ATTR_DTYPE, ATTR_FORMAT, ATTR_DIMENSIONS,
-    ATTR_RANGE_VALUE, ATTR_ARRAY_LENGTH, ATTR_IS_OPTIONAL, ATTR_IS_OPERATOR_PARAM,
-)
+    AttributeDomain, ATTR_DTYPE, ATTR_FORMAT, ATTR_ARRAY_LENGTH, )
 from agent.generators.operator_param_combine.pairwise_combination.constraint_filter import ConstraintProcessor
 from agent.generators.operator_param_combine.pairwise_combination.pairwise_generator import PairwiseCombinationGenerator
-from agent.generators.common_model_definition import OperatorRule
 
 logger = LazyLogger()
 
@@ -167,12 +165,13 @@ class PairwiseParamCombinationGenerator:
         valid_profiles = ParamCombinationGenerator.get_default_range_by_dtype(dtype)
         default_profile = random.choice(valid_profiles)
         rv = raw_case.get(param_name, {}).get("range_value_profile")
-        if rv is not None:
-            if isinstance(rv, str):
-                if rv in valid_profiles:
-                    return rv
-            else:
+        if rv is None:
+            return rv
+        if isinstance(rv, str):
+            if rv in valid_profiles:
                 return rv
+        else:
+            return rv
         return default_profile
 
     def _get_bool_attr(self, param_name: str, attr, attr_name: str) -> bool:

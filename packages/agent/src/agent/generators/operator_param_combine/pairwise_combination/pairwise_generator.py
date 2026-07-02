@@ -56,7 +56,6 @@ allowed_range_value, is_optional, is_operator_param）独立随机取值，组�
 from __future__ import annotations
 
 import random
-from collections import defaultdict
 from typing import Any, Dict, List, Set, Tuple
 
 from agent.generators.common_utils.logger_util import LazyLogger
@@ -64,7 +63,7 @@ from agent.generators.data_definition.constants import DataMatchMap, ParamModelC
 from agent.generators.operator_param_combine.pairwise_combination.attribute_domain import (
     AttributeDomain,
     ATTR_DTYPE, ATTR_FORMAT, ATTR_DIMENSIONS,
-    ATTR_RANGE_VALUE, ATTR_ARRAY_LENGTH, ATTR_IS_OPTIONAL, ATTR_IS_OPERATOR_PARAM,
+    ATTR_RANGE_VALUE, ATTR_ARRAY_LENGTH, ATTR_RANGE_VALUE_TYPE,
 )
 from agent.generators.operator_param_combine.pairwise_combination.constraint_filter import ConstraintProcessor
 
@@ -149,8 +148,9 @@ class PairwiseCombinationGenerator:
 
             param_dtype_list = attrs.get(ATTR_DTYPE, [])
             range_vals = domain.get(ATTR_RANGE_VALUE, [])
+            range_value_type = domain.get(ATTR_RANGE_VALUE_TYPE, None)
             if range_vals:
-                expanded = self._expand_range_values(range_vals, p)
+                expanded = self._expand_range_values(range_vals, range_value_type, p)
                 if expanded:
                     attrs["range_value_profile"] = expanded
                 else:
@@ -221,8 +221,10 @@ class PairwiseCombinationGenerator:
                                 self.param_to_shared[m][attr_name] = effective_key
 
     @staticmethod
-    def _expand_range_values(raw_values: List, param_name: str) -> List[Any]:
+    def _expand_range_values(raw_values: List, range_value_type, param_name: str) -> List[Any]:
         expanded = []
+        if range_value_type == "enum":
+            return raw_values
         for v in raw_values:
             if isinstance(v, (int, float, bool)):
                 expanded.append(v)
