@@ -116,13 +116,7 @@ class AttributeDomain:
         if isinstance(raw, int):
             return [raw]
         if isinstance(raw, list):
-            vals = []
-            for item in raw:
-                if isinstance(item, int):
-                    vals.append(item)
-                elif isinstance(item, list) and len(item) == 2 and all(isinstance(v, int) for v in item):
-                    vals.extend(range(item[0], item[1] + 1))
-            return sorted(set(vals)) if vals else [ParamModelConfig.DEFAULT_TENSOR_SHAPE_DIM]
+            return raw
         return [ParamModelConfig.DEFAULT_TENSOR_SHAPE_DIM]
 
     def _extract_array_length_domain(self, param_name: str, param_attr: ParamAttributes) -> List[int]:

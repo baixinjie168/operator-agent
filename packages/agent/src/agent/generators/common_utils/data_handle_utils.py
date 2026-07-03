@@ -58,19 +58,31 @@ class DataHandleUtil:
         if not os.path.exists(jsonl_file):
             logger.warning(f"JSONL file not found, skip convert: {jsonl_file}")
             return False
+
         logger.info(f"Start convert jsonl to json, api name : '{api_name}'")
         case_config_json_list = []
+
         with open(jsonl_file, "r", encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
                 if line:
                     case_config_json_list.append(json.loads(line))
-        if not os.path.exists(json_save_path):
-            os.makedirs(json_save_path)
+
+        os.makedirs(json_save_path, exist_ok=True)
         json_save_file = os.path.join(json_save_path, api_name + ".json")
+
         with open(json_save_file, "w", encoding="utf-8") as f:
-            f.write(json.dumps(case_config_json_list, ensure_ascii=False, indent=4))
+            json.dump(case_config_json_list, f, ensure_ascii=False, indent=4)
+
+        # 删除原 JSONL 文件
+        try:
+            os.remove(jsonl_file)
+            logger.info(f"Deleted original JSONL file: {jsonl_file}")
+        except OSError as e:
+            logger.error(f"Failed to delete JSONL file {jsonl_file}: {e}")
+            # 不返回 False，因为转换已经成功了
         logger.info(f"End convert jsonl to json, api name : '{api_name}', case count : {len(case_config_json_list)}")
+        logger.info(f"Deleted original JSONL file: {jsonl_file}")
         return True
 
     @staticmethod
