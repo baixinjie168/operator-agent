@@ -55,7 +55,9 @@ allowed_range_value, is_optional, is_operator_param）独立随机取值，组�
 
 from __future__ import annotations
 
+import itertools
 import random
+import time
 from typing import Any, Dict, List, Set, Tuple
 
 from agent.generators.common_utils.logger_util import LazyLogger
@@ -246,6 +248,15 @@ class PairwiseCombinationGenerator:
             result[eff_name] = self.get_effective_values(param, raw_name)
         return result
 
+    @staticmethod
+    def _to_hashable(v: Any) -> Any:
+        """将不可哈希值转为可哈希等价形式，保持语义不变"""
+        if isinstance(v, list):
+            return tuple(v)
+        if isinstance(v, dict):
+            return tuple(sorted(v.items()))
+        return v
+
     def collect_pairs(self) -> Set[Tuple]:
         """
         枚举所有待覆盖的 2-pair 组合。
@@ -266,20 +277,19 @@ class PairwiseCombinationGenerator:
         for p in self.params:
             all_eff[p] = self.get_all_effective_attrs(p)
 
-        for i in range(len(self.params)):
-            p1 = self.params[i]
-            attrs1 = all_eff[p1]
-            for eff1, values1 in attrs1.items():
-                for v1 in values1:
-                    for j in range(i, len(self.params)):
-                        p2 = self.params[j]
-                        attrs2 = all_eff[p2]
-                        for eff2, values2 in attrs2.items():
-                            for v2 in values2:
-                                if p1 == p2 and eff1 == eff2:
-                                    continue
-                                pair = (p1, eff1, v1, p2, eff2, v2)
-                                pairs.add(pair)
+        flattened: list[tuple[str, str, Any]] = [
+            (p, eff, self._to_hashable(v))
+            for p in self.params
+            for eff, values in all_eff[p].items()
+            for v in values
+        ]
+
+        for (p1, eff1, v1), (p2, eff2, v2) in itertools.combinations_with_replacement(flattened, 2):
+            if p1 == p2 and eff1 == eff2:
+                continue
+            pairs.add((p1, eff1, v1, p2, eff2, v2))
+            if p1 == p2:
+                pairs.add((p2, eff2, v2, p1, eff1, v1))
         return pairs
 
     def generate(self, max_cases: int | None = None) -> List[Dict[str, Dict[str, Any]]]:
@@ -407,10 +417,10 @@ class PairwiseCombinationGenerator:
                     score = 0
                     for other_p in assigned_params:
                         for other_eff, other_v in assigned[other_p].items():
-                            pair = (p, eff_name, v, other_p, other_eff, other_v)
+                            pair = (p, eff_name, PairwiseCombinationGenerator._to_hashable(v), other_p, other_eff, PairwiseCombinationGenerator._to_hashable(other_v))
                             if pair in uncovered:
                                 score += 1
-                            pair_rev = (other_p, other_eff, other_v, p, eff_name, v)
+                            pair_rev = (other_p, other_eff, PairwiseCombinationGenerator._to_hashable(other_v), p, eff_name, PairwiseCombinationGenerator._to_hashable(v))
                             if pair_rev in uncovered:
                                 score += 1
                     if score > best_score:
@@ -473,34 +483,22 @@ class PairwiseCombinationGenerator:
     @staticmethod
     def _count_coverage(case: Dict[str, Dict[str, Any]], uncovered: Set[Tuple]) -> int:
         count = 0
-        params = list(case.keys())
-        for i in range(len(params)):
-            p1 = params[i]
-            attrs1 = case[p1]
-            for eff1, v1 in attrs1.items():
-                for j in range(i, len(params)):
-                    p2 = params[j]
-                    attrs2 = case[p2]
-                    for eff2, v2 in attrs2.items():
-                        if p1 == p2 and eff1 == eff2:
-                            continue
-                        pair = (p1, eff1, v1, p2, eff2, v2)
-                        if pair in uncovered:
-                            count += 1
+        flattened = [(p, eff, PairwiseCombinationGenerator._to_hashable(v)) for p in case for eff, v in case[p].items()]
+        for (p1, eff1, v1), (p2, eff2, v2) in itertools.combinations_with_replacement(flattened, 2):
+            if p1 == p2 and eff1 == eff2:
+                continue
+            if (p1, eff1, v1, p2, eff2, v2) in uncovered:
+                count += 1
+            if p1 == p2 and (p2, eff2, v2, p1, eff1, v1) in uncovered:
+                count += 1
         return count
 
     @staticmethod
     def _mark_covered(case: Dict[str, Dict[str, Any]], uncovered: Set[Tuple]):
-        params = list(case.keys())
-        for i in range(len(params)):
-            p1 = params[i]
-            attrs1 = case[p1]
-            for eff1, v1 in attrs1.items():
-                for j in range(i, len(params)):
-                    p2 = params[j]
-                    attrs2 = case[p2]
-                    for eff2, v2 in attrs2.items():
-                        if p1 == p2 and eff1 == eff2:
-                            continue
-                        pair = (p1, eff1, v1, p2, eff2, v2)
-                        uncovered.discard(pair)
+        flattened = [(p, eff, PairwiseCombinationGenerator._to_hashable(v)) for p in case for eff, v in case[p].items()]
+        for (p1, eff1, v1), (p2, eff2, v2) in itertools.combinations_with_replacement(flattened, 2):
+            if p1 == p2 and eff1 == eff2:
+                continue
+            uncovered.discard((p1, eff1, v1, p2, eff2, v2))
+            if p1 == p2:
+                uncovered.discard((p2, eff2, v2, p1, eff1, v1))
