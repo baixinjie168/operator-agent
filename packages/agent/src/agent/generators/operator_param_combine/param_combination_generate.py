@@ -251,9 +251,23 @@ class ParamCombinationGenerator:
                     f"dtype : '{dtype}', range value: '{select_allowed_value}'. solve failed, "
                     f"use default data profile : {default_data_profile}")
                 return default_data_profile
-            range_value_profile_list = [allowed_value_boundary[0], allowed_value_boundary[1],
-                                        (allowed_value_boundary[0] + allowed_value_boundary[1]) / 2,
-                                        allowed_value_boundary[0] + 0.01, allowed_value_boundary[1] - 0.01]
+            low, high = allowed_value_boundary
+            span = high - low
+            if span < 0:
+                logger.error(
+                    f"Invalid descending range, operator: "
+                    f"'{self.operator_rule_data.operator_name}', "
+                    f"param: '{param_name}', range: '{select_allowed_value}'"
+                )
+                return default_data_profile
+            delta = min(0.01, span / 100) if span > 0 else 0
+            range_value_profile_list = [
+                low,
+                high,
+                low + span / 2,
+                low + delta,
+                high - delta,
+            ]
         elif isinstance(select_allowed_value, str) and ExpressionPreprocessor.validate_expression_without_bool(
                 str(select_allowed_value)):
             range_value_profile_list = [select_allowed_value]

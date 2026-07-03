@@ -102,7 +102,10 @@ class AttributeDomain:
         if raw is None:
             return [ParamModelConfig.DEFAULT_PARAM_DTYPE_DTYPE_IN_ORIGINAL_DOC]
         if isinstance(raw, list):
-            return [str(v) for v in raw if v is not None]
+            valid_dtype_set = [str(each) for each in raw if each not in ParamModelConfig.UNSUPPORT_DTYPE]
+            return valid_dtype_set
+        if isinstance(raw, str) and raw in ParamModelConfig.UNSUPPORT_DTYPE:
+            return [ParamModelConfig.DEFAULT_PARAM_DTYPE_DTYPE_IN_ORIGINAL_DOC]
         return [str(raw)]
 
     def _extract_dimensions_domain(self, param_name: str, param_attr: ParamAttributes) -> List[int]:
