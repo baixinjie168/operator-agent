@@ -124,7 +124,12 @@ class ParamConstraintUtils(CommonDispatcher):
                 #     continue
                 logger.debug(f"Relation type : {relation_type}, expr : {constraint_relation.expr}, use z3 solver")
                 z3_constraints.append(constraint_relation)
-        self.solve_z3_constraints(z3_constraints)
+        if not self.solve_z3_constraints(z3_constraints):
+            logger.error(
+                f"Correct case param failed because Z3 constraints are "
+                f"invalid or unsatisfied, operator name : {self.operator_name}"
+            )
+            return False
         for customize_constraint in customize_constraints:
             relation_type = customize_constraint.expr_type
             logger.debug(f"Relation type : {relation_type}, use strict constraint logical")

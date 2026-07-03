@@ -28,14 +28,17 @@
     builder.solve()
 """
 import ast
+import io
 import re
+import tokenize
 from typing import List, Dict
 
 import z3
 
 from agent.generators.common_utils.logger_util import LazyLogger
 from agent.generators.data_definition.constants import DataMatchMap
-from agent.generators.param_constraint_solve.expression_preprocess_utils import ASTtoZ3Converter, TensorVar, ScalarVar, ListVar
+from agent.generators.param_constraint_solve.expression_preprocess_utils import ASTtoZ3Converter, TensorVar, ScalarVar, \
+    ListVar
 from agent.generators.param_constraint_solve.param_var_definition import TensorListVar
 
 logger = LazyLogger()
@@ -45,7 +48,23 @@ class ExpressionPreprocessor:
     """Preprocesses expressions before solving."""
 
     @staticmethod
+    def normalize_json_null(expr: str) -> str:
+        """Convert bare JSON ``null`` tokens to Python ``None`` safely.
+
+        Quoted string values such as ``"null"`` are intentionally unchanged.
+        """
+        tokens = []
+        for token in tokenize.generate_tokens(io.StringIO(expr).readline):
+            if token.type == tokenize.NAME and token.string == "null":
+                token = tokenize.TokenInfo(
+                    token.type, "None", token.start, token.end, token.line
+                )
+            tokens.append(token)
+        return tokenize.untokenize(tokens)
+
+    @staticmethod
     def apply_keyword_replace(expr: str) -> str:
+        # expr = ExpressionPreprocessor.normalize_json_null(expr)
         for keyword, replacement in DataMatchMap.EXPR_KEYWORD_REPLACE.items():
             if replacement is None:
                 expr = expr.replace(keyword, 'None')
@@ -99,13 +118,14 @@ class ExpressionPreprocessor:
 class Z3ConstraintBuilder:
     _VAR_FACTORY = {
         'tensor': (TensorVar, lambda self, kwargs: (self.solver, kwargs.get("dtype"), kwargs.get('allowed_dtypes'),
-                                                     kwargs.get('allowed_formats'), kwargs.get('range_value'))),
-        'tensor_list': (TensorListVar, lambda self, kwargs: (self.solver, kwargs.get("dtype"), kwargs.get('allowed_dtypes'),
-                                                              kwargs.get('allowed_formats'), kwargs.get('range_value'),
-                                                              kwargs.get("length"))),
+                                                    kwargs.get('allowed_formats'), kwargs.get('range_value'))),
+        'tensor_list': (TensorListVar,
+                        lambda self, kwargs: (self.solver, kwargs.get("dtype"), kwargs.get('allowed_dtypes'),
+                                              kwargs.get('allowed_formats'), kwargs.get('range_value'),
+                                              kwargs.get("length"))),
         'scalar': (ScalarVar, lambda self, kwargs: (self.solver, kwargs.get('dtype'), kwargs.get('range_value'))),
         'list': (ListVar, lambda self, kwargs: (self.solver, kwargs.get('dtype'), kwargs.get('range_value'),
-                                                 kwargs.get("length"))),
+                                                kwargs.get("length"))),
     }
 
     def __init__(self, timeout_ms=60000):
@@ -121,7 +141,7 @@ class Z3ConstraintBuilder:
         return self._slice_counter
 
     def declare_var(self, var_name, type_hint="scalar", dtype=None, allowed_dtypes=None, allowed_formats=None,
-                    range_value=None, length=None, is_print_log = False):
+                    range_value=None, length=None, is_print_log=False):
         if var_name in self.var_map:
             logger.warning(f"[Warn] var {var_name} already declared")
             return
@@ -162,7 +182,7 @@ class Z3ConstraintBuilder:
             if ExpressionPreprocessor.validate_expression(replace_expr):
                 self.add_constraint(expr_str_name, replace_expr)
 
-    def add_constraint(self, expr_name, expr_str, is_print_log = False):
+    def add_constraint(self, expr_name, expr_str, is_print_log=False):
         try:
             tree = ast.parse(expr_str, mode='eval')
             converter = ASTtoZ3Converter(self)
