@@ -95,7 +95,7 @@ class ParamModelConfig:
     DIM_VALUE_PROFILE_LIST = ["Has_Large_Size", "Has_Size_1", "Has_Odd_Size", "Typical"]
     # 定义属于float, int, bool等可枚举的数据类型
     FLOAT_DTYPE = ["fp16", "fp32", "fp64", "bf16", "fp", "double"]
-    INT_DTYPE = ["int", "int16", "int8", "int32", "int64", "uint8", "uint16", "uint32", "uint64"]
+    INT_DTYPE = ["int", "int16", "int8", "int32", "int64", "uint8", "uint16", "uint32", "uint64", "int4"]
     BOOL_DTYPE = ["bool"]
 
     # 数值类参数以及bool类参数填充值模型全集
@@ -145,7 +145,7 @@ class DataMatchMap:
                                        "DOUBLE": torch.float64}
 
     # 在case_config中只生成数据生成方法字段，不生成实际数据时使用，用于适配ATK框架
-    ACL_DTYPE_TRANSFER_TENSOR_MAP = {"INT4": "int4", "INT8": "int8", "INT16": "int16", "INT32": "int32",
+    ACL_DTYPE_TRANSFER_TENSOR_MAP = {"INT4": "int4", "int4": "int4", "INT8": "int8", "INT16": "int16", "INT32": "int32",
                                      "UINT8": "uint8", "INT": "int64", "uint64": "uint64",
                                      "UINT16": "uint16", "UINT32": "uint32", "UINT64": "uint64", "INT64": "int64",
                                      "BFLOAT16": "bf16", "FLOAT16": "fp16", "FLOAT32": "fp32", "FLOAT64": "fp64",
