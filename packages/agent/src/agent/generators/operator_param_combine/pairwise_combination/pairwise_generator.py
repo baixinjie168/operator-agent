@@ -68,6 +68,7 @@ from agent.generators.operator_param_combine.pairwise_combination.attribute_doma
     ATTR_RANGE_VALUE, ATTR_ARRAY_LENGTH, ATTR_RANGE_VALUE_TYPE,
 )
 from agent.generators.operator_param_combine.pairwise_combination.constraint_filter import ConstraintProcessor
+from operator_param_combine.param_combination_generate import ParamCombinationGenerator
 
 logger = LazyLogger()
 
@@ -90,20 +91,11 @@ class PairwiseCombinationGenerator:
         if not dtype_list:
             return list(ParamModelConfig.FLOAT_TENSOR_DATA_PROFILE + ParamModelConfig.INT_TENSOR_DATA_PROFILE)
 
-        has_float = False
-        has_int = False
+        profile_data = []
         for d in dtype_list:
-            mapped = DataMatchMap.ACL_DTYPE_TRANSFER_TENSOR_MAP.get(d)
-            if mapped in ParamModelConfig.FLOAT_DTYPE:
-                has_float = True
-            elif mapped in ParamModelConfig.INT_DTYPE:
-                has_int = True
-
-        if has_float and not has_int:
-            return list(ParamModelConfig.FLOAT_TENSOR_DATA_PROFILE)
-        if has_int and not has_float:
-            return list(ParamModelConfig.INT_TENSOR_DATA_PROFILE)
-        return list(ParamModelConfig.FLOAT_TENSOR_DATA_PROFILE + ParamModelConfig.INT_TENSOR_DATA_PROFILE)
+            profile = ParamCombinationGenerator.get_default_range_by_dtype(d)
+            profile_data.extend(profile)
+        return profile_data
 
     def _build_param_attributes(self):
         self.constraint_processor.process()
