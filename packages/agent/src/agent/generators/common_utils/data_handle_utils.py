@@ -208,6 +208,8 @@ class DataHandleUtil:
             if isinstance(param_attribute.value, list):
                 if len(param_attribute.value) == 0:
                     return None, None
+            if param_attribute.value == "N/A":
+                return None, None
             return param_attribute.value, param_attribute.type
         else:
             logger.info(
