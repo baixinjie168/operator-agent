@@ -14,6 +14,10 @@ Use this skill when:
 - You need to replace the dummy computation with real PyTorch CPU calls
 - The file contains `# TODO: CPU_GOLDEN` and `# END_CPU_GOLDEN` markers with the C++ signature in comments
 
+## Skip These Operators (Do NOT Process)
+
+If the operator is **`aclnnCalculateMatmulWeightSize`** or **`aclnnCalculateMatmulWeightSizeV2`**, **stop immediately** — do not read docs, do not modify any files, do not derive CPU golden code. These operators use completely pre-defined test scripts (`test_weightSize.py` / `test_weightSize_v2.py`) that are output verbatim by `generator.py` via special `.tpl` templates. There is no `# TODO: CPU_GOLDEN` marker and no dummy computation to replace. The skill flow ends here for these two operators.
+
 ## Step 0: Read the ACLNN Operator Documentation (MUST DO FIRST)
 
 **Before deriving the CPU golden, ALWAYS read the operator's CANN documentation to extract parameter constraints.**

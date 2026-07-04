@@ -993,3 +993,5 @@ aclnnBitwiseXorScalar aclnnStatus aclnnBitwiseXorScalarGetWorkspaceSize(const ac
 aclnnInplaceBitwiseXorScalar aclnnStatus aclnnInplaceBitwiseXorScalarGetWorkspaceSize(aclTensor* selfRef, const aclTensor* other, uint64_t* workspaceSize, aclOpExecutor** executor)
 aclnnMuls aclnnStatus aclnnMulsGetWorkspaceSize(const aclTensor *self, const aclScalar *other, aclTensor *out, uint64_t *workspaceSize, aclOpExecutor **executor)
 aclnnInplaceMuls aclnnStatus aclnnInplaceMulsGetWorkspaceSize(aclTensor *selfRef, const aclScalar *other, uint64_t *workspaceSize, aclOpExecutor **executor)
+aclnnCalculateMatmulWeightSize aclnnStatus aclnnCalculateMatmulWeightSize(const aclIntArray *tensorShape, uint64_t *weightTensorSize)
+aclnnCalculateMatmulWeightSizeV2 aclnnStatus aclnnCalculateMatmulWeightSizeV2(const aclIntArray *tensorShape, aclDataType dataType, uint64_t *weightTensorSize)
