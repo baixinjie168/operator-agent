@@ -23,15 +23,15 @@ class Function(BaseApi):
         found = self.get_config_by_name(self.task_result.case_config.inputs, "tensorShape")
         dataType = self.get_config_by_name(self.task_result.case_config.inputs, "dataType").range_values
 
-        if isinstance(found[-2].range_values[0], list):
-            n = found[-2].range_values[0][0]
-        else:
+        if isinstance(found[-2].range_values, list):
             n = found[-2].range_values[0]
-
-        if isinstance(found[-1].range_values[0], list):
-            k = found[-1].range_values[0][0]
         else:
+            n = found[-2].range_values
+
+        if isinstance(found[-1].range_values, list):
             k = found[-1].range_values[0]
+        else:
+            k = found[-1].range_values
 
         if dataType not in ["fp16", "bf16", "int8"]:
             output = math.ceil(n / 16) * 16 * math.ceil(k / 16) * 16
