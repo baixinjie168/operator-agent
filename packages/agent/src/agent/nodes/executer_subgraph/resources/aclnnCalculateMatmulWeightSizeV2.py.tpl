@@ -21,12 +21,22 @@ class Function(BaseApi):
         output = None
 
         found = self.get_config_by_name(self.task_result.case_config.inputs, "tensorShape")
-        weightDtype = self.get_config_by_name(self.task_result.case_config.inputs, "weightDtype").range_values
+        dataType = self.get_config_by_name(self.task_result.case_config.inputs, "dataType").range_values
 
-        if weightDtype not in ["fp16", "bf16", "int8"]:
-            output = math.ceil(found[-2].range_values[0] / 16) * 16 * math.ceil(found[-1].range_values[0] / 16) * 16
+        if isinstance(found[-2].range_values[0], list):
+            n = found[-2].range_values[0][0]
         else:
-            output = math.ceil(found[-2].range_values[0] / 16) * 16 * math.ceil(found[-1].range_values[0] / 32) * 32
+            n = found[-2].range_values[0]
+
+        if isinstance(found[-1].range_values[0], list):
+            k = found[-1].range_values[0][0]
+        else:
+            k = found[-1].range_values[0]
+
+        if dataType not in ["fp16", "bf16", "int8"]:
+            output = math.ceil(n / 16) * 16 * math.ceil(k / 16) * 16
+        else:
+            output = math.ceil(n / 16) * 16 * math.ceil(k / 32) * 32
         output = torch.tensor(output, dtype=torch.long)
 
         return output
@@ -61,13 +71,13 @@ class AclnnNpuFormatCast(AclnnBaseApi):
         weightShape = self.backend.input_args[0]
         weightTensorSize = self.backend.input_args[1]
 
-        weightDtype = self.get_config_by_name(self.task_result.case_config.inputs, "weightDtype").range_values
+        dataType = self.get_config_by_name(self.task_result.case_config.inputs, "dataType").range_values
 
-        if weightDtype == "int8":  # ["FLOAT16", "BFLOAT16", "INT8"]
+        if dataType == "int8":  # ["FLOAT16", "BFLOAT16", "INT8"]
             acl_wrapper.aclnn.aclnnCalculateMatmulWeightSizeV2(weightShape, AclDataType.ACL_INT8, ctypes.byref(weightTensorSize))
-        elif weightDtype == "bf16":
+        elif dataType == "bf16":
             acl_wrapper.aclnn.aclnnCalculateMatmulWeightSizeV2(weightShape, AclDataType.ACL_BF16, ctypes.byref(weightTensorSize))
-        elif weightDtype == "fp16":
+        elif dataType == "fp16":
             acl_wrapper.aclnn.aclnnCalculateMatmulWeightSizeV2(weightShape, AclDataType.ACL_FLOAT16, ctypes.byref(weightTensorSize))# 异常用例分支
         else:
             acl_wrapper.aclnn.aclnnCalculateMatmulWeightSizeV2(weightShape, AclDataType.ACL_INT16, ctypes.byref(weightTensorSize))

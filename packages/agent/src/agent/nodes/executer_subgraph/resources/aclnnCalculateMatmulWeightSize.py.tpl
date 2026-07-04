@@ -19,7 +19,18 @@ class Function(BaseApi):
 
     def __call__(self, input_data: InputDataset, with_output: bool = False):
         found = self.get_config_by_name(self.task_result.case_config.inputs, "tensorShape")
-        output = math.ceil(found[-2].range_values[0] / 16) * 16 * math.ceil(found[-1].range_values[0] / 16) * 16
+
+        if isinstance(found[-2].range_values[0], list):
+            n = found[-2].range_values[0][0]
+        else:
+            n = found[-2].range_values[0]
+
+        if isinstance(found[-1].range_values[0], list):
+            k = found[-1].range_values[0][0]
+        else:
+            k = found[-1].range_values[0]
+
+        output = math.ceil(n / 16) * 16 * math.ceil(k / 16) * 16
         output = torch.tensor(output, dtype=torch.long)
 
         return output
