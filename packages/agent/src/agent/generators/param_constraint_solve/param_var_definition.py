@@ -747,6 +747,7 @@ class TensorVar(BaseVar):
             else:
                 resolved_range = BaseVar._resolve_range_from_set_fast(py_vals, self._range_spec)
             result["range_values"] = resolved_range
+        result["is_present"] = z3.is_true(model.eval(self.is_present)) if self.is_present.decl() in decls else True
         return result
 
 
@@ -872,7 +873,7 @@ class TensorListVar(BaseVar):
             else:
                 resolved_range = BaseVar._resolve_range_from_set_fast(py_vals, self._range_spec)
             result['range_values'] = resolved_range
-
+        result["is_present"] = z3.is_true(model.eval(self.is_present)) if self.is_present.decl() in decls else True
         return result
 
 
@@ -942,7 +943,8 @@ class ListVar(BaseVar):
         resolved_range = BaseVar._resolve_range_from_set_fast(py_vals, self._range_spec)
         # 智能解析 Range
         # resolved_range = BaseVar._resolve_range_from_set(values, self._range_spec)
-        return {'type': self.type, 'dtype': self.dtype_arg, 'length': seq_len, 'range_values': resolved_range}
+        is_present = z3.is_true(model.eval(self.is_present)) if self.is_present.decl() in model.decls() else True
+        return {'type': self.type, 'dtype': self.dtype_arg, 'length': seq_len, 'range_values': resolved_range, 'is_present': is_present}
 
 
 class ScalarVar(BaseVar):
@@ -984,4 +986,5 @@ class ScalarVar(BaseVar):
         #     py_val,
         #     self._range_spec
         # )
-        return {'type': self.type, 'dtype': self.dtype_arg, 'range_values': resolved_range}
+        is_present = z3.is_true(model.eval(self.is_present)) if self.is_present.decl() in model.decls() else True
+        return {'type': self.type, 'dtype': self.dtype_arg, 'range_values': resolved_range, 'is_present': is_present}
