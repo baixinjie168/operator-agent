@@ -458,6 +458,9 @@ class ParamConstraintUtils(CommonDispatcher):
             else:
                 builder.declare_var(param_name, z3_param_type, dtype=param_dtype, range_value=range_values,
                                     length=param_length, is_print_log=is_print_log)
+        for param_name in self.case_input_map:
+            if param_name in builder.var_map:
+                builder.solver.add(builder.var_map[param_name].is_present)
 
     def solve_z3_constraints(self, z3_constraints: List[InterParamConstraint]):
         """
@@ -494,6 +497,13 @@ class ParamConstraintUtils(CommonDispatcher):
                 f"Z3 solver error, no solution can satisfy constraints, operator name : {self.operator_name}")
             return False
         logger.info(f"End solving solution of constraints by Z3, operator name : {self.operator_name}")
+
+        absent_params = [param_name for param_name in self.case_input_map.keys()
+                         if solver_result.get(param_name, {}).get('is_present') is False]
+        for param_name in absent_params:
+            self.case.inputs = [inp for inp in self.case.inputs if inp.name not in absent_params]
+            self.case_input_map.pop(param_name)
+
         for param_name in self.case_input_map.keys():
             property_dict = solver_result.get(param_name, {})
             for field_name in ParamSetValueFlag.model_fields.keys():
