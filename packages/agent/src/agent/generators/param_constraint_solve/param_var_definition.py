@@ -746,6 +746,8 @@ class TensorVar(BaseVar):
                 resolved_range = self._range_spec
             else:
                 resolved_range = BaseVar._resolve_range_from_set_fast(py_vals, self._range_spec)
+            dtype_str = result.get("dtype") if "dtype" in result else self._dtype_arg
+            resolved_range = DataHandleUtil.range_value_post_processing(dtype_str, resolved_range)
             result["range_values"] = resolved_range
         result["is_present"] = z3.is_true(model.eval(self.is_present)) if self.is_present.decl() in decls else True
         return result
@@ -872,6 +874,8 @@ class TensorListVar(BaseVar):
                 resolved_range = self._range_spec
             else:
                 resolved_range = BaseVar._resolve_range_from_set_fast(py_vals, self._range_spec)
+            dtype_str = result.get("dtype") if "dtype" in result else self._dtype_arg
+            resolved_range = DataHandleUtil.range_value_post_processing(dtype_str, resolved_range)
             result['range_values'] = resolved_range
         result["is_present"] = z3.is_true(model.eval(self.is_present)) if self.is_present.decl() in decls else True
         return result
@@ -941,6 +945,8 @@ class ListVar(BaseVar):
         py_vals = set(values)
         # 快速解析 Range, 避免多次调用solver.check(),加快效率
         resolved_range = BaseVar._resolve_range_from_set_fast(py_vals, self._range_spec)
+        dtype_str = result.get("dtype") if "dtype" in result else self._dtype_arg
+        resolved_range = DataHandleUtil.range_value_post_processing(dtype_str, resolved_range)
         # 智能解析 Range
         # resolved_range = BaseVar._resolve_range_from_set(values, self._range_spec)
         is_present = z3.is_true(model.eval(self.is_present)) if self.is_present.decl() in model.decls() else True
@@ -979,6 +985,8 @@ class ScalarVar(BaseVar):
             py_val = self._range_spec
         # 使用快速解析逻辑，避免多次调用solver.check()
         resolved_range = BaseVar._resolve_range_fast(py_val, self._range_spec)
+        dtype_str = result.get("dtype") if "dtype" in result else self._dtype_arg
+        resolved_range = DataHandleUtil.range_value_post_processing(dtype_str, resolved_range)
         # 智能解析range
         # resolved_range = self._resolve_range_smartly(
         #     self.solver,

@@ -15,7 +15,7 @@ from pydantic import ValidationError
 
 from agent.generators.atk_common_utils.case_config import CaseConfig
 from agent.generators.common_utils.logger_util import LazyLogger
-from agent.generators.data_definition.constants import DataMatchMap, GlobalConfig
+from agent.generators.data_definition.constants import DataMatchMap, GlobalConfig, ParamModelConfig
 from agent.generators.data_definition.param_models_def import RunPlatform
 from agent.generators.common_model_definition import OperatorRule, ParamAttributes, ValueWithSrcText
 
@@ -249,3 +249,21 @@ class DataHandleUtil:
         else:
             return None
         return value_boundary
+
+    @staticmethod
+    def range_value_post_processing(dtype: str, range_value):
+        """
+        后处理所有的range_value，如果dtype为int， 则range_value中不能出现float
+        Args:
+            dtype: 数据类型
+            range_value: 原始range_value
+        Returns: 修复后的range_value
+        """
+        if dtype in ParamModelConfig.INT_DTYPE:
+            if isinstance(range_value, list):
+                range_value = [int(v) for v in range_value]
+                return range_value
+            if isinstance(range_value, float):
+                range_value = int(range_value)
+                return range_value
+        return range_value

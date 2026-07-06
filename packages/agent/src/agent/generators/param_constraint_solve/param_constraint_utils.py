@@ -463,7 +463,8 @@ class ParamConstraintUtils(CommonDispatcher):
         for constraint in self.inter_param_constraints:
             expr_text = constraint.expr
             for param_name in self.case_input_map:
-                if re.match(rf'^\s*{re.escape(param_name)}\s+is\s+None\s*$', expr_text):
+                # 检测参数名是否出现在任何 is None / is not None 上下文中
+                if re.search(rf'\b{re.escape(param_name)}\s+is\s+(?:not\s+)?None\b', expr_text):
                     standalone_none_params.add(param_name)
 
         for param_name in self.case_input_map:
