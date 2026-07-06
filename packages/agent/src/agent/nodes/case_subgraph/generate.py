@@ -12,6 +12,7 @@ import logging
 import re
 from typing import Any
 
+from agent.core.config import settings
 from agent.generators import TestCaseGenerator
 from agent.mcp_client import MCPClient
 from agent.nodes.state import PipelineState
@@ -65,14 +66,19 @@ async def case_generate_node(state: PipelineState) -> dict[str, Any]:
             operator_name, count, len(gen.supported_platforms) or 1,
             target_product or "ALL",
         )
+        jsonl_save_path = str(settings.cases_dir / operator_name)
         if target_product:
             # Narrow generation to a single product so the result count is
             # exactly ``count`` instead of ``count * num_products``.
             cases_by_product = {
-                target_product: gen.generate_for_platform(target_product, count),
+                target_product: gen.generate_for_platform(
+                    target_product, count, jsonl_save_path=jsonl_save_path,
+                ),
             }
         else:
-            cases_by_product = gen.generate_by_platform(count=count)
+            cases_by_product = gen.generate_by_platform(
+                count=count, jsonl_save_path=jsonl_save_path,
+            )
 
         # Save per-product files. 注入 ``supported_product`` 字段到每条用例 dict，
         # 这样 ``db.save_test_cases`` / ``/api/v1/test-cases?supported_product=...`` 能按

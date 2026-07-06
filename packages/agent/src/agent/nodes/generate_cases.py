@@ -11,6 +11,7 @@ import json
 import logging
 from typing import Any
 
+from agent.core.config import settings
 from agent.generators import TestCaseGenerator
 from agent.mcp_client import MCPClient
 from agent.nodes.state import PipelineState
@@ -59,7 +60,10 @@ async def generate_cases_node(state: PipelineState) -> dict[str, Any]:
 
         # 直接透传原始 ``json_constraints`` dict，不再做 ``parse_result_json``
         # 或任何 ``GeneratorContext`` 中间层转换。
-        cases = TestCaseGenerator(constraints, seed=seed).generate(count=count)
+        jsonl_save_path = str(settings.cases_dir / operator_name)
+        cases = TestCaseGenerator(constraints, seed=seed).generate(
+            count=count, jsonl_save_path=jsonl_save_path,
+        )
         cases_json = json.dumps(
             [c.model_dump() for c in cases], ensure_ascii=False,
         )
