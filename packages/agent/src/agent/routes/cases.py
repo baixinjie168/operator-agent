@@ -8,6 +8,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
 
+from agent.core.config import settings
 from agent.mcp_client import MCPClient
 from agent.schemas.cases import (
     GenerateCasesRequest,
@@ -50,7 +51,10 @@ async def generate_cases(body: GenerateCasesRequest) -> GenerateCasesResponse:
 
         # 直接透传原始 ``json_constraints`` dict，不再做 ``parse_result_json``
         # 或任何 ``GeneratorContext`` 中间层转换。
-        cases = TestCaseGenerator(constraints, seed=body.seed).generate(count=body.count)
+        jsonl_save_path = str(settings.cases_dir / body.operator_name)
+        cases = TestCaseGenerator(constraints, seed=body.seed).generate(
+            count=body.count, jsonl_save_path=jsonl_save_path,
+        )
         cases_json = json.dumps(
             [c.model_dump() for c in cases], ensure_ascii=False,
         )

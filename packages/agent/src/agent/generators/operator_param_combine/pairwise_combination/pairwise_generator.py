@@ -68,7 +68,7 @@ from agent.generators.operator_param_combine.pairwise_combination.attribute_doma
     ATTR_RANGE_VALUE, ATTR_ARRAY_LENGTH, ATTR_RANGE_VALUE_TYPE,
 )
 from agent.generators.operator_param_combine.pairwise_combination.constraint_filter import ConstraintProcessor
-from operator_param_combine.param_combination_generate import ParamCombinationGenerator
+from agent.generators.operator_param_combine.param_combination_generate import ParamCombinationGenerator
 
 logger = LazyLogger()
 
