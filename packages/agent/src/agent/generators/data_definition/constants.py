@@ -146,7 +146,7 @@ class DataMatchMap:
 
     # 在case_config中只生成数据生成方法字段，不生成实际数据时使用，用于适配ATK框架
     ACL_DTYPE_TRANSFER_TENSOR_MAP = {"INT4": "int4", "int4": "int4", "INT8": "int8", "INT16": "int16", "INT32": "int32",
-                                     "UINT8": "uint8", "INT": "int64", "uint64": "uint64",
+                                     "UINT8": "uint8", "INT": "int64", "uint64": "uint64", "uint64_t": "uint64",
                                      "UINT16": "uint16", "UINT32": "uint32", "UINT64": "uint64", "INT64": "int64",
                                      "BFLOAT16": "bf16", "FLOAT16": "fp16", "FLOAT32": "fp32", "FLOAT64": "fp64",
                                      "float32": "fp32", "float16": "fp16", "float64": "fp64", "COMPLEX64": "complex64",
