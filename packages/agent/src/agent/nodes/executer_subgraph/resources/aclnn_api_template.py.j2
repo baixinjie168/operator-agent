@@ -43,7 +43,7 @@ class {{ class_name }}(AclnnBaseApi):
         output_packages = []  # 算子的出参数据包列表
 
         # 获取到算子参数的入参
-        param_list = self.get_param_names_excluding_last(self.get_cpp_func_signature_type())
+        param_list = self.get_param_names_excluding_last_two(self.get_cpp_func_signature_type())
         # 获取到算子参数的类型
         param_type = self.parse_operator_params(self.get_cpp_func_signature_type())
 
