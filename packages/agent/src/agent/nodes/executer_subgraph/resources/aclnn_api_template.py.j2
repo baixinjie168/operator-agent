@@ -178,6 +178,7 @@ class {{ class_name }}(AclnnBaseApi):
 
         if "aclnnBatchMatMulWeightNz" in operator_name:
             found_mat2_transposed = next((config for config in self.task_result.case_config.inputs if config.name == "mat2_transposed"), None)
+            found_self_transposed = next((config for config in self.task_result.case_config.inputs if config.name == "self_transposed"), None)
             # 转置的情况
             if found_mat2_transposed.range_values:
                 # 转换
@@ -186,13 +187,15 @@ class {{ class_name }}(AclnnBaseApi):
                     input_data.kwargs['mat2'].shape[1] * input_data.kwargs['mat2'].shape[4],  # k1 * k0 = k
                     input_data.kwargs['mat2'].shape[2] * input_data.kwargs['mat2'].shape[3]  # n1 * n0 = n
                 )
+            else:
+                input_data.kwargs['mat2'] = input_data.kwargs['mat2'].reshape(
+                    input_data.kwargs['mat2'].shape[0],  # a
+                    input_data.kwargs['mat2'].shape[2] * input_data.kwargs['mat2'].shape[3],  # c*d
+                    input_data.kwargs['mat2'].shape[1] * input_data.kwargs['mat2'].shape[4]  # b*e
+                )
+            if found_mat2_transposed.range_values:
                 input_data.kwargs['self'] = input_data.kwargs['self'].permute(0, 2, 1)
-                return
-            input_data.kwargs['mat2'] = input_data.kwargs['mat2'].reshape(
-                input_data.kwargs['mat2'].shape[0],  # a
-                input_data.kwargs['mat2'].shape[2] * input_data.kwargs['mat2'].shape[3],  # c*d
-                input_data.kwargs['mat2'].shape[1] * input_data.kwargs['mat2'].shape[4]  # b*e
-            )
+
 
 
     def parse_operator_params(self, func_signature: str):
