@@ -73,6 +73,9 @@ class AclnnNpuFormatCast(AclnnBaseApi):
 
         dataType = self.get_config_by_name(self.task_result.case_config.inputs, "dataType").range_values
 
+        acl_wrapper.aclnn.bind_function("aclnnCalculateMatmulWeightSizeV2", [pointer(AclIntArray), AclDataType, pointer(Uint64)],
+                                        AclnnStatus
+
         if dataType == "int8":  # ["FLOAT16", "BFLOAT16", "INT8"]
             acl_wrapper.aclnn.aclnnCalculateMatmulWeightSizeV2(weightShape, AclDataType.ACL_INT8, ctypes.byref(weightTensorSize))
         elif dataType == "bf16":
@@ -82,11 +85,6 @@ class AclnnNpuFormatCast(AclnnBaseApi):
         else:
             acl_wrapper.aclnn.aclnnCalculateMatmulWeightSizeV2(weightShape, AclDataType.ACL_INT16, ctypes.byref(weightTensorSize))
 
-
-        acl_wrapper.aclnn.bind_function("aclnnCalculateMatmulWeightSize", [pointer(AclIntArray), pointer(Uint64)],
-                                        AclnnStatus)
-
-        acl_wrapper.aclnn.aclnnCalculateMatmulWeightSize(weightShape, weightTensorSize)
 
         found = self.get_config_by_name(self.task_result.case_config.inputs, "weightTensorSize")
 
