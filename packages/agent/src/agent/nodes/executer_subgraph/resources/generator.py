@@ -691,9 +691,16 @@ def main():
     # 写回展开后的 JSON，供 ATK 在服务器端读取
     # ATK 需要嵌套 list 格式 [[{entry1}, {entry2}, ...]]，不识别 length 简写
     # 文件名与原 JSON 相同，放在和生成的 py 文件同一目录
+    # 一段式算子特殊处理: aclnnCalculateMatmulWeightSize / V2 的 aclnn_name 改为 Ad
+    _SPECIAL_ONE_STAGE_OPS = {"aclnnCalculateMatmulWeightSize", "aclnnCalculateMatmulWeightSizeV2"}
+    expanded_cases = copy.deepcopy(cases)
+    for case in expanded_cases:
+        case_name = case.get("aclnn_name", "") or case.get("name", "")
+        if case_name in _SPECIAL_ONE_STAGE_OPS:
+            case["aclnn_name"] = "Add"
     expanded_json_path = base + "_expanded.json"
     with open(expanded_json_path, "w", encoding="utf-8") as f:
-        json.dump(cases, f, ensure_ascii=False, indent=2)
+        json.dump(expanded_cases, f, ensure_ascii=False, indent=2)
     print(f"已生成: {expanded_json_path} (展开后的 JSON，用于 ATK 服务器端运行)")
 
     # 按算子分组 (同一个算子的所有用例合并生成一个 py 文件)
