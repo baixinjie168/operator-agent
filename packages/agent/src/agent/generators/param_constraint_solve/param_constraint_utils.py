@@ -468,9 +468,11 @@ class ParamConstraintUtils(CommonDispatcher):
                     standalone_none_params.add(param_name)
 
         for param_name in self.case_input_map:
-            if param_name not in builder.var_map:
+            param_combination_data = self.param_combinations.get(param_name)
+            if param_combination_data is None:
                 continue
-            if param_name in standalone_none_params:
+            is_optional = param_combination_data.is_optional
+            if is_optional:
                 continue
             builder.solver.add(builder.var_map[param_name].is_present)
 
