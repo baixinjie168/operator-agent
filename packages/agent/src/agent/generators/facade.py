@@ -185,8 +185,8 @@ class TestCaseGenerator:
     ) -> list[CaseConfig]:
         """针对单个 ``platform`` 调用 ``single_operator_handle``，返回原始 ``CaseConfig`` 列表。
 
-        指定 ``jsonl_save_path`` 时，生成过程逐条写入 JSONL；平台生成结束后
-        调用 ``convert_jsonl_to_json`` 转换为标准 JSON。
+        指定 ``jsonl_save_path`` 时，生成过程逐条写入 JSONL；调用结束（包括异常
+        或中断）后立即转换为正式 JSON。``json_save_path`` 默认与 JSONL 目录相同。
         """
         if count < 0:
             raise ValueError(f"count must be >= 0, got {count}")
@@ -228,8 +228,8 @@ class TestCaseGenerator:
         """按平台分组生成用例，返回 ``dict[platform, list[CaseConfig]]``。
 
         当 ``json_constraints`` 没有 ``product_support`` 字段时，会回退到默认平台。
-        指定 ``jsonl_save_path`` 时，每个平台写入独立子目录，生成结束后转换
-        为 JSON，避免同名算子的 checkpoint 相互覆盖。
+        指定 ``jsonl_save_path`` 时，每个平台先写入独立子目录，随后由
+        ``generate_for_platform`` 转换为 JSON，避免同名算子产物相互覆盖。
         """
         platforms = self._resolve_platforms()
         result: dict[str, list[CaseConfig]] = {}

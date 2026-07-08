@@ -145,7 +145,7 @@ class DataMatchMap:
                                        "DOUBLE": torch.float64}
 
     # 在case_config中只生成数据生成方法字段，不生成实际数据时使用，用于适配ATK框架
-    ACL_DTYPE_TRANSFER_TENSOR_MAP = {"INT4": "int4", "int4": "int4", "INT8": "int8", "INT16": "int16", "INT32": "int32",
+    ACL_DTYPE_TRANSFER_TENSOR_MAP = {"INT4": "int4", "int4": "int4", "INT8": "int8","int8":"int8","int8_t":"int8", "INT16": "int16", "INT32": "int32",
                                      "UINT8": "uint8", "INT": "int64", "uint64": "uint64", "uint64_t": "uint64",
                                      "UINT16": "uint16", "UINT32": "uint32", "UINT64": "uint64", "INT64": "int64",
                                      "BFLOAT16": "bf16", "FLOAT16": "fp16", "FLOAT32": "fp32", "FLOAT64": "fp64",
