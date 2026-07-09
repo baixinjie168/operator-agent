@@ -438,6 +438,7 @@ def generate_api_class_for_op(cases: list[dict], signature: str, op_name: str) -
     _SPECIAL_TEMPLATES = {
         "aclnnCalculateMatmulWeightSize": "aclnnCalculateMatmulWeightSize.py.tpl",
         "aclnnCalculateMatmulWeightSizeV2": "aclnnCalculateMatmulWeightSizeV2.py.tpl",
+        "aclnnAlltoAllMatmul": "aclnnAlltoAllMatmul.py.tpl",
     }
     if op_name in _SPECIAL_TEMPLATES:
         tpl_path = os.path.join(os.path.dirname(__file__), _SPECIAL_TEMPLATES[op_name])
@@ -698,6 +699,9 @@ def main():
         case_name = case.get("aclnn_name", "") or case.get("name", "")
         if case_name in _SPECIAL_ONE_STAGE_OPS:
             case["aclnn_name"] = "Add"
+        if case_name == "aclnnAlltoAllMatmul":
+            if case.get("dist_api_type") == "dist_function":
+                case["dist_api_type"] = "function"
     expanded_json_path = base + "_expanded.json"
     with open(expanded_json_path, "w", encoding="utf-8") as f:
         json.dump(expanded_cases, f, ensure_ascii=False, indent=2)

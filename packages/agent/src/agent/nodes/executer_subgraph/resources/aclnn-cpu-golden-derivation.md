@@ -16,7 +16,7 @@ Use this skill when:
 
 ## Skip These Operators (Do NOT Process)
 
-If the operator is **`aclnnCalculateMatmulWeightSize`** or **`aclnnCalculateMatmulWeightSizeV2`**, **stop immediately** — do not read docs, do not modify any files, do not derive CPU golden code. These operators use completely pre-defined test scripts (`test_weightSize.py` / `test_weightSize_v2.py`) that are output verbatim by `generator.py` via special `.tpl` templates. There is no `# TODO: CPU_GOLDEN` marker and no dummy computation to replace. The skill flow ends here for these two operators.
+If the operator is **`aclnnCalculateMatmulWeightSize`**, **`aclnnCalculateMatmulWeightSizeV2`**, or **`aclnnAlltoAllMatmul`**, **stop immediately** — do not read docs, do not modify any files, do not derive CPU golden code. These operators use completely pre-defined test scripts that are output verbatim by `generator.py` via special `.tpl` templates. There is no `# TODO: CPU_GOLDEN` marker and no dummy computation to replace. The skill flow ends here for these operators.
 
 ## Step 0: Read the ACLNN Operator Documentation (MUST DO FIRST)
 
