@@ -359,14 +359,17 @@ class AclnnNpuFormatCast(AclnnBaseApi):
             'HWCN': AclFormat.ACL_FORMAT_HWCN,
             'NHWC': AclFormat.ACL_FORMAT_NHWC,
             'NC1HWC0': AclFormat.ACL_FORMAT_NC1HWC0,
+            'NDC1HWC0': AclFormat.ACL_FORMAT_NDC1HWC0,
             'NCL': AclFormat.ACL_FORMAT_NCL,
             'NCDHW': AclFormat.ACL_FORMAT_NCDHW,
             'NDHWC': AclFormat.ACL_FORMAT_NDHWC,
+            'FRACTAL_Z_3D': AclFormat.ACL_FRACTAL_Z_3D,
         }
 
         if format_str in FORMAT_MAPPING:
             return FORMAT_MAPPING[format_str]
         else:
+            logging.error(f"not found format: {format_str}")
             return AclFormat.ACL_FORMAT_ND
 
     def get_ctype(self, type_str):

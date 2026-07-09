@@ -12,7 +12,7 @@ from atk.configs.results_config import TaskResult
 from atk.tasks.api_execute import register
 from atk.tasks.api_execute.aclnn_base_api import AclnnBaseApi
 from atk.tasks.api_execute.base_api import BaseApi
-from atk.tasks.backends.lib_interface.acl_wrapper import AclTensorStruct, AclTensorlistStruct, AclFormat, nnopbase, AclTensor, AclTensorList
+from atk.tasks.backends.lib_interface.acl_wrapper import Int64, Uint64, AclTensorStruct, TORCH_TO_ACLTYPE, nnopbase, AclFormat, aclnn, AclnnStatus, TensorPtr ,AclTensorlistStruct, pointer, AclIntArray, AclTensor, AclTensorList
 
 logging = Logger().get_logger()
 
@@ -171,6 +171,12 @@ class {{ class_name }}(AclnnBaseApi):
                 for config_item in config:
                     if config_item.type == "attrs" or config_item.type == "attr_tuple":
                         range_val = config_item.range_values[0] if isinstance(config_item.range_values, list) else config_item.range_values
+                        if range_val is None:
+                            AclIntArrayPtr = ctypes.POINTER(AclIntArray)
+                            null_void_ptr = ctypes.c_void_p(None)
+                            null_array_ptr = ctypes.cast(null_void_ptr, AclIntArrayPtr)
+                            input_tmp[data_name] = null_array_ptr
+                            return
                         data.append(self.get_ctype(config_item.dtype)(range_val))
                         input_tmp[data_name] = nnopbase.create_x_list(data)
 
@@ -289,14 +295,17 @@ class {{ class_name }}(AclnnBaseApi):
             'HWCN': AclFormat.ACL_FORMAT_HWCN,
             'NHWC': AclFormat.ACL_FORMAT_NHWC,
             'NC1HWC0': AclFormat.ACL_FORMAT_NC1HWC0,
+            'NDC1HWC0': AclFormat.ACL_FORMAT_NDC1HWC0,
             'NCL': AclFormat.ACL_FORMAT_NCL,
             'NCDHW': AclFormat.ACL_FORMAT_NCDHW,
             'NDHWC': AclFormat.ACL_FORMAT_NDHWC,
+            'FRACTAL_Z_3D': AclFormat.ACL_FRACTAL_Z_3D,
         }
 
         if format_str in FORMAT_MAPPING:
             return FORMAT_MAPPING[format_str]
         else:
+            logging.error(f"not found format: {format_str}")
             return AclFormat.ACL_FORMAT_ND
 
     def get_ctype(self, type_str):
