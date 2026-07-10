@@ -205,12 +205,7 @@ class AclnnNpuFormatCast(AclnnBaseApi):
             data = self.backend.convert_input_data(kwarg, name=name, dtype=dtype)
             if name in param_list:
                 input_tmp[name] = data
-        # === 处理标杆输出 ===
-        # 收集算子输出，并储存根据输出中的shape和dtype信息生成的AclTensorStruct数据结构
-        # 输出数据结构说明：
-        for index, output_data in enumerate(self.task_result.output_info_list):
-            output = self.backend.convert_output_data(output_data, index)
-            output_packages.extend(output)  # 保存完整AclTensorStruct结构
+
         # 构造算子调用的入参顺序
         for i, arg_name in enumerate(param_list):
             data = input_tmp.get(arg_name)
@@ -234,17 +229,17 @@ class AclnnNpuFormatCast(AclnnBaseApi):
                 else:
                     input_args.append(ctypes.c_void_p(None))
 
-
+        # === 处理标杆输出 ===
+        # 收集算子输出，并储存根据输出中的shape和dtype信息生成的AclTensorStruct数据结构
+        # 输出数据结构说明：
+        output_list = self.output.split(',')
+        for index, output in enumerate(output_list):
+            data = input_tmp.get(output)
+            if isinstance(data, list):
+                output_packages.append(data[0])
+            else:
+                output_packages.append(data)
         return input_args, output_packages
-
-    def after_call(self, output_packages):
-        output = []
-        for output_pack in output_packages:
-            if isinstance(output_pack, AclTensorStruct):
-                output.append(self.acl_tensor_to_torch(output_pack))
-            elif isinstance(output_pack, AclTensorlistStruct):
-                output.append(self.acl_tensorlist_to_torch(output_pack))
-        return output
 
     def get_storage_shape(self, input_data: InputDataset, index=None, name=None):
         if name is not None:
