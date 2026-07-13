@@ -86,9 +86,7 @@ class AclnnNpuFormatCast(AclnnBaseApi):
             acl_wrapper.aclnn.aclnnCalculateMatmulWeightSizeV2(weightShape, AclDataType.ACL_INT16, ctypes.byref(weightTensorSize))
 
 
-        found = self.get_config_by_name(self.task_result.case_config.inputs, "weightTensorSize")
-
-        self.output = torch.tensor(found.range_values, dtype=torch.long)
+        self.output = torch.tensor(weightTensorSize, dtype=torch.long)
 
     def after_call(self, output_packages):
 
@@ -161,16 +159,9 @@ class AclnnNpuFormatCast(AclnnBaseApi):
                 else:
                     input_args.append(ctypes.c_void_p(None))
 
-        # === 处理标杆输出 ===
-        # 收集算子输出，并储存根据输出中的shape和dtype信息生成的AclTensorStruct数据结构
-        # 输出数据结构说明：
-        output_list = self.output.split(',')
-        for index, output in enumerate(output_list):
-            data = input_tmp.get(output)
-            if isinstance(data, list):
-                output_packages.append(data[0])
-            else:
-                output_packages.append(data)
+        weightTensorSize = torch.zeros(1, dtype=torch.long)
+        weightTensorSizeAclTensor = nnopbase.create_acl_tensor(weightTensorSize, AclFormat.ACL_FORMAT_ND, weightTensorSize.shape)
+        output_packages = [weightTensorSizeAclTensor]
 
         return input_args, output_packages
 
