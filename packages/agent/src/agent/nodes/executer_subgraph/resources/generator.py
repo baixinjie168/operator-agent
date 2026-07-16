@@ -178,6 +178,39 @@ def load_signatures(path: str) -> dict[str, str]:
     return sigs
 
 
+def load_acc_config(path: str) -> dict[str, object]:
+    """
+    加载 acc_config.txt，返回 {op_name: acc_value} 字典。
+
+    文件格式: 每行 '<算子名>："acc": <JSON 值>'
+      - 算子名与配置之间用全角冒号 '：'(U+FF1A) 分隔（兼容 ASCII ':'）。
+      - 冒号后是一个缺少外层花括号的 JSON 片段，形如 '"acc": "md5"'
+        或 '"acc": {"cv_fused_double_benchmark": {...}}'。
+    acc_value 已解析为 Python 对象（str / dict / list 等）；解析失败的行被跳过。
+    """
+    config: dict[str, object] = {}
+    # 算子名仅含 ASCII 字母/数字/下划线；分隔符为全角或 ASCII 冒号
+    sep_re = re.compile(r"^([A-Za-z0-9_]+)\s*[：:]\s*(.*)$")
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            m = sep_re.match(line)
+            if not m:
+                continue
+            op_name = m.group(1)
+            fragment = m.group(2).strip()
+            # 补上外层花括号后解析为完整 JSON 对象
+            try:
+                parsed = json.loads("{" + fragment + "}")
+            except json.JSONDecodeError:
+                continue
+            if "acc" in parsed:
+                config[op_name] = parsed["acc"]
+    return config
+
+
 # ---------------------------------------------------------------------------
 # 代码生成
 # ---------------------------------------------------------------------------
@@ -467,6 +500,9 @@ def generate_api_class_for_op(cases: list[dict], signature: str, op_name: str) -
         "aclnnCalculateMatmulWeightSize": "aclnnCalculateMatmulWeightSize.py.tpl",
         "aclnnCalculateMatmulWeightSizeV2": "aclnnCalculateMatmulWeightSizeV2.py.tpl",
         "aclnnAlltoAllMatmul": "aclnnAlltoAllMatmul.py.tpl",
+        "aclnnReflectionPad1dBackward": "aclnnReflectionPad1dBackward.py.tql",
+        "aclnnNpuFormatCast": "aclnnNpuFormatCast.py.tpl",
+        "aclnnBatchMatMulWeightNz": "aclnnBatchMatMulWeightNz.py.tql",
     }
     if op_name in _SPECIAL_TEMPLATES:
         tpl_path = os.path.join(os.path.dirname(__file__), _SPECIAL_TEMPLATES[op_name])
@@ -622,6 +658,12 @@ def main():
         default=os.path.join(os.path.dirname(__file__), "aclnn.txt"),
         help="aclnn.txt 签名表路径（默认: 脚本同目录下 aclnn.txt）",
     )
+    parser.add_argument(
+        "--acc-config",
+        default=os.path.join(os.path.dirname(__file__), "acc_config.txt"),
+        help="acc_config.txt 路径（默认: 脚本同目录下 acc_config.txt）；"
+             "按算子名替换用例 standard.acc 的 \"default\" 值",
+    )
     args = parser.parse_args()
 
     # 加载签名表
@@ -629,6 +671,13 @@ def main():
     if not sigs:
         print(f"错误: 签名表为空或格式不正确: {args.signatures}", file=sys.stderr)
         sys.exit(1)
+
+    # 加载 acc 配置表（可选；文件缺失时跳过 acc 替换，不影响主流程）
+    try:
+        acc_config = load_acc_config(args.acc_config)
+    except FileNotFoundError:
+        print(f"警告: acc 配置文件不存在: {args.acc_config}，跳过 acc 替换", file=sys.stderr)
+        acc_config = {}
 
     # 加载用例 JSON
     with open(args.case_json, "r", encoding="utf-8") as f:
@@ -733,6 +782,12 @@ def main():
         if case_name == "aclnnAlltoAllMatmul":
             if case.get("dist_api_type") == "dist_function":
                 case["dist_api_type"] = "function"
+        # 按算子名到 acc_config 查找配置，替换 standard.acc 的 "default" 占位值。
+        # 用 case_name（重命名前的原始算子名）查找，保持与 acc_config.txt 键一致。
+        if case_name in acc_config:
+            standard = case.get("standard")
+            if isinstance(standard, dict) and standard.get("acc") == "default":
+                standard["acc"] = acc_config[case_name]
     expanded_json_path = base + "_expanded.json"
     with open(expanded_json_path, "w", encoding="utf-8") as f:
         json.dump(expanded_cases, f, ensure_ascii=False, indent=2)
