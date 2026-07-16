@@ -5,6 +5,7 @@ import atk.tasks.backends.lib_interface.acl_wrapper as acl_wrapper
 import torch.nn.functional as F
 import re
 from atk.common.log import Logger
+from atk.tasks.backends.aclnn_backend import DTYPE_TO_TORCH_TYPE
 from atk.tasks.backends.lib_interface.acl_wrapper import Int64, Uint64, AclTensorStruct, TORCH_TO_ACLTYPE, nnopbase, AclFormat, aclnn, AclnnStatus, TensorPtr ,AclTensorlistStruct, pointer, AclIntArray, AclTensor, AclTensorList
 from atk.configs.dataset_config import InputDataset
 from atk.tasks.api_execute import register
@@ -65,7 +66,7 @@ class AllToAllMatmul(BaseApi):
 
         if self.name == "cpu":
             '''
-            ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓ CPU  真值 ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
+            ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓ CPU  真值 ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
             '''
             logging.info(f"==========================cpu============================")
             # ========================= alltoall =========================
@@ -114,7 +115,7 @@ class AllToAllMatmul(BaseApi):
             else:
                 return output
             '''
-            ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑ NPU 小算子级联标杆 ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑
+            ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑ NPU 小算子级联标杆 ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑
             '''
         else:
             logging.info(f"==========================pass============================")
@@ -174,6 +175,7 @@ class AclnnNpuFormatCast(AclnnBaseApi):
                 shape: List[int]      # 张量形状
                 dtype: AclDataType    # 数据类型
         """
+        logging.info(f"----------------------------------------------------------------------------------->hhhhhhhhhhhhhhhhhhhhhhhhhhhhhh")
         rank_id = self.dist_task_info.rank
         self.group = input_data.kwargs['group']
         input_data.kwargs['group'] = self.group._get_backend(torch.device("npu")).get_hccl_comm_name(rank_id)
@@ -193,6 +195,7 @@ class AclnnNpuFormatCast(AclnnBaseApi):
 
         self.handle_attr_param(input_tmp, param_list)
 
+        # input_data.kwargs['mat2'] = nnopbase.create_acl_tensor(input_data.kwargs['mat2'], AclFormat.ACL_FORMAT_FRACTAL_NZ)
         # === 处理输入参数 ===
         # 将输入数据转换为aclnn所需的c++格式
         for i, arg in enumerate(input_data.args):
@@ -241,6 +244,15 @@ class AclnnNpuFormatCast(AclnnBaseApi):
                 output_packages.append(data)
         return input_args, output_packages
 
+    def after_call(self, output_packages):
+        output = []
+        for output_pack in output_packages:
+            if isinstance(output_pack, AclTensorStruct):
+                output.append(self.acl_tensor_to_torch(output_pack))
+            elif isinstance(output_pack, AclTensorlistStruct):
+                output.append(self.acl_tensorlist_to_torch(output_pack))
+        return output
+
     def get_storage_shape(self, input_data: InputDataset, index=None, name=None):
         if name is not None:
             found = self.get_config_by_name(self.task_result.case_config.inputs, name)
@@ -287,7 +299,6 @@ class AclnnNpuFormatCast(AclnnBaseApi):
                 param_names.append(name_match.group(1))
         # 排除最后两个
         return param_names[:-2] if len(param_names) >= 2 else param_names
-
 
     def handle_attr_param(self, input_tmp, param_list):
         for config in self.task_result.case_config.inputs:
