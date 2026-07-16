@@ -775,6 +775,7 @@ def main():
     # 一段式算子特殊处理: aclnnCalculateMatmulWeightSize / V2 的 aclnn_name 改为 Ad
     _SPECIAL_ONE_STAGE_OPS = {"aclnnCalculateMatmulWeightSize", "aclnnCalculateMatmulWeightSizeV2"}
     expanded_cases = copy.deepcopy(cases)
+    acc_default_ops: set[str] = set()  # 未在 acc_config 中配置、回退 default 的算子名
     for case in expanded_cases:
         case_name = case.get("aclnn_name", "") or case.get("name", "")
         if case_name in _SPECIAL_ONE_STAGE_OPS:
@@ -788,6 +789,15 @@ def main():
             standard = case.get("standard")
             if isinstance(standard, dict) and standard.get("acc") == "default":
                 standard["acc"] = acc_config[case_name]
+        elif case_name:
+            # acc_config.txt 中未找到该算子的 acc 配置，保持 "default" 不变
+            acc_default_ops.add(case_name)
+    if acc_default_ops:
+        print(
+            f"提示: 以下算子在 acc_config.txt 中未配置 acc，保持 \"default\": "
+            f"{sorted(acc_default_ops)}",
+            file=sys.stderr,
+        )
     expanded_json_path = base + "_expanded.json"
     with open(expanded_json_path, "w", encoding="utf-8") as f:
         json.dump(expanded_cases, f, ensure_ascii=False, indent=2)
