@@ -425,9 +425,10 @@ class Function(BaseApi):
 
 
         dtype = input_data.kwargs['self'].dtype
-        output = torch.bmm(
-            self_t,
-            dense_t.to(dtype),
-        )
+        #output = torch.bmm(
+        #    self_t,
+        #    dense_t.to(dtype),
+        #)
+        output = torch.matmul(self_t, dense_t.to(dtype))
         return output
         # return result
