@@ -500,9 +500,10 @@ def generate_api_class_for_op(cases: list[dict], signature: str, op_name: str) -
         "aclnnCalculateMatmulWeightSize": "aclnnCalculateMatmulWeightSize.py.tpl",
         "aclnnCalculateMatmulWeightSizeV2": "aclnnCalculateMatmulWeightSizeV2.py.tpl",
         "aclnnAlltoAllMatmul": "aclnnAlltoAllMatmul.py.tpl",
-        "aclnnReflectionPad1dBackward": "aclnnReflectionPad1dBackward.py.tql",
+        "aclnnReflectionPad1dBackward": "aclnnReflectionPad1dBackward.py.tpl",
         "aclnnNpuFormatCast": "aclnnNpuFormatCast.py.tpl",
-        "aclnnBatchMatMulWeightNz": "aclnnBatchMatMulWeightNz.py.tql",
+        "aclnnBatchMatMulWeightNz": "aclnnBatchMatMulWeightNz.py.tpl",
+        "aclnnSwinTransformerLnQkvQuant": "aclnnSwinTransformerLnQkvQuant.py.tpl",
     }
     if op_name in _SPECIAL_TEMPLATES:
         tpl_path = os.path.join(os.path.dirname(__file__), _SPECIAL_TEMPLATES[op_name])
