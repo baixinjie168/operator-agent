@@ -504,6 +504,7 @@ def generate_api_class_for_op(cases: list[dict], signature: str, op_name: str) -
         "aclnnNpuFormatCast": "aclnnNpuFormatCast.py.tpl",
         "aclnnBatchMatMulWeightNz": "aclnnBatchMatMulWeightNz.py.tpl",
         "aclnnSwinTransformerLnQkvQuant": "aclnnSwinTransformerLnQkvQuant.py.tpl",
+        "aclnnSwinAttentionScoreQuant": "aclnnSwinAttentionScoreQuant.py.tpl",
     }
     if op_name in _SPECIAL_TEMPLATES:
         tpl_path = os.path.join(os.path.dirname(__file__), _SPECIAL_TEMPLATES[op_name])
