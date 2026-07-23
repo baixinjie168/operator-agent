@@ -229,12 +229,15 @@ class AclnnNpuFormatCast(AclnnBaseApi):
                     null_void_ptr = ctypes.c_void_p(None)  # 声明一个空指针
                     null_tensor_ptr = ctypes.cast(null_void_ptr, AclTensorPtr)  # 把这个空指针类型转换为tensor指针类型
                     input_args.append(null_tensor_ptr)
+                    input_tmp[arg_name] = null_tensor_ptr
                 elif type == "aclTensorList":
                     AclTensorListPtr = ctypes.POINTER(AclTensorList)
                     null_tensorlist_ptr = AclTensorListPtr()  # 默认为 None
                     input_args.append(null_tensorlist_ptr)
+                    input_tmp[arg_name] = null_tensorlist_ptr
                 else:
                     input_args.append(ctypes.c_void_p(None))
+                    input_tmp[arg_name] = ctypes.c_void_p(None)
 
         # === 处理标杆输出 ===
         # 收集算子输出，并储存根据输出中的shape和dtype信息生成的AclTensorStruct数据结构
